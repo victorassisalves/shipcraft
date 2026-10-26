@@ -28,6 +28,7 @@ enum Gate {
 }
 
 pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>) -> Result<()> {
+    let started = Instant::now();
     let base = repo.default_branch();
     repo.run(&["fetch", "-q", "origin"])?;
     let config = Config::of_base(repo, &base)?;
@@ -70,6 +71,9 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>) -> Result<(
     };
     println!("shipcraft: PR #{number}");
     let base_sha = repo.text(&["merge-base", &format!("origin/{base}"), "HEAD"])?;
+    // Item 38: the ci, review and pr rows of this PR carry its locks.
+    let locks = medicao::locks_changed(repo, &base_sha, &head);
+    medicao::set_pr_locks(&locks);
     let size = medicao::product_lines(repo, &config, &base_sha, &head)?;
     std::env::set_var(medicao::LINHAS_ENV, (size.0 + size.1).to_string());
     let forma = forma::forma(repo, &config, &base_sha, &head);
@@ -113,6 +117,18 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>) -> Result<(
     };
     let summary = medicao::summary(repo, &branch) + "\n" + &medicao::size_text(&config, size) + &forma.text;
     gh::comment(repo, number, &summary)?;
+    // Item 38: the PR as a step of the locks it delivers; a PR with none has no item to measure.
+    if !locks.is_empty() {
+        let (result, code) = match &gate {
+            Gate::Passed => ("passed", ""),
+            Gate::Stopped(code, _) => ("refused", *code),
+        };
+        medicao::record(
+            repo,
+            json!({"layer": "pr", "secs": medicao::seconds(started), "result": result, "code": code,
+                   "pr": number, "branch": branch, "commit": head, "base": base}),
+        );
+    }
     match gate {
         Gate::Passed => {
             println!("shipcraft: PR #{number} ready: enabled layers passed; merge with `shipcraft merge {number}`.");
@@ -233,6 +249,7 @@ fn earlier_verdict(repo: &Repo, diff_sha256: &str) -> Option<(String, String)> {
         .rev()
         .find(|r| {
             r["layer"] == "review"
+                && r["reused"] != true
                 && r["diff_sha256"] == diff_sha256
                 && (r["result"] == "passed" || r["result"] == "refused")
         })
@@ -250,6 +267,14 @@ fn review_and_publish(req: &Request) -> Result<Gate> {
         } else {
             ("failure", Gate::Stopped("review-changes-requested", "review requested changes".to_string()))
         };
+        // Item 38: a reused verdict is recorded, and is not a new round.
+        medicao::record(
+            repo,
+            json!({"layer": "review", "secs": 0, "result": resultado,
+                   "code": if resultado == "passed" { "" } else { "changes-requested" },
+                   "branch": req.branch, "commit": sha, "tokens": 0, "agent": req.config.papeis.revisao,
+                   "pr": req.pr, "reused": true}),
+        );
         let description = format!("on this machine: verdict from {} reused (same file versions)", short(&from));
         gh::status(repo, sha, "shipcraft/review", state, &description)?;
         println!("shipcraft: shipcraft/review {state}: {description}");
@@ -335,6 +360,7 @@ pub fn of_pr(repo: &Repo, number: &str) -> Result<()> {
     let config = Config::of_base(repo, &base)?;
     refuse_if_off(&config)?;
     let base_sha = repo.text(&["merge-base", &format!("origin/{base}"), &sha])?;
+    medicao::set_pr_locks(&medicao::locks_changed(repo, &base_sha, &sha));
     let req = Request {
         repo,
         config: &config,

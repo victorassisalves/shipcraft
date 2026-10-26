@@ -73,12 +73,19 @@ pub fn merge(repo: &Repo, number: &str, sem_revisao: Option<&str>) -> Result<()>
             &format!("**{SEM_REVISAO_MARK}:** {motivo}\n\nThis merge landed without an executed review; the reason stays here and in measurements."),
         )?;
     }
+    // Item 38: the locks the PR delivers, from its own diff, read before the
+    // merge moves the base; best effort, as all measuring.
+    if repo.resolve(&format!("{head}^{{commit}}")).ok().flatten().is_none() {
+        let _ = repo.run(&["fetch", "-q", "origin", &format!("refs/pull/{pr_number}/head")]);
+    }
+    let locks = medicao::locks_changed(repo, &format!("origin/{base}"), &head);
     gh::must(repo, &["pr", "merge", number, "--merge"])?;
     medicao::record(
         repo,
         json!({"layer": "merge", "secs": medicao::seconds(started), "result": "passed",
                "code": if sem_revisao.is_some() { "no-review" } else { "" }, "reason": sem_revisao,
-               "pr": pr_number, "branch": field("headRefName"), "commit": head}),
+               "pr": pr_number, "branch": field("headRefName"), "commit": head,
+               "base": base, "default_branch": repo.default_branch(), "locks": locks}),
     );
     println!(
         "shipcraft: PR #{number} merged into {base}{}.",

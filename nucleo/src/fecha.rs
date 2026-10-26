@@ -1,14 +1,18 @@
 //! `shipcraft close`, called by the post-commit hook (item 17, point 2): closes, in
 //! a commit of its own, the locks the `commit-msg` judgment marked, when the
 //! commit just made is the one it judged. It always exits 0 (the user's commit
-//! already exists) and writes no row to `runs.jsonl`.
+//! already exists). Item 38: it writes a `close` row per lock once the commit
+//! that closes it exists, or an `error` row when it could not close.
 
 use crate::git::{short, Repo, Snapshot, TempDir};
 use crate::lock::Lock;
 use crate::marca::{self, Marca};
+use crate::medicao;
+use serde_json::json;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
+use std::time::Instant;
 
 const AGAIN: &str = "the lock stays open, and the next green commit closes it";
 /// The operations `git status` reports as in progress, by their git path.
@@ -21,6 +25,7 @@ const IN_PROGRESS: [(&str, &str); 5] = [
 ];
 
 pub fn run() {
+    let started = Instant::now();
     let Ok(repo) = Repo::open() else { return };
     let Some(marca) = marca::read(&repo) else { return };
     if let Some(op) = in_progress(&repo) {
@@ -34,13 +39,27 @@ pub fn run() {
     let closed = match closing_commit(&repo, &marca, &head) {
         Ok(closed) => closed,
         Err(e) => {
+            record(&repo, &marca, started, "error", "");
             return println!(
                 "shipcraft: the lock did not close ({}); nothing changed: run `shipcraft close` manually.",
                 one_line(&e)
             )
         }
     };
+    record(&repo, &marca, started, "passed", &closed.commit);
     after_ref(&repo, &marca, &closed);
+}
+
+/// Item 38: one `close` row per lock of the mark.
+fn record(repo: &Repo, marca: &Marca, started: Instant, result: &str, commit: &str) {
+    for path in &marca.travas {
+        medicao::record(
+            repo,
+            json!({"layer": "close", "secs": medicao::seconds(started), "result": result,
+                   "code": if result == "passed" { "" } else { "error" }, "branch": repo.branch(),
+                   "commit": commit, "lock": medicao::lock_id(path)}),
+        );
+    }
 }
 
 fn in_progress(repo: &Repo) -> Option<&'static str> {
