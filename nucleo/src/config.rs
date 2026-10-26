@@ -168,24 +168,20 @@ pub struct Revisao {
 }
 
 /// Item 11, rule 3: above `aviso_linhas` product lines the summary suggests a
-/// split. Item 19: the globs of a text-only PR, and its cheap check. Item 24:
+/// split. Item 24:
 /// `forma_linhas` fixes the N of the shape warning (an integer above 0).
 #[derive(Deserialize)]
 #[serde(default)]
 pub struct Pr {
     #[serde(rename = "warn_lines")]
     pub aviso_linhas: u64,
-    #[serde(rename = "text")]
-    pub texto: Vec<String>,
-    #[serde(rename = "text_check")]
-    pub verifica_texto: Option<String>,
     #[serde(rename = "shape_lines")]
     pub forma_linhas: Option<std::num::NonZeroU64>,
 }
 
 impl Default for Pr {
     fn default() -> Self {
-        Pr { aviso_linhas: 500, texto: vec!["**/*.md".into()], verifica_texto: None, forma_linhas: None }
+        Pr { aviso_linhas: 500, forma_linhas: None }
     }
 }
 
@@ -256,7 +252,6 @@ impl Config {
     pub fn parse(text: &str) -> Result<Config> {
         check_legacy_keys(text)?;
         check_min(text)?;
-        check_texto(text)?;
         let mut config: Config = match toml::from_str(text) {
             Ok(config) => config,
             Err(e) => return not_toml(text, &e),
@@ -368,8 +363,6 @@ fn legacy_keys(value: &toml::Value, path: &str) -> Result<()> {
                     "tempo_max_ci" => Some("ci_timeout"),
                     "tempo_max" => Some("timeout"),
                     "aviso_linhas" => Some("warn_lines"),
-                    "texto" => Some("text"),
-                    "verifica_texto" => Some("text_check"),
                     "forma_linhas" => Some("shape_lines"),
                     "nome" => Some("name"),
                     "raiz" => Some("root"),
@@ -455,21 +448,7 @@ pub fn check_min(text: &str) -> Result<()> {
     )
 }
 
-/// Item 19.1: `[pr] texto` is a list of globs; another type is refused.
-fn check_texto(text: &str) -> Result<()> {
-    let Ok(table) = text.parse::<toml::Table>() else { return Ok(()) };
-    let Some(value) = table.get("pr").and_then(|pr| pr.get("text")) else { return Ok(()) };
-    if value.as_array().is_some_and(|list| list.iter().all(toml::Value::is_str)) {
-        return Ok(());
-    }
-    refuse(
-        "pr-text-invalid",
-        format!("[pr] text = {value} is not a list of globs"),
-        "a text-only PR skips the suite, and shipcraft does not guess which files are text",
-        "use a list, such as text = [\"**/*.md\"], or text = [] to disable the shortcut, in .shipcraft.toml on main",
-    )
-}
-
+/// Splits a version into numbers, trailing zeros dropped, so 2.0 and 2.0.0 compare equal.
 pub fn version_parts(v: &str) -> Vec<u64> {
     let mut parts: Vec<u64> = v.split('.').map(|p| p.trim().parse().unwrap_or(0)).collect();
     while parts.last() == Some(&0) {
@@ -527,8 +506,6 @@ timeout = 19
 slots = 3
 [pr]
 warn_lines = 23
-text = ["*.rst"]
-text_check = "spellcheck"
 shape_lines = 29
 [build]
 command = "compile"
@@ -551,8 +528,6 @@ globs = ["tests/**"]
         assert_eq!(config.revisao.tempo_max, 19);
         assert_eq!(config.maquina.slots, Some(3));
         assert_eq!(config.pr.aviso_linhas, 23);
-        assert_eq!(config.pr.texto, ["*.rst"]);
-        assert_eq!(config.pr.verifica_texto.as_deref(), Some("spellcheck"));
         assert_eq!(config.pr.forma_linhas.unwrap().get(), 29);
         assert_eq!(config.build.unwrap().comando, "compile");
         let suite = &config.suite[0];

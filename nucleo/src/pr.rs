@@ -11,7 +11,6 @@ use crate::medicao;
 use crate::processo::{self, End};
 use crate::refusal::{failed, refuse, Result};
 use crate::revisao::{self, Request, Review, Verdict};
-use crate::texto;
 use serde_json::json;
 use std::fs;
 use std::process::Command;
@@ -19,9 +18,6 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 const OFF: &str = "off in .shipcraft.toml";
-/// Item 19.2: on the text path the CI stops its `verifica_texto` at
-/// `tempo_max_ci`; these seconds let it record the refusal before this stops it.
-const TEXTO_FOLGA: u64 = 5;
 
 /// How a layer ended for this PR.
 enum Gate {
@@ -77,10 +73,9 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>) -> Result<(
     std::env::set_var(medicao::LINHAS_ENV, (size.0 + size.1).to_string());
     let forma = forma::forma(repo, &config, &base_sha, &head);
     std::env::set_var(forma::AVISOS_ENV, forma.avisos.map_or("null".to_string(), |n| n.to_string()));
-    let so_texto = texto::so_texto(repo, &config, &base_sha, &head);
 
     let ci_gate = match ci {
-        Camada::Local => local_ci(repo, &config, &branch, &head, &base, so_texto)?,
+        Camada::Local => local_ci(repo, &config, &branch, &head, &base)?,
         Camada::Github if revisao == Camada::Local => wait_github_ci(repo, &config, &head)?,
         Camada::Github => Gate::Passed,
         Camada::Desligado => {
@@ -115,10 +110,7 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>) -> Result<(
         }
         (stopped, _) => stopped,
     };
-    let mut summary = medicao::summary(repo, &branch) + "\n" + &medicao::size_text(&config, size) + &forma.text;
-    if so_texto {
-        summary += "\ntext only: the suite does not run\n";
-    }
+    let summary = medicao::summary(repo, &branch) + "\n" + &medicao::size_text(&config, size) + &forma.text;
     gh::comment(repo, number, &summary)?;
     match gate {
         Gate::Passed => {
@@ -134,30 +126,22 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>) -> Result<(
     }
 }
 
-/// Item 3, rule 2: `shipcraft ci --pr` on this machine, through the queue (unless
-/// the PR is text only, item 19.2) and with `[execucao] tempo_max_ci`,
-/// published as `shipcraft/ci` on HEAD.
-fn local_ci(repo: &Repo, config: &Config, branch: &str, head: &str, base: &str, so_texto: bool) -> Result<Gate> {
+/// Item 3, rule 2: `shipcraft ci` on this machine, through the queue and with
+/// `[execution] ci_timeout`, published as `shipcraft/ci` on HEAD.
+fn local_ci(repo: &Repo, config: &Config, branch: &str, head: &str, base: &str) -> Result<Gate> {
     // `--base` is the tip of the base branch as origin has it now: the range
     // is the same as from the merge-base, and the child judges the suite by
     // the base's current config (item 1, rule 3).
     let base_tip = repo.text(&["rev-parse", &format!("origin/{base}")])?;
     let limit = config.execucao.tempo_max_ci;
-    let slot = match so_texto {
-        true => None,
-        false => Some(fila::enter(fila::slots(config), &format!("{} ({branch}, ci)", repo.name()))?),
-    };
+    let slot = fila::enter(fila::slots(config), &format!("{} ({branch}, ci)", repo.name()))?;
     println!(
         "shipcraft: CI on this machine: shipcraft ci --base origin/{base} ({}, up to {limit} s)",
         short(&base_tip)
     );
     let started = Instant::now();
     let exe = std::env::current_exe().map_err(|e| failed(format!("find the current binary: {e}")))?;
-    let child_limit = if so_texto { limit + TEXTO_FOLGA } else { limit };
-    let end = processo::run(
-        Command::new(exe).args(["ci", "--base", &base_tip, "--pr"]).current_dir(repo.root()),
-        child_limit,
-    )?;
+    let end = processo::run(Command::new(exe).args(["ci", "--base", &base_tip]).current_dir(repo.root()), limit)?;
     drop(slot);
     let (state, description, gate) = match end {
         End::Exited(0) => ("success", "on this machine: CI passed".to_string(), Gate::Passed),
@@ -175,7 +159,7 @@ fn local_ci(repo: &Repo, config: &Config, branch: &str, head: &str, base: &str, 
             medicao::record(
                 repo,
                 json!({"layer": "ci", "secs": medicao::seconds(started), "result": "error",
-                       "code": "timed-out", "branch": branch, "commit": head, "text_only": so_texto}),
+                       "code": "timed-out", "branch": branch, "commit": head}),
             );
             let why = format!("timed out ({limit} s, [execution] ci_timeout)");
             ("error", format!("on this machine: {why}"), Gate::Stopped("ci-timed-out", format!("CI stopped: {why}")))

@@ -3,8 +3,6 @@
 //! `.shipcraft.toml` says. A commit made with
 //! `--no-verify`, or under an edited hook, is caught here. Run on the default
 //! branch, it also warns of the merges that skipped the gate (item 5.5).
-//! With `--pr`, a text-only PR skips the build, the `verifica` and the
-//! suites, and runs `[pr] verifica_texto` instead (item 19).
 
 use crate::config::{Camada, Config};
 use crate::contract::{
@@ -16,12 +14,9 @@ use crate::lock::lock_files;
 use crate::medicao;
 use crate::refusal::{failed, refuse, Result};
 use crate::suite;
-use crate::texto;
 use serde_json::json;
-use std::time::Instant;
 
-pub fn run(repo: &Repo, base: &str, pr: bool, so_texto: &mut bool) -> Result<()> {
-    let started = Instant::now();
+pub fn run(repo: &Repo, base: &str) -> Result<()> {
     let base =
         repo.resolve(base)?.ok_or_else(|| failed(format!("--base {base} is not a commit in this repository")))?;
     let head_sha = repo.head()?.ok_or_else(|| failed("the repository has no commits"))?;
@@ -34,7 +29,6 @@ pub fn run(repo: &Repo, base: &str, pr: bool, so_texto: &mut bool) -> Result<()>
         return crate::config::no_config();
     };
     let commits = repo.commits_since(&base)?;
-    *so_texto = pr && texto::so_texto(repo, &config, &base, &head_sha);
 
     // How each commit changed the locks; with an empty range, HEAD's locks as they are.
     let head_locks = lock_files(repo, &head)?;
@@ -54,11 +48,6 @@ pub fn run(repo: &Repo, base: &str, pr: bool, so_texto: &mut bool) -> Result<()>
         head_changes = changes;
     }
     println!("shipcraft: {} commit(s) checked in {}..HEAD", commits.len(), short(&base));
-    if *so_texto {
-        texto::verifica(repo, &config, &head_sha, started)?;
-        println!("text only: the suite does not run");
-        return passed(repo, &base, &config);
-    }
 
     // The suite judges HEAD: on the tree when it is HEAD, else on a copy of
     // HEAD. The build runs only on the tree (item 16a).

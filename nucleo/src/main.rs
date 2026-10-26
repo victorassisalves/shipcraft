@@ -30,7 +30,6 @@ mod red;
 mod refusal;
 mod revisao;
 mod suite;
-mod texto;
 mod tsbuild;
 
 use git::Repo;
@@ -80,15 +79,15 @@ fn run(args: &[&str]) -> Result<()> {
             init::run(&init::open()?, lang, github)
         }
         ["red"] => red::run(&Repo::open()?),
-        ["check"] => measured("hook", |repo, _| check::run(repo, false)),
+        ["check"] => measured("hook", |repo| check::run(repo, false)),
         // The git hook passes the message file, which is ignored.
-        ["check", "--commit-msg", ..] => measured("hook", |repo, _| check::run(repo, true)),
+        ["check", "--commit-msg", ..] => measured("hook", |repo| check::run(repo, true)),
         ["close"] => {
             fecha::run();
             Ok(())
         }
-        ["ci", "--base", base] => measured("ci", |repo, so_texto| ci::run(repo, base, false, so_texto)),
-        ["ci", "--base", base, "--pr"] => measured("ci", |repo, so_texto| ci::run(repo, base, true, so_texto)),
+        // `--pr` is still accepted (older callers pass it); it no longer changes anything.
+        ["ci", "--base", base] | ["ci", "--base", base, "--pr"] => measured("ci", |repo| ci::run(repo, base)),
         ["pr", rest @ ..] => {
             let (mut title, mut body) = (None, None);
             let mut rest = rest.iter();
@@ -128,14 +127,12 @@ fn invalid(args: &[&str]) -> Stop {
     refusal::failed(format!("invalid arguments: {}; {USAGE}", args.join(" ")))
 }
 
-/// Runs a hook or CI command and records it in the measurement (item 10);
-/// the CI says whether it judged the PR as text only (item 19.3).
-fn measured(camada: &str, command: impl FnOnce(&Repo, &mut bool) -> Result<()>) -> Result<()> {
+/// Runs a hook or CI command and records it in the measurement (item 10).
+fn measured(camada: &str, command: impl FnOnce(&Repo) -> Result<()>) -> Result<()> {
     let started = Instant::now();
     let repo = Repo::open()?;
-    let mut so_texto = false;
-    let result = command(&repo, &mut so_texto);
-    medicao::layer(&repo, camada, started, &result, (camada == "ci").then_some(so_texto));
+    let result = command(&repo);
+    medicao::layer(&repo, camada, started, &result);
     result
 }
 

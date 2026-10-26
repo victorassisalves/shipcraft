@@ -11,7 +11,6 @@ use crate::init::AGENTS;
 use crate::medicao;
 use crate::processo::{self, End};
 use crate::refusal::{failed, Result};
-use crate::texto;
 use serde_json::json;
 use std::fs::{self, File};
 use std::process::{Command, Stdio};
@@ -253,23 +252,10 @@ fn brief(req: &Request, tree: &str, work: &str) -> Result<String> {
         .replace("{{WORK}}", work)
         .replace("{{COMMANDS}}", &commands.join("\n"))
         .replace("{{MINUTES}}", &(req.config.revisao.tempo_max / 60).max(1).to_string())
-        .replace("{{TEXTO}}", &text_only(req))
         .replace("{{BODY}}", &body)
         .replace("{{SPEC}}", &spec)
         .replace("{{BATTERY}}", &battery(req)?)
         .replace("{{DIFF}}", &cap(&diff, MAX_DIFF)))
-}
-
-/// Item 19.3: a text-only PR is reviewed by reading, without the battery.
-fn text_only(req: &Request) -> String {
-    if !texto::so_texto(req.repo, req.config, &req.base_sha, &req.sha) {
-        return String::new();
-    }
-    "## Text only\n\n\
-     Every path this PR changes is text (`[pr] text` in .shipcraft.toml), and the CI did not run the suite.\n\
-     Do not install or run the suite (step 1).\n\
-     A Blocking item found by reading counts without an executed reproduction: quote the text and the rule it breaks.\n"
-        .to_string()
 }
 
 /// The test files of the head commit, whole up to a cap; past it, by name.
