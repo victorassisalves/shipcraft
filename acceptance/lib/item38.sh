@@ -39,7 +39,8 @@ item38_case() {
           L implement
           if [ "$c" = aborted-commit ]; then
             # Abort after the installed Shipcraft commit-msg check has returned.
-            printf '\nexit 1\n' >> .git/hooks/commit-msg
+            printf '#!/bin/sh\nshipcraft check --commit-msg "$1" || exit $?\nexit 1\n' > .git/hooks/commit-msg
+            chmod +x .git/hooks/commit-msg
             run_cmd commit_all 'feat: aborted GREEN'
             chk 'later hook aborts commit' rc_nonzero
           else
