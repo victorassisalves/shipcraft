@@ -156,23 +156,6 @@ exec ''' + py + ''' runner.py --runner "$1" "${args[@]}"
             f.write('\n[build]\ncommand = ' + json.dumps(probe + ' build') + '\n')
         git('add', '.shipcraft.toml')
         git('commit', '-qm', 'test: build')
-    if case == 'ambiente-texto':
-        Path('value').write_text('green')
-        Path('guia.md').write_text('base')
-        with open('.shipcraft.toml', 'a') as f:
-            f.write('\n[pr]\ntext = ["**/*.md", "*.md"]\ntext_check = ' + json.dumps(probe) + '\n')
-        git('add', '.')
-        git('commit', '-qm', 'test: base texto')
-        base = git('rev-parse', 'HEAD')
-        Path('guia.md').write_text('mudou')
-        git('add', 'guia.md')
-        git('commit', '-qm', 'docs: guia')
-        clear()
-        p = run(binary, 'ci', '--base', base, '--pr', env=dict(os.environ, SHIPCRAFT_CASES='/herdado', SHIPCRAFT_FILES='/herdado'))
-        assert 'text only' in p.stdout + p.stderr
-        assert rows() and all(r['argv'][0] == 'probe' for r in rows())
-        assert all(all(v is None for v in r['env'].values()) for r in rows())
-        return
     if case.startswith('filtra-invalido'):
         p = run(binary, 'red', ok=False)
         assert p.returncode != 0, 'filtra inválido aceito'

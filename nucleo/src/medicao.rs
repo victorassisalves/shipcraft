@@ -49,9 +49,8 @@ pub fn rows(repo: &Repo) -> Vec<Value> {
         .collect()
 }
 
-/// The row of a hook or CI run, from how the command ended; a CI row says
-/// whether the PR was judged as text only (item 19.3).
-pub fn layer(repo: &Repo, camada: &str, started: Instant, result: &Result<()>, so_texto: Option<bool>) {
+/// The row of a hook or CI run, from how the command ended.
+pub fn layer(repo: &Repo, camada: &str, started: Instant, result: &Result<()>) {
     let (resultado, codigo) = match result {
         Ok(()) => ("passed", String::new()),
         Err(Stop::Refused(r)) => ("refused", r.code.to_string()),
@@ -68,9 +67,6 @@ pub fn layer(repo: &Repo, camada: &str, started: Instant, result: &Result<()>, s
     // The `shipcraft pr` that ran this CI repeats why it refused (item 19.2).
     if let Err(Stop::Refused(r)) = result {
         row["reason"] = json!(r.what());
-    }
-    if let Some(so_texto) = so_texto {
-        row["text_only"] = json!(so_texto);
     }
     record(repo, row);
 }

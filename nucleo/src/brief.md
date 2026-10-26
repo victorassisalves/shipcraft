@@ -19,7 +19,6 @@ review; you never post, push, commit or comment yourself.
 {{COMMANDS}}
 ```
 
-{{TEXTO}}
 ## The intent (the PR body)
 
 {{BODY}}

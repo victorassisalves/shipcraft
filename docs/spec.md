@@ -78,7 +78,7 @@ Each command is `shipcraft <command>`. Exit codes, unless the row says otherwise
 | `red` | Runs the suite, requires assertion failures, writes an open lock. Refuses `lock-open`, `red-already-passes`, `error-before-assertions`, `no-report`, `suite-without-tests`, `build-failed`. |
 | `check [--commit-msg <file>]` | The hook: judges the commit against the open locks and closes them when the RED cases pass. With `--commit-msg` it judges the final index and writes a close mark instead of the lock (`mark-failed` if it cannot). |
 | `close` | The `post-commit` half of the `commit-msg` route: if the mark matches the commit just made, adds one commit that only flips the lock to `closed`. On failure it changes nothing and says to rerun it. Always exits `0`. |
-| `ci --base <ref> [--pr]` | CI (section 2). `--pr` allows the text-only path (section 5). |
+| `ci --base <ref>` | CI (section 2). `--pr` is still accepted and changes nothing. |
 | `pr [--title <t>] [--body <file>]` | Pushes (`--force-with-lease`), opens or updates the PR, runs the layers, posts statuses and summary (section 5). Refuses `pr-not-on-branch`. Exit `0` is guaranteed only when every layer passed or is off. |
 | `review` | Reviews local HEAD and prints the verdict; publishes nothing. Exit `0` on approval; refuses `review-changes-requested`, `review-error`, `review-off`. |
 | `review --pr <n>` | Reviews any PR in an isolated copy and publishes `shipcraft/review` and a comment. Refuses `pr-from-fork`. |
@@ -137,8 +137,6 @@ Each command is `shipcraft <command>`. Exit codes, unless the row says otherwise
 | `[review] timeout` | Review time limit, in seconds. | `1200` |
 | `[machine] slots` | Concurrent local CI and review runs on this machine. | `1` |
 | `[pr] warn_lines` | Product lines above which the PR summary suggests a split. | `500` |
-| `[pr] text` | Globs of a text-only PR. `[]` turns the shortcut off. | `["**/*.md"]` |
-| `[pr] text_check` | Optional cheap check for text-only PRs. | none |
 | `[pr] shape_lines` | Fixes the file-size threshold of the shape warning (an integer above 0). | p90 of the project |
 
 ### Rules
@@ -164,11 +162,9 @@ With `ci = "github"` and `review = "local"`, `shipcraft pr` waits for GitHub's `
 ### `shipcraft pr`
 
 1. Pushes and opens or updates the PR. The PR body is the intent the reviewer receives.
-2. Local CI runs `shipcraft ci --base <merge-base> --pr` and publishes `shipcraft/ci` on HEAD.
+2. Local CI runs `shipcraft ci --base <merge-base>` and publishes `shipcraft/ci` on HEAD.
 3. Only if CI passed, the review runs and publishes `shipcraft/review` and a comment.
 4. Posts a summary: runs, refusals and time per layer, review tokens, product lines changed (tests, support files, pure renames, lockfiles and binaries excluded), a split hint above `warn_lines`, and a warning for each product file that grows past the project's p90 file size. Warnings never change exit codes or statuses.
-
-**Text-only PRs.** A PR is text only when every changed path matches `[pr] text`, none is protected (test globs, `.shipcraft.toml`, `.shipcraft/`, hook integration files) and no lock is open at HEAD. With `--pr`, CI then skips `[build]`, `check` and the suites, runs `[pr] text_check` if set, and still checks every commit. When in doubt, it runs everything. Edge cases are fixed by the acceptance battery (`acceptance/`).
 
 ### The review
 
@@ -187,7 +183,7 @@ Fork PRs are refused (`pr-from-fork`): code from outside the project is outside 
 
 ### The per-machine queue
 
-Local CI and local review share one queue per machine, across all projects, with at most `[machine] slots` runs at once (default 1; the machine file `$XDG_CONFIG_HOME/shipcraft/config.toml` wins over the project). A waiting run prints its position and what is running. A run that exceeds its timeout (`[review] timeout`, `[execution] ci_timeout`) is stopped, its status becomes `error` and the slot is freed. The hook and text-only CI do not queue.
+Local CI and local review share one queue per machine, across all projects, with at most `[machine] slots` runs at once (default 1; the machine file `$XDG_CONFIG_HOME/shipcraft/config.toml` wins over the project). A waiting run prints its position and what is running. A run that exceeds its timeout (`[review] timeout`, `[execution] ci_timeout`) is stopped, its status becomes `error` and the slot is freed. The hook does not queue.
 
 ## 6. Monorepo and runners
 
@@ -259,7 +255,6 @@ Output from a project command that `shipcraft` passes through always ends before
 | `pr-from-fork` | The PR comes from a fork. |
 | `pr-not-on-branch` | `pr` run without a working branch. |
 | `pr-not-open` | `merge` on a PR that is not open. |
-| `pr-text-invalid` | `[pr] text` is not a list of globs. |
 | `red-already-passes` | The suite passes at RED, so there is nothing to lock. |
 | `review-changes-requested` | The reviewer requested changes. |
 | `review-error` | The reviewer gave no well-formed verdict. |
@@ -269,7 +264,6 @@ Output from a project command that `shipcraft` passes through always ends before
 | `suite-red` | The suite fails at HEAD with no open cycle. |
 | `suite-without-tests` | At RED, a suite with failing cases matches no test file. |
 | `test-changed` | A locked test changed after RED. |
-| `text-check-failed` | `[pr] text_check` failed or timed out. |
 
 ## 8. Measurement
 
@@ -284,7 +278,6 @@ Each hook, CI, review and merge run appends one JSON line to `.git/shipcraft/run
 | `at` | Unix time of the run. |
 | `branch`, `commit` | Where it ran. |
 | `reason` | The first refusal line, or the `--no-review` reason. |
-| `text_only` | On `ci` rows: whether the PR was judged as text only. |
 | `product_lines`, `shape_warnings` | On rows from `shipcraft pr`: product lines, and files that got a shape warning (`null` when there is no threshold). |
 | `tokens`, `agent`, `pr`, `diff_sha256` | On `review` rows: tokens used (or `null`), the agent, the PR, and the reuse key. |
 | `escape` | `true` on a merge that skipped the gate. |

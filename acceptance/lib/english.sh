@@ -2,7 +2,7 @@
 english_variants() {
   echo root-check root-filter execution-table roles-table review-table machine-table
   echo execution-review execution-timeout roles-review review-timeout
-  echo pr-warn-lines pr-text pr-text-check pr-shape-lines
+  echo pr-warn-lines pr-shape-lines
   echo suite-name suite-root suite-command suite-check suite-filter build-command
   echo quoted-check dotted-timeout inline-suite coexisting-check
 }
@@ -34,7 +34,7 @@ sections = {
     'roles': dict(review='"codex"'),
     'review': dict(spec='"verifica"', timeout='19'),
     'machine': dict(slots='1'),
-    'pr': dict(warn_lines='23', text='["*.md"]', text_check=command, shape_lines='29'),
+    'pr': dict(warn_lines='23', shape_lines='29'),
     'suite': dict(name='"verifica filtra execucao comando"', root='"."', command=runner,
                   check=command, filter='"shipcraft"', globs='["tests/**"]'),
     'build': dict(command=json.dumps('touch ' + shlex.quote(cw + '/built'))),
@@ -51,8 +51,6 @@ variants = {
     'roles-review': ('roles', 'review', 'revisao'),
     'review-timeout': ('review', 'timeout', 'tempo_max'),
     'pr-warn-lines': ('pr', 'warn_lines', 'aviso_linhas'),
-    'pr-text': ('pr', 'text', 'texto'),
-    'pr-text-check': ('pr', 'text_check', 'verifica_texto'),
     'pr-shape-lines': ('pr', 'shape_lines', 'forma_linhas'),
     'suite-name': ('suite', 'name', 'nome'),
     'suite-root': ('suite', 'root', 'raiz'),
