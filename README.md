@@ -55,12 +55,15 @@ Every refusal is three lines: **what happened, why it matters, and the next step
 ## Quick start
 
 ```bash
-# build from source (macOS or Linux, Rust toolchain)
+# macOS (Apple silicon or Intel): the latest release, checksum-verified, into ~/.local/bin
+gh repo clone victorassisalves/shipcraft && bash shipcraft/install.sh
+
+# or build from source (macOS or Linux, Rust toolchain)
 git clone https://github.com/victorassisalves/shipcraft && cd shipcraft
 cargo install --path nucleo
 ```
 
-Prebuilt macOS binaries (Apple silicon and Intel, checksum-verified) come with the first tagged release.
+`install.sh --version <v>` pins a version and `install.sh --uninstall` removes the binary. It needs `gh` logged in.
 
 Then, in your project:
 
@@ -176,7 +179,7 @@ Give the RED and the GREEN to different sessions. They can be the same model; se
 
 Shipcraft 2 is a rewrite of an earlier internal version, built and measured in public from here on.
 
-- **Binaries:** build from source with `cargo install --path nucleo` (macOS, Linux). Prebuilt macOS archives come with the first tagged release.
+- **Binaries:** prebuilt for macOS (Apple silicon and Intel) through `install.sh`; on Linux, build from source with `cargo install --path nucleo`.
 - **Windows:** not supported.
 - **Fork PRs** are refused by the local review. The good-faith model doesn't hold for code from outside.
 - **Not yet:** a hosted review layer (`review = "github"`), and other CI providers.
