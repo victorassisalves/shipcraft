@@ -78,7 +78,7 @@ Each command is `shipcraft <command>`. Exit codes, unless the row says otherwise
 | `red` | Runs the suite, requires assertion failures, writes an open lock. Refuses `lock-open`, `red-already-passes`, `error-before-assertions`, `no-report`, `suite-without-tests`, `build-failed`. |
 | `check [--commit-msg <file>]` | The hook: judges the commit against the open locks and closes them when the RED cases pass. With `--commit-msg` it judges the final index and writes a close mark instead of the lock (`mark-failed` if it cannot). |
 | `close` | The `post-commit` half of the `commit-msg` route: if the mark matches the commit just made, adds one commit that only flips the lock to `closed`. On failure it changes nothing and says to rerun it. Always exits `0`. |
-| `ci --base <ref>` | CI (section 2). `--pr` is still accepted and changes nothing. |
+| `ci --base <ref> [--pr]` | CI (section 2). `--pr` allows the docs-only path (section 5). |
 | `pr [--title <t>] [--body <file>]` | Pushes (`--force-with-lease`), opens or updates the PR, runs the layers, posts statuses and summary (section 5). Refuses `pr-not-on-branch`. Exit `0` is guaranteed only when every layer passed or is off. |
 | `review` | Reviews local HEAD and prints the verdict; publishes nothing. Exit `0` on approval; refuses `review-changes-requested`, `review-error`, `review-off`. |
 | `review --pr <n>` | Reviews any PR in an isolated copy and publishes `shipcraft/review` and a comment. Refuses `pr-from-fork`. |
@@ -163,9 +163,11 @@ With `ci = "github"` and `review = "local"`, `shipcraft pr` waits for GitHub's `
 ### `shipcraft pr`
 
 1. Pushes and opens or updates the PR. The PR body is the intent the reviewer receives.
-2. Local CI runs `shipcraft ci --base <merge-base>` and publishes `shipcraft/ci` on HEAD.
+2. Local CI runs `shipcraft ci --base <merge-base> --pr` and publishes `shipcraft/ci` on HEAD.
 3. Only if CI passed, the review runs and publishes `shipcraft/review` and a comment.
 4. Posts a summary: runs, refusals and time per layer, review tokens, product lines changed (tests, support files, pure renames, lockfiles and binaries excluded), a split hint above `warn_lines`, and a warning for each product file that grows past the project's p90 file size. Warnings never change exit codes or statuses.
+
+**Docs-only PRs (item 40).** With `--pr`, a PR is docs only when the diff from the merge-base to HEAD is not empty and every entry is a regular file added, modified or deleted (a rename counts as both paths; no link, submodule, mode or type change) whose path is a `*.md` file at the repository root or anything under the top-level `docs/`, and none of those paths is protected (a test or support file of any suite, `.shipcraft.toml`, `.shipcraft/`, hook integration files), and no lock is open at HEAD, and every suite's `root` is a chain of folders of HEAD's tree (no link, file, submodule, missing path, `..` or absolute root; without that, shipcraft cannot tell which `.md` a suite reads as a test). Then CI still checks every commit, skips `[build]`, `check` and the suites, and prints exactly one line, `docs only: the suites do not run`. Any doubt runs everything. There is no config: a `.md` outside the root and `docs/` (for example one embedded in the code) always runs the suites. Every `ci` row of the run log has `docs_only` (`true` or `false`).
 
 ### The review
 
@@ -280,6 +282,7 @@ Each hook, CI, review and merge run appends one JSON line to `.git/shipcraft/run
 | `branch`, `commit` | Where it ran. |
 | `reason` | The first refusal line, or the `--no-review` reason. |
 | `product_lines`, `shape_warnings` | On rows from `shipcraft pr`: product lines, and files that got a shape warning (`null` when there is no threshold). |
+| `docs_only` | On `ci` rows: whether the PR was judged docs only (item 40). |
 | `tokens`, `agent`, `pr`, `diff_sha256` | On `review` rows: tokens used (or `null`), the agent, the PR, and the reuse key. |
 | `escape` | `true` on a merge that skipped the gate. |
 
