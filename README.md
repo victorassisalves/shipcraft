@@ -153,6 +153,8 @@ A layer that is switched off is labeled "off in .shipcraft.toml" on every PR, so
 | Review | every PR, after CI is green | a different agent reads the diff against the spec and the PR body, and runs its own checks. A blocker counts only if the reviewer reproduced it and it breaks a quoted spec rule or crashes. Errors, timeouts and quota failures are never an approval. |
 | Merge gate | `shipcraft merge` | refuses unless CI and review are green on the PR head |
 
+A PR that changes only docs (a `*.md` at the root, or anything under `docs/`) still gets every commit checked, but skips the build and the suites, so specs and docs reach main in seconds. Any doubt, such as a Markdown file a suite reads as a test, runs everything.
+
 On a public repository (or a paid GitHub plan), `shipcraft init --github` also marks both statuses as required, so the platform enforces the gate too.
 
 ## Measured, not asserted
