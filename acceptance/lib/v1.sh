@@ -1,10 +1,10 @@
-# Biblioteca da bateria v1 (docs/spec.md). Lida por run.sh.
-# Ajudantes (stubs, PR, estado do "GitHub"), cenarios por linguagem (itens 6, 8, 9.1) e os casos v1.
-# Cada caso cita o item e a regra da spec no nome e num comentario de uma linha.
-# bash 3.2: sem arrays associativos; com `set -u`, sem expandir arrays vazios.
+# Library of the v1 battery (docs/spec.md). Sourced by run.sh.
+# Helpers (stubs, PR, "GitHub" state), per-language scenarios (items 6, 8, 9.1) and the v1 cases.
+# Each case names the spec item and rule in its id and in a one-line comment.
+# bash 3.2: no associative arrays; with `set -u`, never expand empty arrays.
 
-# Destino novo por caso; /. permite completar uma tentativa parcial sem aninhar a base.
-copy_base() { # copy_base <base> <destino>
+# Fresh target per case; /. lets a partial attempt complete without nesting the base.
+copy_base() { # copy_base <base> <target>
   if [ "${SHIPCRAFT_ACCEPTANCE_CLONE:-1}" != 0 ]; then
     case "$(uname -s)" in
       Darwin) cp -cR "$1/." "$2" 2>/dev/null && return 0 ;;
@@ -17,17 +17,17 @@ copy_base() { # copy_base <base> <destino>
 H() { "$PY" "$ACEITE/tools/h.py" "$@"; }
 TMO() { "$PY" "$ACEITE/tools/tmo.py" "$@"; }
 
-# ---------------------------------------------------------------- listas de casos
+# ---------------------------------------------------------------- case lists
 fonte15a_cases() {
   echo v1-15a.fonte-config-arquivo
   echo v1-15a.fonte-config-arquivo-com-yaml
-  # 15a.2: fontes sem config YAML na raiz; exemplos, bordas e controles.
+  # 15a.2: sources with no YAML config at the root; examples, edges and controls.
   for kind in config-yml toml oculto-jsonc local-yml config-local-yaml env-definida env-vazia config-ilegivel link-quebrado git-config-falha subpasta ausente parecido-extensao parecido-subpasta; do
     echo "v1-15a.fonte-$kind"
   done
 }
 
-core_cases() { # os casos independentes de linguagem; os de fila (item 7) primeiro, sao os mais longos
+core_cases() { # the language-independent cases; the queue ones (item 7) first, they are the longest
   english_cases
   item_cases core
   echo v1-7.1-fila-um-slot v1-7.1-fila-dois-slots v1-7.2-fila-posicao v1-7.2-fila-tempo-libera v1-7.2-ci-tempo-esgotado-libera v1-7.3-hook-fora-da-fila
@@ -70,7 +70,7 @@ core_cases() { # os casos independentes de linguagem; os de fila (item 7) primei
   echo v1-15a.2-husky-ou-pre-commit-na-raiz v1-15a.2-husky-vazio-ou-junto-com-lefthook
   echo v1-15a.2-lefthook-dois-nomes-ou-hook-alheio v1-15a.2-lefthook-condicoes-do-15b-ponto-1
 }
-lang_v1_cases() { # casos v1 por linguagem
+lang_v1_cases() { # v1 cases per language
   item_cases "$1"
   echo v1-6.1-fora-do-commit v1-6.2-nao-rastreado-fica-fora v1-6.2-ignorado-entra v1-6.3-so-os-casos-travados
   echo v1-8.1-arquivos-de-apoio
@@ -84,8 +84,8 @@ lang_v1_cases() { # casos v1 por linguagem
   esac
 }
 
-# ---------------------------------------------------------------- ajudantes gerais
-chk() { # chk <label> <command...>: falha o caso com a ultima linha da saida do comando
+# ---------------------------------------------------------------- general helpers
+chk() { # chk <label> <command...>: fails the case with the last line of the command's output
   local label="$1" o; shift
   if o=$("$@" 2>&1); then echo "ok: $label" >> "$LOG"
   else echo "$o" >> "$LOG"; fail "$label${o:+: $(printf '%s' "$o" | tail -n 1 | cut -c1-90)}"; fi
@@ -105,23 +105,23 @@ nonempty() { [ -n "$1" ] || { echo "empty"; return 1; }; }
 tget() { H toml-get .shipcraft.toml "$1"; }
 tset() { H toml-set .shipcraft.toml "$1" "$2" "$3"; }
 
-# ---------------------------------------------------------------- ambiente de um projeto v1
-# Cada projeto tem uma pasta de stubs ($CB: gh, agentes, estado em $CB/state) e um PATH so com
-# o que o caso quer: nenhum gh ou agent real fica visivel.
-stubs_for() { # stubs_for <cbdir> [agentes...]
+# ---------------------------------------------------------------- environment of a v1 project
+# Each project has a stubs folder ($CB: gh, agents, state in $CB/state) and a PATH with only
+# what the case wants: no real gh or agent is visible.
+stubs_for() { # stubs_for <cbdir> [agents...]
   local cb="$1"; shift
   mkdir -p "$cb/state"
   cp "$ACEITE/stubs/gh" "$cb/gh"; chmod +x "$cb/gh"
   local a
   for a in "$@"; do cp "$ACEITE/stubs/agent" "$cb/$a"; chmod +x "$cb/$a"; done
 }
-use_proj() { # use_proj <dir do projeto> <dir dos stubs>
+use_proj() { # use_proj <project dir> <stubs dir>
   T="$1"; CB="$2"; ST="$CB/state"
   cd "$T" || exit 1
   export VIRTUAL_ENV="$T/.venv"
   PATH="$CB:$T/.venv/bin:$WORK/bin:$CLEAN_REST"; export PATH
 }
-v1_start() { # v1_start [agentes...]: o projeto do caso ($T) com stubs em $CW/bin
+v1_start() { # v1_start [agents...]: the case's project ($T) with stubs in $CW/bin
   stubs_for "$CW/bin" "$@"
   use_proj "$T" "$CW/bin"
 }
@@ -130,7 +130,7 @@ rev_n() { H rev-calls "$ST" "$@"; }
 osha() { git --git-dir="$(cat "$ST/origin")" rev-parse -q --verify "refs/heads/$1" 2>/dev/null || true; }
 probe_runs() { if [ -f "$CB/probe.log" ]; then grep -c ran "$CB/probe.log" || true; else echo 0; fi; }
 old_runs() { if [ -f "$OLDLOG" ]; then grep -c ran "$OLDLOG" || true; else echo 0; fi; }
-# o teste antigo esta travado (a trava cita o arquivo) e nao esta em failing_at_red (item 13, regra 1)
+# the old test is locked (the lock names the file) and is not in failing_at_red (item 13, rule 1)
 old_locked_not_failing() {
   local lf; lf=$(lock_files_head); [ "$(printf '%s\n' "$lf" | count_lines)" -eq 1 ] || { echo "want one committed lock, got: $lf"; return 1; }
   git show "HEAD:$lf" > "$CW/lock.json"
@@ -139,7 +139,7 @@ old_locked_not_failing() {
   [ "$(H lock-failing "$CW/lock.json" | count_lines)" -ge 1 ] || { echo "failing_at_red is empty"; return 1; }
 }
 failing_at_least() { [ "$(H lock-failing "$CW/lock.json" | count_lines)" -ge "$1" ] || { echo "fewer than $1 cases in failing_at_red"; return 1; }; }
-# item 13 com jest: projeto Node com jest 29 e jest-junit; $1 = "rootdir-src" poe `rootDir: "src"` no jest.config.js
+# item 13 with jest: Node project with jest 29 and jest-junit; $1 = "rootdir-src" puts `rootDir: "src"` in jest.config.js
 jest_old_project() {
   local ws="$CW/jp"
   mkdir -p "$ws/src"; cd "$ws" || exit 1
@@ -159,7 +159,7 @@ JS
   printf 'node_modules/\n' > .gitignore
   git add -A && git commit -q -m "initial jest project" || fail "harness: commit of the jest project"
 }
-jest_old_case() { # o teste antigo (passa no RED, sonda) nao roda no hook, qualquer que seja o rootDir do jest
+jest_old_case() { # the old test (passes at RED, probe) does not run in the hook, whatever jest's rootDir
   OLDLOG="$CW/old.log"
   jest_old_project "$1"
   must_accept "shipcraft init" cmd shipcraft init
@@ -178,16 +178,16 @@ jest_old_case() { # o teste antigo (passa no RED, sonda) nao roda no hook, qualq
   must_refuse "shipcraft ci runs everything and sees the broken old test" cmd shipcraft ci --base "$BASE"
   pass
 }
-python_prefix_cfg() { # o comando de teste do projeto usa --junit-prefix (os ids dos casos ganham um prefixo)
+python_prefix_cfg() { # the project's test command uses --junit-prefix (case ids get a prefix)
   perl -pi -e 's/--junitxml=/--junit-prefix=project --junitxml=/' .shipcraft.toml
   grep -q -- '--junit-prefix=project' .shipcraft.toml || fail "harness: the test_command has no --junitxml= to prefix"
 }
-python_doctest_cfg() { # --doctest-modules: o RED roda tambem os doctests de um modulo do produto
+python_doctest_cfg() { # --doctest-modules: RED also runs the doctests of a product module
   printf '[pytest]\naddopts = --doctest-modules\n' > pytest.ini
   printf 'def ident(x):\n    """\n    >>> ident(2)\n    2\n    """\n    return x\n' > docmod.py
 }
-# item 13.1, config do runner que desfaz o mapa caso -> arquivo: o teste antigo quebrado nao recusa o GREEN
-python_map_case() { # python_map_case <cenario de config>
+# item 13.1, runner config that breaks the case -> file map: the broken old test does not refuse GREEN
+python_map_case() { # python_map_case <config scenario>
   OLDLOG="$CW/old.log"
   L old_probe; commit_all "test: an old test that already passes"
   setup_init
@@ -204,8 +204,8 @@ python_map_case() { # python_map_case <cenario de config>
   must_refuse "shipcraft ci runs the whole suite and sees the old test fail" cmd shipcraft ci --base "$BASE"
   pass
 }
-# item 13.1 (spec 50f33ed): um erro de coleta ou de compilacao fora dos arquivos do RED nunca recusa o GREEN; vai para o CI
-collect_case() { # collect_case [cenario de config que altera o comando de teste] [cenario do teste antigo] [cenario da quebra]
+# item 13.1 (spec 50f33ed): a collection or compile error outside the RED files never refuses GREEN; it goes to CI
+collect_case() { # collect_case [config scenario that changes the test command] [old test scenario] [breakage scenario]
   L "${2:-collect_old}"; commit_all "test: an old test that uses a product API"
   setup_init
   if [ -n "${1:-}" ]; then L "$1"; commit_all "chore: test command config"; BASE=$(head_rev); fi
@@ -219,7 +219,7 @@ collect_case() { # collect_case [cenario de config que altera o comando de teste
   pass
 }
 verifica_needle() { case "$TL" in node) echo 'tsc --noEmit' ;; go) echo 'go vet' ;; esac; }
-# item 12: um workspace npm com dois pacotes TypeScript (tsconfig com outDir, sem noEmit) e um teste que falha de verdade
+# item 12: an npm workspace with two TypeScript packages (tsconfig with outDir, no noEmit) and a really failing test
 ws_ts_project() {
   local ws="$CW/ws" p
   mkdir -p "$ws/packages/api/src" "$ws/packages/web/src"; cd "$ws" || exit 1
@@ -235,7 +235,7 @@ ws_ts_project() {
   npm install --no-audit --no-fund --loglevel=error >> "$LOG" 2>&1 || fail "harness: npm install of the workspace"
   git add -A && git commit -q -m "initial workspace" || fail "harness: commit of the workspace"
 }
-no_build_output() { # nenhuma pasta dist (nem arquivo novo) fora do node_modules
+no_build_output() { # no dist folder (and no new file) outside node_modules
   local d; d=$(find . -name dist -not -path '*/node_modules/*' | head -n 1)
   [ -z "$d" ] || { echo "build output at $d"; return 1; }
   local s; s=$(git status --porcelain --untracked-files=all | grep -v -E '^\?\? \.shipcraft/locks/' || true)
@@ -246,7 +246,7 @@ st_state() { st "$1" "$2" | cut -f1; }
 st_desc() { st "$1" "$2" | cut -f2-; }
 nwrites() { H nwrites "$ST" "$@"; }
 
-run_cmd_stdin() { # run_cmd_stdin <file> <comando...>
+run_cmd_stdin() { # run_cmd_stdin <file> <command...>
   local f="$1"; shift
   run_cmd "$BASH" -c 'f=$1; shift; exec "$@" < "$f"' _ "$f" "$@"
 }
@@ -261,19 +261,19 @@ remote_setup() {
   git fetch -q origin && git remote set-head origin main >/dev/null 2>&1
 }
 
-pr_commit() { # commit_all, ou --no-verify at NV esta setado (config invalida de proposito)
+pr_commit() { # commit_all, or --no-verify when NV is set (config invalid on purpose)
   if [ -n "${NV:-}" ]; then must_accept "$1 (harness)" commit commit_nv "$1"
   else must_accept "$1" commit commit_all "$1"; fi
 }
-# pr_main: shipcraft init + configuracao ($CFGS: linhas "secao|chave|literal") + marcadores na main,
-# main publicada no origin. AGENTS (agentes instalados no init) vem do caso.
+# pr_main: shipcraft init + config ($CFGS: lines "section|key|literal") + markers on main,
+# main pushed to origin. AGENTS (agents installed at init) comes from the case.
 pr_main() {
   must_accept "shipcraft init" cmd shipcraft init
   if [ -n "${CFGS:-}" ]; then
     local s k v
     while IFS='|' read -r s k v; do
       [ -n "$s$k" ] || continue
-      [ "$s" = - ] && s=""   # "-" = chave de primeiro nivel
+      [ "$s" = - ] && s=""   # "-" = top-level key
       H toml-set .shipcraft.toml "$s" "$k" "$v" || fail "harness: toml-set $s $k"
     done <<EOF
 $CFGS
@@ -287,7 +287,7 @@ EOF
   remote_setup
   BASE=$(head_rev)
 }
-probe_write() { # tests/test_probe.py: anota que a suite rodou; opcionalmente a linha do tempo
+probe_write() { # tests/test_probe.py: records that the suite ran; optionally the timeline
   cat > tests/test_probe.py <<EOF
 import time
 
@@ -307,7 +307,7 @@ def test_probe_ci():
             f.write("%s ci end %.3f\n" % (NAME, time.time()))
 EOF
 }
-pr_feature() { # pr_feature [branch]: um modulo, o teste dele e a sonda de CI, commitados
+pr_feature() { # pr_feature [branch]: a module, its test and the CI probe, committed
   BR="${1:-feature/alpha}"
   git checkout -q -b "$BR" || fail "harness: checkout -b $BR"
   printf '# diff-marker-4f9a\ndef shout_marker(text):\n    return text.upper() + "!"\n' > shoutmod.py
@@ -316,12 +316,12 @@ pr_feature() { # pr_feature [branch]: um modulo, o teste dele e a sonda de CI, c
   if [ -n "${FAILING:-}" ]; then printf 'def test_always_fails():\n    assert False\n' > tests/test_failing.py; fi
   pr_commit "feat: shout"
 }
-shipcraft_pr() { # shipcraft pr com titulo e corpo; o codigo de saida fica em $RC, sem julgamento
+shipcraft_pr() { # shipcraft pr with title and body; the exit code goes to $RC, not judged
   git rev-parse HEAD > "$ST/sha"
   run_cmd TMO "${PR_TMO:-240}" shipcraft pr --title "Titulo-PR-6d1" --body "$CW/body.md" "$@"
 }
 gh_quiet() { SHIPCRAFT_STUB_QUIET=1 "$CB/gh" "$@"; }
-# um PR que nao nasceu do shipcraft pr: o branch vai para o origin e o PR e aberto pelo "GitHub" direto
+# a PR not born from shipcraft pr: the branch goes to origin and the PR is opened in "GitHub" directly
 pr_outside() { # pr_outside [branch] -> PRN, HEADSHA
   BR="${1:-feature/alpha}"
   git push -q origin "$BR" >> "$LOG" 2>&1 || fail "harness: push $BR"
@@ -331,9 +331,9 @@ pr_outside() { # pr_outside [branch] -> PRN, HEADSHA
 }
 seed_ok() { H seed-status "$ST" "$1" "$2" success "${3:-on this machine}" 0; }
 
-# ---------------------------------------------------------------- cenarios por linguagem (itens 6, 8)
+# ---------------------------------------------------------------- per-language scenarios (items 6, 8)
 # --- Python
-python_dep_impl() { # a implementacao importa um modulo (slughelper) que ficara nao rastreado
+python_dep_impl() { # the implementation imports a module (slughelper) that stays untracked
   cat > slughelper.py <<'PY'
 import re
 import unicodedata
@@ -347,7 +347,7 @@ PY
   DEP_STAGE="textutil.py"
 }
 python_ign_prepare() { printf 'generated_slug.py\n' >> .gitignore; }
-python_ign_impl() { # a implementacao importa um arquivo gerado, ignorado pelo git
+python_ign_impl() { # the implementation imports a generated file, ignored by git
   cat > generated_slug.py <<'PY'
 import re
 import unicodedata
@@ -380,8 +380,8 @@ PY
   SUPPORT_FILES="conftest.py tests/helpers/util.py tests/fixtures/expected.txt"
 }
 
-# --- Itens 13 e 14, Python
-python_old_probe() { # teste antigo: passa, anota cada execucao em $OLDLOG e le legacy_state.txt (arquivo que nao e teste)
+# --- Items 13 and 14, Python
+python_old_probe() { # old test: passes, records each run in $OLDLOG and reads legacy_state.txt (a non-test file)
   OLDFILE=tests/test_old.py
   printf 'ok\n' > legacy_state.txt
   cat > tests/test_old.py <<PY
@@ -396,7 +396,7 @@ PY
 }
 python_old_touch() { printf '\n# touched\n' >> tests/test_old.py; }
 python_legacy_break() { printf 'changed\n' > legacy_state.txt; }
-python_shout_odd_test() { # tres casos cujos nomes tem espaco, +, parenteses, colchetes e .*
+python_shout_odd_test() { # three cases whose names have a space, +, parentheses, brackets and .*
   cat > tests/test_shout.py <<'PY'
 import pytest
 
@@ -413,7 +413,7 @@ def test_shout_odd(text, want):
 PY
 }
 python_legacy_file() { printf 'ok\n' > legacy_state.txt; }
-python_mixed_test() { # o mesmo arquivo: um caso que falha no RED e um que passa no RED (le legacy_state.txt)
+python_mixed_test() { # the same file: one case failing at RED and one passing at RED (reads legacy_state.txt)
   cat > tests/test_slug.py <<'PY'
 from pathlib import Path
 
@@ -430,7 +430,7 @@ PY
 }
 python_flag_off() { printf 'ENABLED = False\n' > flags.py; }
 python_flag_on() { printf 'ENABLED = True\n' > flags.py; }
-python_skipped_test() { # um caso que falha no RED e um pulado no RED por uma flag do produto
+python_skipped_test() { # one case failing at RED and one skipped at RED by a product flag
   cat > tests/test_slug.py <<'PY'
 import pytest
 
@@ -447,7 +447,7 @@ def test_flagged():
     assert False
 PY
 }
-python_same_name() { # test_value em dois arquivos; so o de a falha no RED; o de b anota a execucao e le stateb.txt
+python_same_name() { # test_value in two files; only a's fails at RED; b's records the run and reads stateb.txt
   printf 'ok\n' > stateb.txt
   printf 'def value():\n    return 0\n' > moda.py
   printf 'import moda\n\n\ndef test_value():\n    assert moda.value() == 1\n' > tests/test_a.py
@@ -462,7 +462,7 @@ def test_value():
 PY
 }
 python_same_name_green() { printf 'def value():\n    return 1\n' > moda.py; printf 'changed\n' > stateb.txt; }
-python_two_dirs() { # test_value.py na raiz (passa no RED, sonda) e tests/test_value.py (falha no RED)
+python_two_dirs() { # test_value.py at the root (passes at RED, probe) and tests/test_value.py (fails at RED)
   printf 'ok\n' > legacy_value.txt
   printf 'def new():\n    return 0\n' > valuemod.py
   printf 'import valuemod\n\n\ndef test_new():\n    assert valuemod.new() == 1\n' > tests/test_value.py
@@ -477,7 +477,7 @@ def test_legacy():
 PY
 }
 python_two_dirs_green() { printf 'def new():\n    return 1\n' > valuemod.py; printf 'changed\n' > legacy_value.txt; }
-python_ls_test() { # um caso que falha no RED e um que passa no RED e chama o git ls-files
+python_ls_test() { # one case failing at RED and one passing at RED that calls git ls-files
   cat > tests/test_slug.py <<'PY'
 import subprocess
 
@@ -493,16 +493,16 @@ def test_git_lists_the_tests():
     assert "tests/test_slug.py" in out.splitlines()
 PY
 }
-python_collect_old() { # um teste antigo que importa uma API do produto
+python_collect_old() { # an old test that imports a product API
   printf 'def old():\n    return True\n' > legacy.py
   printf 'from legacy import old\n\n\ndef test_old():\n    assert old()\n' > tests/test_old.py
 }
 python_collect_break() { printf '# the legacy API was removed\n' > legacy.py; }
-python_explicit_cfg() { # o comando de teste do projeto nomeia os arquivos de teste
+python_explicit_cfg() { # the project's test command names the test files
   perl -pi -e 's/-m pytest /-m pytest tests\/test_smoke.py tests\/test_slug.py tests\/test_old.py /' .shipcraft.toml
   grep -q 'tests/test_old.py' .shipcraft.toml || fail "harness: the test_command has no '-m pytest ' to extend"
 }
-python_git_test_basic() { # o caso que falha no RED tambem chama o git
+python_git_test_basic() { # the case failing at RED also calls git
   cat > tests/test_slug.py <<'PY'
 import subprocess
 
@@ -519,7 +519,7 @@ def test_slug_in_a_git_checkout():
     assert git("rev-parse", "HEAD").returncode == 0
 PY
 }
-python_git_test_deep() { # o git da copia tem a historia e os arquivos rastreados, como um clone
+python_git_test_deep() { # the copy's git has the history and the tracked files, like a clone
   cat > tests/test_slug.py <<'PY'
 import subprocess
 
@@ -566,8 +566,8 @@ TS
   SUPPORT_FILES="vitest.config.ts jest.config.js src/__tests__/helpers/util.ts"
 }
 
-# --- Itens 13 e 14, Node
-node_old_probe() { # em .js: o tsc do comando de teste nao olha para ele
+# --- Items 13 and 14, Node
+node_old_probe() { # in .js: the test command's tsc does not look at it
   OLDFILE=src/old.test.js
   printf 'ok\n' > legacy_state.txt
   cat > src/old.test.js <<JS
@@ -649,7 +649,7 @@ it("value", () => {
 JS
 }
 node_same_name_green() { printf 'export const value = (): number => 1;\n' > src/moda.ts; printf 'changed\n' > state_b.txt; }
-node_two_dirs() { # src/value.test.ts (passa no RED, sonda) e src/sub/value.test.ts (falha no RED)
+node_two_dirs() { # src/value.test.ts (passes at RED, probe) and src/sub/value.test.ts (fails at RED)
   mkdir -p src/sub
   printf 'ok\n' > legacy_value.txt
   printf 'export const newValue = (): number => 0;\n' > src/valuemod.ts
@@ -697,7 +697,7 @@ it("old", () => {
 JS
 }
 node_collect_break() { printf 'export const other = 1;\n' > src/legacy.js; }
-node_ts_old() { # um teste antigo em TypeScript que usa uma API do produto
+node_ts_old() { # an old TypeScript test that uses a product API
   printf 'export const old = (): boolean => true;\n' > src/legacy.ts
   printf 'import { expect, it } from "vitest";\nimport { old } from "./legacy";\n\nit("old", () => {\n  expect(old()).toBe(true);\n});\n' > src/old.test.ts
 }
@@ -824,7 +824,7 @@ GO
   SUPPORT_FILES="helper_test.go testdata/expected.txt"
 }
 
-# --- Itens 13 e 14, Go
+# --- Items 13 and 14, Go
 go_old_probe() {
   OLDFILE=old_test.go
   printf 'ok\n' > legacy_state.txt
@@ -917,7 +917,7 @@ func TestFlagged(t *testing.T) {
 }
 GO
 }
-go_same_name() { # TestValue em dois pacotes; so o de a falha no RED; o de b anota a execucao e le state.txt
+go_same_name() { # TestValue in two packages; only a's fails at RED; b's records the run and reads state.txt
   mkdir -p a b
   printf 'package a\n\n// Value is a stub.\nfunc Value() int { return 0 }\n' > a/a.go
   printf 'package a\n\nimport "testing"\n\nfunc TestValue(t *testing.T) {\n\tif Value() != 1 {\n\t\tt.Fatalf("Value = %%d", Value())\n\t}\n}\n' > a/a_test.go
@@ -947,7 +947,7 @@ func TestValue(t *testing.T) {
 GO
 }
 go_same_name_green() { printf 'package a\n\n// Value is done.\nfunc Value() int { return 1 }\n' > a/a.go; printf 'changed\n' > b/state.txt; }
-go_two_dirs() { # x/sub/value_test.go (pacote aninhado, passa no RED, sonda) e x/value_test.go (falha no RED)
+go_two_dirs() { # x/sub/value_test.go (nested package, passes at RED, probe) and x/value_test.go (fails at RED)
   mkdir -p x/sub
   printf 'package x\n\n// New is a stub.\nfunc New() int { return 0 }\n' > x/x.go
   printf 'package x\n\nimport "testing"\n\nfunc TestNew(t *testing.T) {\n\tif New() != 1 {\n\t\tt.Fatalf("New = %%d", New())\n\t}\n}\n' > x/value_test.go
@@ -1007,13 +1007,13 @@ func TestGitListsTheTests(t *testing.T) {
 }
 GO
 }
-go_collect_old() { # um teste antigo em outro pacote, que deixa de compilar at o produto perde a funcao
+go_collect_old() { # an old test in another package that stops compiling when the product loses the function
   mkdir -p old
   printf 'package old\n\n// Old is a legacy API.\nfunc Old() bool { return true }\n' > old/old.go
   printf 'package old\n\nimport "testing"\n\nfunc TestOld(t *testing.T) {\n\tif !Old() {\n\t\tt.Fatal("Old")\n\t}\n}\n' > old/old_test.go
 }
 go_collect_break() { printf 'package old\n\n// New replaces the legacy API.\nfunc New() bool { return true }\n' > old/old.go; }
-go_type_error() { # compila e os testes passam, mas o go vet (copylocks) recusa: fora do subconjunto que o go test roda
+go_type_error() { # compiles and the tests pass, but go vet (copylocks) refuses: outside the subset go test runs
   printf 'package textutil\n\nimport "sync"\n\n// Lock passes a mutex by value.\nfunc Lock(m sync.Mutex) { _ = m }\n' > locked.go
 }
 go_git_test_basic() {
@@ -1088,12 +1088,12 @@ func TestSlugInAGitClone(t *testing.T) {
 GO
 }
 
-# ---------------------------------------------------------------- casos v1
+# ---------------------------------------------------------------- v1 cases
 run_case_v1() {
   case "$CASE" in
   v1-15c.trava-*)
-    # Item 15c.2/4: config travada no hook e CI, no indice ou commit, nos quatro nomes.
-    EXPECT="mudanca do lefthook recusada com trava aberta"
+    # Item 15c.2/4: config locked in the hook and CI, in the index or a commit, under all four names.
+    EXPECT="lefthook change refused with an open lock"
     v1_start codex
     setup_init
     INIT_HEAD=$(head_rev)
@@ -1106,13 +1106,13 @@ run_case_v1() {
     esac
     for name in $names; do
       git reset --hard -q "$INIT_HEAD" >> "$LOG" 2>&1
-      # Limpa somente as fixtures criadas pela iteracao anterior.
+      # Clean only the fixtures the previous iteration created.
       rm -f lefthook.yml .lefthook.yml lefthook.yaml .lefthook.yaml lefthook-local.yml .lefthook-local.yml lefthook-local.yaml .lefthook-local.yaml
       case "$CASE" in *local*) printf 'pre-commit:\n  commands:\n    shipcraft:\n      run: shipcraft check\n      priority: 1\n' > lefthook.yml ;; esac
       if [[ "$CASE" != *local* || "$local_change" = 1 ]]; then
         printf 'pre-commit:\n  commands:\n    shipcraft:\n      run: shipcraft check\n      priority: 9\n' > "$name"
       fi
-      must_accept "config antes do RED" commit commit_all "chore: lefthook"
+      must_accept "config before RED" commit commit_all "chore: lefthook"
       BASE=$(head_rev)
       L stub; L spec_test
       must_accept "shipcraft red" cmd shipcraft red
@@ -1122,52 +1122,52 @@ run_case_v1() {
       case "$CASE" in
         *hook*)
           git add -A
-          must_refuse "hook recusa $name" commit commit_index "chore: altera lefthook" ;;
+          must_refuse "hook refuses $name" commit commit_index "chore: altera lefthook" ;;
         *ci-comum)
-          must_accept "atalho sem hook" commit commit_nv "chore: altera lefthook"
-          must_refuse "CI recusa $name" cmd shipcraft ci --base "$BASE" ;;
+          must_accept "shortcut without hook" commit commit_nv "chore: altera lefthook"
+          must_refuse "CI refuses $name" cmd shipcraft ci --base "$BASE" ;;
         *ci-borda)
-          # O CI julga a mudanca commitada nos outros tres nomes (15c.4).
-          must_accept "atalho sem hook" commit commit_nv "chore: altera lefthook"
-          must_refuse "CI recusa $name" cmd shipcraft ci --base "$BASE" ;;
+          # CI judges the committed change under the other three names (15c.4).
+          must_accept "shortcut without hook" commit commit_nv "chore: altera lefthook"
+          must_refuse "CI refuses $name" cmd shipcraft ci --base "$BASE" ;;
       esac
-      chk "recusa identifica config do lefthook nas tres linhas" last3_has 'lefthook'
+      chk "refusal names the lefthook config in the three lines" last3_has 'lefthook'
     done
     pass ;;
   v1-15c.*)
-    # Item 15c.1 e 15c.3: exemplo e borda de init, status e comandos existentes.
-    EXPECT="contrato lefthook 15c"
+    # Items 15c.1 and 15c.3: example and edge for init, status and existing commands.
+    EXPECT="lefthook contract 15c"
     v1_start codex
     case "$CASE" in *status-*) setup_init ;; esac
     must_accept "$CASE" cmd "$PY" "$ACEITE/tools/lefthook15c.py" "${CASE#v1-15c.}"
     pass ;;
   v1-15a.fonte-*)
-    EXPECT="fonte unica lefthook sem YAML na raiz"
+    EXPECT="single lefthook source with no YAML at the root"
     v1_start codex claude
-    must_accept "${CASE}: contrato fonte unica" cmd "$PY" "$ACEITE/tools/fonte15a.py" "${CASE#v1-15a.fonte-}"
+    must_accept "${CASE}: single source contract" cmd "$PY" "$ACEITE/tools/fonte15a.py" "${CASE#v1-15a.fonte-}"
     pass ;;
 
 
-  # ======================================================== por linguagem: itens 6, 8, 9.1
+  # ======================================================== per language: items 6, 8, 9.1
   v1-6.1-fora-do-commit)
-    # Item 6, regra 1: nao rastreado, mudanca fora do indice e backup do editor nao bloqueiam nem afetam o commit.
+    # Item 6, rule 1: untracked files, changes outside the index and editor backups neither block nor affect the commit.
     EXPECT="accepted, lock closed"
     printf 'um\n' > NOTES.md; commit_all "notes"
     setup_red
     L implement; git add -A
-    printf 'dois\n' > NOTES.md                       # mudanca fora do indice, arquivo rastreado
-    printf 'rascunho\n' > scratch-notes.txt          # nao rastreado, nao ignorado
-    cp "$TESTFILE" "${TESTFILE}~"                    # backup do editor ao lado do teste travado
+    printf 'dois\n' > NOTES.md                       # change outside the index, tracked file
+    printf 'rascunho\n' > scratch-notes.txt          # untracked, not ignored
+    cp "$TESTFILE" "${TESTFILE}~"                    # editor backup next to the locked test
     must_accept "GREEN commit with stray files around" commit commit_index "feat: slugify"
     chk "the commit closed the lock" one_lock_head_state closed
     chk "the stray files stayed out of the commit" sh -c "! git ls-tree -r --name-only HEAD | grep -E -q 'scratch-notes|~\$'"
     chk "the unstaged edit is still in the tree" sh -c "[ \"\$(cat NOTES.md)\" = dois ]"
     pass ;;
   v1-6.2-nao-rastreado-fica-fora)
-    # Item 6, regra 2: um arquivo nao rastreado e nao ignorado fica de fora (o furo do PR 5): o GREEN que depende dele nao fecha a trava.
+    # Item 6, rule 2: an untracked, unignored file stays out (the PR 5 hole): a GREEN that depends on it does not close the lock.
     EXPECT="lock stays open until the helper is added"
     setup_red
-    L dep_impl                      # a implementacao e o helper, este nunca adicionado ao indice
+    L dep_impl                      # the implementation and the helper, the latter never added to the index
     git add "$DEP_STAGE"
     git status --porcelain | grep -q '^??' || fail "harness: the helper should be untracked"
     run_cmd commit_index "feat: depends on an untracked file"
@@ -1177,7 +1177,7 @@ run_case_v1() {
     else
       [ "$RC" -ne 0 ] || fail "rc 0 but no commit was made"
       msg_check || fail "refused, but $MSGERR"
-      chk "the refusal is not about files outside the commit (item 6, regra 1)" last3_hasnt 'outside the commit|in the index|stash'
+      chk "the refusal is not about files outside the commit (item 6, rule 1)" last3_hasnt 'outside the commit|in the index|stash'
       chk "the refused commit left the lock open" one_lock_head_state open
     fi
     git add -A
@@ -1186,7 +1186,7 @@ run_case_v1() {
     must_accept "shipcraft ci --base <before RED>" cmd shipcraft ci --base "$BASE"
     pass ;;
   v1-6.2-ignorado-entra)
-    # Item 6, regra 2: os arquivos ignorados da arvore entram no que o hook julga (dependencias, gerados, .env).
+    # Item 6, rule 2: the tree's ignored files are part of what the hook judges (dependencies, generated files, .env).
     EXPECT="accepted, lock closed"
     L ign_prepare; commit_all "chore: ignore the generated file"
     setup_red
@@ -1196,7 +1196,7 @@ run_case_v1() {
     chk "the ignored file counted: the lock closed" one_lock_head_state closed
     pass ;;
   v1-6.3-teste-novo-que-nao-importa)
-    # Item 6, regra 3 (e v0, regra 6): o hook roda so os casos travados; um teste novo, nao travado, que nem importa nao impede o GREEN valido.
+    # Item 6, rule 3 (and v0, rule 6): the hook runs only the locked cases; a new, unlocked test that does not even import does not block a valid GREEN.
     EXPECT="accepted, lock closed; ci refuses"
     setup_red
     printf 'import unfinished_feature\n\n\ndef test_next():\n    assert unfinished_feature.ok()\n' > tests/test_next.py
@@ -1206,7 +1206,7 @@ run_case_v1() {
     must_refuse "shipcraft ci runs the whole suite and sees the import error" cmd shipcraft ci --base "$BASE"
     pass ;;
   v1-6.3-teste-novo-com-glob-do-projeto)
-    # Item 6, regra 3: "so os casos travados" usa os globs de teste do .shipcraft.toml do projeto, nao nomes fixos (test_*.py): o projeto que descobre check_*.py tambem pode ter o teste novo, nao travado, ainda sem importar.
+    # Item 6, rule 3: "only the locked cases" uses the test globs from the project's .shipcraft.toml, not fixed names (test_*.py): a project that discovers check_*.py can also have the new, unlocked test that does not import yet.
     EXPECT="accepted, lock closed; ci refuses"
     printf '[pytest]\npython_files = check_*.py\n' > pytest.ini
     setup_init
@@ -1234,7 +1234,7 @@ PY
     must_refuse "shipcraft ci runs the whole suite and sees the import error" cmd shipcraft ci --base "$BASE"
     pass ;;
   v1-6.3-so-os-casos-travados)
-    # Item 6, regra 3, como o item 13 a muda: o hook roda so os casos que falhavam no RED; a suite inteira e do CI, que recusa o teste novo que falha.
+    # Item 6, rule 3, as item 13 changes it: the hook runs only the cases failing at RED; the whole suite belongs to CI, which refuses the new failing test.
     EXPECT="hook closes the lock; ci refuses"
     setup_red
     L extra_fail_test; L implement
@@ -1243,7 +1243,7 @@ PY
     must_refuse "shipcraft ci runs the whole suite and sees the failing extra test" cmd shipcraft ci --base "$BASE"
     pass ;;
   v1-8.1-arquivos-de-apoio)
-    # Item 8, regra 1: os globs do init cobrem os arquivos de apoio da linguagem; o GREEN nao os edita durante o ciclo.
+    # Item 8, rule 1: the init globs cover the language's support files; GREEN does not edit them during the cycle.
     EXPECT="each support file refused"
     setup_init
     L stub; L support_spec
@@ -1257,20 +1257,20 @@ PY
     done
     pass ;;
   v1-13.1-teste-antigo-nao-executa)
-    # Item 13, regra 1: o hook executa so os casos que falhavam no RED; o teste antigo (ja passava) fica travado pelo hash e nao roda.
+    # Item 13, rule 1: the hook runs only the cases failing at RED; the old test (already passing) stays locked by hash and does not run.
     EXPECT="accepted, lock closed, old test never ran"
     OLDLOG="$CW/old.log"
     L old_probe; commit_all "test: an old test that already passes"
     setup_red
     chk "the old test is locked but did not fail at RED" old_locked_not_failing
-    : > "$OLDLOG"     # o RED rodou tudo; daqui em diante so conta o hook
+    : > "$OLDLOG"     # RED ran everything; from here on only the hook counts
     L implement
     must_accept "GREEN commit" commit commit_all "feat: slugify"
     chk "the lock closed" one_lock_head_state closed
     chk "the hook did not execute the old test" eq "$(old_runs)" 0
     pass ;;
   v1-13.1-teste-antigo-quebrado-nao-bloqueia)
-    # Item 13, regra 1 (borda): um teste antigo que quebra por reason alheio nao bloqueia o GREEN; so o CI, com a suite inteira, o ve.
+    # Item 13, rule 1 (edge): an old test that breaks for an unrelated reason does not block GREEN; only CI, with the whole suite, sees it.
     EXPECT="hook closes the lock; ci refuses"
     OLDLOG="$CW/old.log"
     L old_probe; commit_all "test: an old test that already passes"
@@ -1281,7 +1281,7 @@ PY
     must_refuse "shipcraft ci runs the whole suite and sees the old test fail" cmd shipcraft ci --base "$BASE"
     pass ;;
   v1-13.1-teste-antigo-editado-recusado)
-    # Item 13, regra 1 (borda): o teste antigo continua travado pelo hash; o GREEN que o edita ou apaga e recusado.
+    # Item 13, rule 1 (edge): the old test stays locked by hash; a GREEN that edits or deletes it is refused.
     EXPECT="edit and delete of the old test refused"
     OLDLOG="$CW/old.log"
     L old_probe; commit_all "test: an old test that already passes"
@@ -1297,7 +1297,7 @@ PY
     chk "the lock closed" one_lock_head_state closed
     pass ;;
   v1-13.1-caso-executado-que-falha-bloqueia)
-    # Item 13, regra 1 (spec f643e28): o filtro e por arquivo; um caso executado que falha bloqueia, mesmo que passasse no RED.
+    # Item 13, rule 1 (spec f643e28): the filter is per file; an executed case that fails blocks, even if it passed at RED.
     EXPECT="refused, lock open; accepted once fixed"
     L legacy_file; commit_all "chore: a file the tests read"
     setup_init
@@ -1314,7 +1314,7 @@ PY
     chk "the lock closed" one_lock_head_state closed
     pass ;;
   v1-13.1-caso-pulado-no-red-que-passa-a-falhar-bloqueia)
-    # Item 13, regra 1: um caso executado que falha bloqueia; vale tambem para o que estava pulado no RED (nem em failing_at_red, nem entre os que passavam) e a flag do produto o liga.
+    # Item 13, rule 1: an executed case that fails blocks; this also holds for one skipped at RED (neither in failing_at_red nor among the passing ones) that a product flag turns on.
     EXPECT="refused, lock open"
     L flag_off; commit_all "chore: a product flag"
     setup_init
@@ -1328,7 +1328,7 @@ PY
     chk "the lock stays open" one_lock_head_state open
     pass ;;
   v1-13.1-mesmo-nome-em-dois-arquivos)
-    # Item 13, regra 1: o filtro e pelo arquivo (no Go, pelo pacote), nao pelo nome do caso; o caso homonimo de outro arquivo, que passava no RED, nao roda.
+    # Item 13, rule 1: the filter is by file (in Go, by package), not by case name; the same-name case in another file, which passed at RED, does not run.
     EXPECT="accepted, lock closed, same-name case never ran; ci refuses"
     OLDLOG="$CW/old.log"
     L same_name; commit_all "test: a passing test and a failing one with the same name"
@@ -1345,7 +1345,7 @@ PY
     must_refuse "shipcraft ci runs everything and sees the broken case" cmd shipcraft ci --base "$BASE"
     pass ;;
   v1-13.1-mesmo-arquivo-em-duas-pastas)
-    # Item 13, regra 1: o caso se liga ao arquivo pelo caminho inteiro, nao por um pedaco do nome: dois arquivos de teste com o mesmo nome em pastas diferentes (no Go, pacote e pacote aninhado) nao se confundem.
+    # Item 13, rule 1: a case is tied to its file by the full path, not part of the name: two test files with the same name in different folders (in Go, a package and a nested package) are not confused.
     EXPECT="accepted, lock closed, other folder's test never ran; ci refuses"
     OLDLOG="$CW/old.log"
     L two_dirs; commit_all "test: two test files with the same name in different folders"
@@ -1362,42 +1362,42 @@ PY
     must_refuse "shipcraft ci runs everything and sees the broken case" cmd shipcraft ci --base "$BASE"
     pass ;;
   v1-13.1-jest-teste-antigo-nao-executa)
-    # Item 13, regra 1, com jest 29 + jest-junit e o rootDir padrao: o teste antigo (passava no RED) fica travado e nao roda no hook.
+    # Item 13, rule 1, with jest 29 + jest-junit and the default rootDir: the old test (passing at RED) stays locked and does not run in the hook.
     EXPECT="accepted, lock closed, old test never ran; ci refuses"
     jest_old_case "" ;;
   v1-13.1-jest-rootdir-src-teste-antigo-nao-executa)
-    # Item 13, regra 1, com jest.config.js `rootDir: "src"` e os testes em src/: a exclusao do arquivo antigo vale para o caminho que o jest ve, nao o da suite.
+    # Item 13, rule 1, with jest.config.js `rootDir: "src"` and the tests in src/: excluding the old file works on the path jest sees, not the suite's.
     EXPECT="accepted, lock closed, old test never ran; ci refuses"
     jest_old_case rootdir-src ;;
   v1-13.1-junit-prefix-nao-recusa)
-    # Item 13, regra 1 (spec df931ba): um erro no mapa caso -> arquivo custa tempo, nunca recusa falsa; com `--junit-prefix` os ids ganham um prefixo e o teste antigo quebrado nao pode recusar o GREEN.
+    # Item 13, rule 1 (spec df931ba): an error in the case -> file map costs time, never a false refusal; with `--junit-prefix` ids get a prefix and the broken old test cannot refuse GREEN.
     EXPECT="accepted, lock closed; ci refuses"
     python_map_case prefix_cfg ;;
   v1-13.1-doctest-nao-recusa)
-    # Item 13, regra 1 (spec df931ba): so os casos que falhavam no RED acham os arquivos do RED (doctest nao conta); com `--doctest-modules` o teste antigo quebrado nao recusa o GREEN.
+    # Item 13, rule 1 (spec df931ba): only the cases failing at RED find the RED files (doctest does not count); with `--doctest-modules` the broken old test does not refuse GREEN.
     EXPECT="accepted, lock closed; ci refuses"
     python_map_case doctest_cfg ;;
   v1-13.1-erro-de-coleta-fora-do-red-nao-recusa)
-    # Item 13, regra 1 (spec 50f33ed): um erro fora dos arquivos do RED (teste antigo que nao coleta ou nao compila) nunca bloqueia; os casos do RED rodam do mesmo jeito e o erro vai para o CI.
+    # Item 13, rule 1 (spec 50f33ed): an error outside the RED files (an old test that does not collect or compile) never blocks; the RED cases run anyway and the error goes to CI.
     EXPECT="accepted, lock closed; ci refuses"
     collect_case "" ;;
   v1-13.1-erro-de-coleta-com-arquivos-no-comando-nao-recusa)
-    # Item 13, regra 1 (spec 50f33ed): o mesmo, com os arquivos de teste nomeados no test_command (o pytest coleta o que esta nos argumentos).
+    # Item 13, rule 1 (spec 50f33ed): the same, with the test files named in test_command (pytest collects what is in its arguments).
     EXPECT="accepted, lock closed; ci refuses"
     collect_case explicit_cfg ;;
   v1-13.1-verifica-fora-do-hook)
-    # Item 13, regra 1 (spec dfe780d): a checagem do projeto inteiro (tsc, go vet) nao roda no hook; um teste antigo que deixa de compilar por causa do produto nao recusa o GREEN, e o shipcraft ci a pega.
+    # Item 13, rule 1 (spec dfe780d): the whole-project check (tsc, go vet) does not run in the hook; an old test that stops compiling because of the product does not refuse GREEN, and shipcraft ci catches it.
     EXPECT="accepted, lock closed; ci refuses"
     if [ "$TL" = node ]; then collect_case "" ts_old ts_break; else collect_case "" collect_old collect_break; fi ;;
   v1-13.1-init-escreve-verifica)
-    # Item 13, regra 1 (spec dfe780d): o init escreve o tsc --noEmit (Node) ou o go vet (Go) em `verifica`, e o test_command nao os traz mais.
+    # Item 13, rule 1 (spec dfe780d): init writes tsc --noEmit (Node) or go vet (Go) in `verifica`, and test_command no longer carries them.
     EXPECT="verifica holds tsc/go vet; test_command does not"
     must_accept "shipcraft init" cmd shipcraft init
     chk "verifica has the whole-project check and test_command does not" H verifica-check .shipcraft.toml "$(verifica_needle)"
     pass ;;
   v1-13.1-init-verifica-com-traco)
-    # Item 13 + item 12: numa suite com tsconfig o `verifica` leva o npx com -- (npx --no -- tsc --noEmit) e o comando da suite fica so com o runner.
-    EXPECT="verifica has npx --no -- tsc --noEmit; comando has no tsc"
+    # Item 13 + item 12: in a suite with a tsconfig, `verifica` carries npx with -- (npx --no -- tsc --noEmit) and the suite's command keeps only the runner.
+    EXPECT="verifica has npx --no -- tsc --noEmit; command has no tsc"
     ws="$CW/ws"; mkdir -p "$ws/packages/api/src" "$ws/packages/lib/src"; cd "$ws" || exit 1
     git init -q -b main
     printf '{"name":"root","private":true,"workspaces":["packages/*"]}\n' > package.json
@@ -1408,11 +1408,11 @@ PY
     printf 'import { it } from "vitest";\nit("lib", () => {});\n' > packages/lib/src/c.spec.ts
     git add -A && git commit -q -m init
     must_accept "shipcraft init in a workspace with typescript" cmd shipcraft init
-    chk "the api suite has verifica = npx --no -- tsc --noEmit and no comando with tsc" H verifica-check .shipcraft.toml 'npx --no -- tsc --noEmit'
+    chk "the api suite has verifica = npx --no -- tsc --noEmit and no command with tsc" H verifica-check .shipcraft.toml 'npx --no -- tsc --noEmit'
     chk "every npx the init wrote keeps the -- of item 12" H npx-check .shipcraft.toml .github/workflows/shipcraft.yml .git/hooks/commit-msg
     pass ;;
   v1-13.1-ci-roda-verifica)
-    # Item 13, regra 1 (spec dfe780d): o shipcraft ci roda `verifica` e depois o test_command; um erro de tipo (tsc) ou de vet (go) com os testes passando recusa.
+    # Item 13, rule 1 (spec dfe780d): shipcraft ci runs `verifica` and then test_command; a type error (tsc) or vet error (go) with passing tests refuses.
     EXPECT="hook accepts; ci refuses on the whole-project check alone"
     setup_red
     L implement; L type_error
@@ -1421,7 +1421,7 @@ PY
     must_refuse "shipcraft ci runs verifica and refuses" cmd shipcraft ci --base "$BASE"
     pass ;;
   v1-13.1-arquivos-no-comando-teste-antigo-nao-executa)
-    # Item 13, regra 1: com os arquivos de teste nomeados no test_command, o hook ainda so executa os arquivos do RED; o teste antigo que coleta bem (e passa) nao roda.
+    # Item 13, rule 1: with the test files named in test_command, the hook still runs only the RED files; the old test that collects fine (and passes) does not run.
     EXPECT="accepted, lock closed, old test never ran"
     OLDLOG="$CW/old.log"
     L old_probe; commit_all "test: an old test that already passes"
@@ -1438,7 +1438,7 @@ PY
     chk "the hook did not execute the old test named in the command" eq "$(old_runs)" 0
     pass ;;
   v1-13.2-fecha-so-com-todos-os-do-red)
-    # Item 13, regra 2: a trava fecha at todos os casos de failing_at_red passam (dois arquivos, um com nomes de caso cheios de metacaracteres), sem nenhum nao coletado.
+    # Item 13, rule 2: the lock closes when every case in failing_at_red passes (two files, one with case names full of metacharacters), with none left uncollected.
     EXPECT="open until both RED files pass, then closed"
     OLDLOG="$CW/old.log"
     L old_probe; commit_all "test: an old test that already passes"
@@ -1460,7 +1460,7 @@ PY
     pass ;;
 
   v1-14.1-arquivo-solto-teste-com-git)
-    # Item 14: o hook julga um checkout git; o teste que chama o git (rev-parse HEAD) passa mesmo com um arquivo solto na arvore.
+    # Item 14: the hook judges a git checkout; the test that calls git (rev-parse HEAD) passes even with a loose file in the tree.
     EXPECT="accepted, lock closed"
     setup_init
     L stub; L git_test_basic
@@ -1474,7 +1474,7 @@ PY
     chk "the loose file stayed out of the commit" sh -c "! git ls-tree -r --name-only HEAD | grep -q nota-solta"
     pass ;;
   v1-14.1-primeiro-red-sem-commit)
-    # Item 14: antes do primeiro commit a copia tambem e um repositorio git, com o indice como conteudo; o caso que passa no RED e chama `git ls-files` continua passando com um arquivo solto.
+    # Item 14: before the first commit the copy is also a git repository, with the index as content; the case that passes at RED and calls `git ls-files` keeps passing with a loose file.
     EXPECT="first RED accepted with a loose file; GREEN closes"
     [ -d .git ] && [ "$(pwd)" = "$T" ] || fail "harness: not in the case's project"
     rm -rf .git; git init -q -b main || fail "harness: git init"
@@ -1494,7 +1494,7 @@ PY
     chk "the loose file stayed out of the commits" sh -c "! git ls-tree -r --name-only HEAD | grep -q nota-solta"
     pass ;;
   v1-14.1-copia-com-historia-e-ci-na-arvore-suja)
-    # Item 14 (borda): a copia e um checkout de verdade (historia e arquivos rastreados, nao um git init de um retrato), no hook e no shipcraft ci com a arvore suja.
+    # Item 14 (edge): the copy is a real checkout (history and tracked files, not a git init of a snapshot), in the hook and in shipcraft ci with a dirty tree.
     EXPECT="accepted; ci accepted with a dirty tree"
     setup_init
     L stub; L git_test_deep
@@ -1509,7 +1509,7 @@ PY
     pass ;;
 
   v1-12.1-npx-tsc-com-traco)
-    # Item 12: o init escreve `npx --no -- tsc --noEmit`; o tsc so confere e nao grava build na arvore (o npm 11 engole o --noEmit sem o --).
+    # Item 12: init writes `npx --no -- tsc --noEmit`; tsc only checks and writes no build into the tree (npm 11 swallows --noEmit without the --).
     EXPECT="npx --no -- tsc --noEmit; no build output"
     ws_ts_project
     must_accept "shipcraft init in a workspace with typescript" cmd shipcraft init
@@ -1527,7 +1527,7 @@ PY
     chk "the hook wrote no build output either" no_build_output
     pass ;;
   v1-12.1-todo-npx-com-traco)
-    # Item 12 (borda): todo comando com npx que o init escreve (tsc, vitest, jest, em qualquer suite) leva o -- antes dos argumentos da ferramenta.
+    # Item 12 (edge): every npx command init writes (tsc, vitest, jest, in any suite) has the -- before the tool's arguments.
     EXPECT="every npx has -- before the tool args"
     ws="$CW/ws"; mkdir -p "$ws/packages/api/src" "$ws/packages/web/src" "$ws/packages/lib/src"; cd "$ws" || exit 1
     git init -q -b main
@@ -1547,7 +1547,7 @@ PY
     pass ;;
 
   v1-9.1-init-pnpm)
-    # Item 9, regra 1: o init detecta pnpm-workspace.yaml e escreve uma suite por pacote com testes.
+    # Item 9, rule 1: init detects pnpm-workspace.yaml and writes one suite per package with tests.
     EXPECT="one suite per package with tests"
     ws="$CW/ws"; mkdir -p "$ws/packages/api/src" "$ws/packages/web/src" "$ws/packages/docs"; cd "$ws" || exit 1
     git init -q -b main
@@ -1564,7 +1564,7 @@ PY
     chk "one [[suite]] per package with tests, named after the folder" eq "$(H toml-suites .shipcraft.toml | sort)" "$(printf 'api\tpackages/api\nweb\tpackages/web')"
     pass ;;
   v1-9.1-init-workspaces-do-package-json)
-    # Item 9, regra 1: o init detecta "workspaces" no package.json.
+    # Item 9, rule 1: init detects "workspaces" in package.json.
     EXPECT="one suite per package with tests"
     ws="$CW/ws"; mkdir -p "$ws/packages/api/src" "$ws/packages/web/src" "$ws/packages/docs"; cd "$ws" || exit 1
     git init -q -b main
@@ -1580,7 +1580,7 @@ PY
     chk "one [[suite]] per package with tests, named after the folder" eq "$(H toml-suites .shipcraft.toml | sort)" "$(printf 'api\tpackages/api\nweb\tpackages/web')"
     pass ;;
   v1-9.1-init-go-work)
-    # Item 9, regra 1: o init detecta go.work e escreve uma suite por modulo com testes.
+    # Item 9, rule 1: init detects go.work and writes one suite per module with tests.
     EXPECT="one suite per module with tests"
     ws="$CW/ws"; mkdir -p "$ws/svc/a" "$ws/svc/b" "$ws/svc/c"; cd "$ws" || exit 1
     git init -q -b main
@@ -1615,7 +1615,7 @@ PY
     chk "the init says how to turn it on (review = \"local\")" out_has 'review = "local"'
     pass ;;
   v1-1.2-revisao-github-recusada)
-    # Item 1, regra 2: review = "github" e recusado em tres linhas dizendo que ainda nao existe, antes de qualquer escrita.
+    # Item 1, rule 2: review = "github" is refused in three lines saying it does not exist yet, before any write.
     EXPECT="refused, nothing published"
     v1_start codex; NV=1
     CFGS='execution|review|"github"'
@@ -1628,7 +1628,7 @@ PY
     chk "the branch was not pushed" eq "$(osha "$BR")" ""
     pass ;;
   v1-1.2-valor-invalido)
-    # Item 1, regra 2: so local, github e desligado valem em ci; outro valor e recusado em tres linhas.
+    # Item 1, rule 2: only local, github and off are valid for ci; any other value is refused in three lines.
     EXPECT="refused, nothing published"
     v1_start codex; NV=1
     CFGS='execution|ci|"nuvem"'
@@ -1639,7 +1639,7 @@ PY
     chk "nothing was written to GitHub" eq "$(nwrites)" 0
     pass ;;
   v1-1.3-base-config-desliga)
-    # Item 1, regra 3: o PR e julgado pela config do branch base; o PR que desliga a revisao e troca o revisor nao tem efeito.
+    # Item 1, rule 3: the PR is judged by the base branch's config; a PR that turns review off and swaps the reviewer has no effect.
     EXPECT="base config wins: codex reviews"
     v1_start codex
     pr_main
@@ -1651,11 +1651,11 @@ PY
     HEAD=$(git rev-parse HEAD)
     chk "the review of the base config (codex) ran once" eq "$(rev_n codex)" 1
     chk "the reviewer the PR asked for (claude) did not run" eq "$(rev_n claude)" 0
-    chk "shipcraft/review is a real verdict, not 'desligada'" nomatch 'off' "$(st_desc "$HEAD" shipcraft/review)"
+    chk "shipcraft/review is a real verdict, not 'off'" nomatch 'off' "$(st_desc "$HEAD" shipcraft/review)"
     chk "shipcraft/review is success" eq "$(st_state "$HEAD" shipcraft/review)" success
     pass ;;
   v1-1.3-base-config-liga)
-    # Item 1, regra 3: a base tem a revisao desligada; o PR que a liga so vale depois de entrar na main.
+    # Item 1, rule 3: the base has review off; a PR that turns it on only counts after it reaches main.
     EXPECT="base config wins: review stays off"
     v1_start codex
     CFGS='execution|review|"off"'
@@ -1733,7 +1733,7 @@ PY
 
   # ======================================================== core: item 3
   v1-3.1-push-e-pr)
-    # Item 3, regra 1: shipcraft pr faz push do branch e abre o PR (titulo e corpo dados), ou atualiza o que ja existe.
+    # Item 3, rule 1: shipcraft pr pushes the branch and opens the PR (given title and body), or updates the existing one.
     EXPECT="pushed, 1 PR, updated on rerun"
     v1_start codex
     CFGS='execution|review|"off"'
@@ -1752,7 +1752,7 @@ PY
     chk "the new commit was pushed" eq "$(osha "$BR")" "$(git rev-parse HEAD)"
     pass ;;
   v1-3.2-ci-local-publica-status)
-    # Item 3, regra 2: com ci = local, o shipcraft pr roda o CI nesta maquina e publica shipcraft/ci no commit do HEAD.
+    # Item 3, rule 2: with ci = local, shipcraft pr runs CI on this machine and publishes shipcraft/ci on the HEAD commit.
     EXPECT="suite ran once, shipcraft/ci success on HEAD"
     v1_start codex
     CFGS='execution|review|"off"'
@@ -1764,7 +1764,7 @@ PY
     chk "shipcraft/ci is success on the HEAD sha" eq "$(st_state "$HEAD" shipcraft/ci)" success
     pass ;;
   v1-3.2-ci-falha-sem-revisao)
-    # Item 3, regras 2 e 3: CI vermelho publica shipcraft/ci sem success e a revisao nao roda.
+    # Item 3, rules 2 and 3: red CI publishes shipcraft/ci without success and the review does not run.
     EXPECT="shipcraft/ci not success, no review"
     v1_start codex
     FAILING=1; pr_main; pr_feature
@@ -1775,7 +1775,7 @@ PY
     chk "shipcraft/review is not success" ne "$(st_state "$HEAD" shipcraft/review)" success
     pass ;;
   v1-3.3-revisao-local-status-e-comentario)
-    # Item 3, regra 3 (e item 1, tabela): com o CI verde a revisao local roda, publica shipcraft/review e o comentario; a camada aparece como "nesta maquina".
+    # Item 3, rule 3 (and item 1, table): with green CI the local review runs, publishes shipcraft/review and the comment; the layer shows as "on this machine".
     EXPECT="review ran; status + comment; 'on this machine'"
     v1_start codex
     pr_main; pr_feature
@@ -1789,7 +1789,7 @@ PY
     chk "a local layer shows as 'on this machine' (output, comment, PR text or status)" shown_local
     pass ;;
   v1-3.4-ci-github-nada-local)
-    # Item 3, regra 4: com ci = github nada roda local e o shipcraft nao publica shipcraft/ci (quem publica e o workflow).
+    # Item 3, rule 4: with ci = github nothing runs locally and shipcraft does not publish shipcraft/ci (the workflow does).
     EXPECT="no local suite, no shipcraft/ci"
     v1_start codex
     CFGS='execution|ci|"github"
@@ -1801,7 +1801,7 @@ execution|review|"off"'
     chk "shipcraft published no shipcraft/ci status" eq "$(H st-ctx-count "$ST" shipcraft/ci)" 0
     pass ;;
   v1-3.5-desligado-publica-success)
-    # Item 3, regra 5: camada desligada publica o status com success e a descricao "off in .shipcraft.toml".
+    # Item 3, rule 5: a layer that is off publishes the status as success with the description "off in .shipcraft.toml".
     EXPECT="both statuses success + 'off in .shipcraft.toml'"
     v1_start codex
     CFGS='execution|ci|"off"
@@ -1818,29 +1818,29 @@ execution|review|"off"'
     chk "no reviewer ran" eq "$(rev_n)" 0
     pass ;;
   v1-3.5-desligado-so-a-revisao)
-    # Item 3, regra 5: so a revisao desligada; o CI roda de verdade e a descricao dele nao diz "desligada".
-    EXPECT="ci real, revisao desligada"
+    # Item 3, rule 5: only review off; CI really runs and its description does not say "off".
+    EXPECT="real ci, review off"
     v1_start codex
     CFGS='execution|review|"off"'
     pr_main; pr_feature
     shipcraft_pr
     HEAD=$(git rev-parse HEAD)
     chk "the suite ran" eq "$(probe_runs)" 1
-    chk "shipcraft/ci is success and does not say 'desligada'" nomatch 'off' "$(st_desc "$HEAD" shipcraft/ci)"
+    chk "shipcraft/ci is success and does not say 'off'" nomatch 'off' "$(st_desc "$HEAD" shipcraft/ci)"
     chk "shipcraft/review says 'off in .shipcraft.toml'" match 'off in \.shipcraft\.toml' "$(st_desc "$HEAD" shipcraft/review)"
     chk "shipcraft/review is success" eq "$(st_state "$HEAD" shipcraft/review)" success
     pass ;;
   v1-3.6-resumo-de-medicao-no-pr)
-    # Item 3, regra 6 (e item 10, regra 2): o shipcraft pr posta no PR o resumo do branch: camadas, secs e tokens.
+    # Item 3, rule 6 (and item 10, rule 2): shipcraft pr posts the branch summary to the PR: layers, secs and tokens.
     EXPECT="summary posted in the PR"
     v1_start codex
     pr_main; pr_feature
     shipcraft_pr
     chk "shipcraft pr succeeded" rc_zero
-    chk "a text posted to the PR covers hook, ci, revisao and tokens" eq "$(H has-summary "$ST")" OK
+    chk "a text posted to the PR covers hook, ci, review and tokens" eq "$(H has-summary "$ST")" OK
     pass ;;
   v1-3.7-revisao-local-sem-publicar)
-    # Item 3, regra 7: shipcraft review revisa o HEAD local, mostra o veredito e nao publica nada (nem push).
+    # Item 3, rule 7: shipcraft review reviews the local HEAD, shows the verdict and publishes nothing (no push either).
     EXPECT="verdict shown, nothing published"
     v1_start codex
     pr_main; pr_feature
@@ -1859,7 +1859,7 @@ execution|review|"off"'
     chk "still nothing published" eq "$(nwrites)" 0
     pass ;;
   v1-3.7-revisao-pr-copia-isolada)
-    # Item 3, regra 7: shipcraft review --pr N revisa um PR que nao nasceu do shipcraft pr numa copia isolada e publica o status.
+    # Item 3, rule 7: shipcraft review --pr N reviews a PR not born from shipcraft pr in an isolated copy and publishes the status.
     EXPECT="isolated copy, shipcraft/review on the PR head"
     v1_start codex
     pr_main; pr_feature
@@ -1877,7 +1877,7 @@ execution|review|"off"'
     chk "the PR body reached the reviewer" match 'PR-BODY-MARKER-91b' "$(H rev-brief "$ST")"
     pass ;;
   v1-3.7-revisao-pr-fork-recusado)
-    # Item 3, regra 7: PR de fork e recusado na v1, em tres linhas, sem revisar nem publicar.
+    # Item 3, rule 7: a fork PR is refused in v1, in three lines, without reviewing or publishing.
     EXPECT="refused, nothing reviewed or published"
     v1_start codex
     pr_main; pr_feature
@@ -1894,7 +1894,7 @@ execution|review|"off"'
 
   # ======================================================== core: item 4
   v1-4.1-brief-completa)
-    # Item 4, regra 1: a brief leva a spec do projeto ([review] spec), o corpo do PR, o diff e a bateria.
+    # Item 4, rule 1: the brief carries the project spec ([review] spec), the PR body, the diff and the battery.
     EXPECT="brief has spec, body, diff, battery"
     v1_start codex
     CFGS='review|spec|"docs/spec-produto.md"'
@@ -1908,7 +1908,7 @@ execution|review|"off"'
     chk "the brief carries the battery (a test the PR did not touch)" match 'test_bateria_marker_2c7' "$BRIEF"
     pass ;;
   v1-4.2-veredito-changes-requested)
-    # Item 4, regra 2: "CHANGES REQUESTED at <sha>" vira shipcraft/review failure, com o comentario do revisor.
+    # Item 4, rule 2: "CHANGES REQUESTED at <sha>" becomes shipcraft/review failure, with the reviewer's comment.
     EXPECT="shipcraft/review failure + comment"
     v1_start codex
     pr_main; pr_feature
@@ -1920,7 +1920,7 @@ execution|review|"off"'
     chk "the findings were posted as a comment" eq "$(H text-has "$ST" comment 'REVIEW-FINDING-MARKER-77c')" OK
     pass ;;
   v1-4.2-veredito-fora-da-primeira-linha)
-    # Item 4, regras 2 e 3: a primeira linha tem que ser o veredito; qualquer outra coisa e erro, nunca aprovacao.
+    # Item 4, rules 2 and 3: the first line must be the verdict; anything else is an error, never an approval.
     EXPECT="shipcraft/review error"
     v1_start codex
     pr_main; pr_feature
@@ -1928,7 +1928,7 @@ execution|review|"off"'
     shipcraft_pr
     review_failed_closed ;;
   v1-4.2-veredito-com-linha-em-branco-antes)
-    # Item 4, regras 2 e 3: a primeira linha da saida E o veredito; uma linha em branco antes dele e "qualquer outra coisa": error.
+    # Item 4, rules 2 and 3: the first line of output IS the verdict; a blank line before it is "anything else": error.
     EXPECT="shipcraft/review error"
     v1_start codex
     pr_main; pr_feature
@@ -1936,7 +1936,7 @@ execution|review|"off"'
     shipcraft_pr
     review_failed_closed ;;
   v1-4.2-veredito-com-texto-depois-da-sha)
-    # Item 4, regras 2 e 3: o veredito e exatamente "APPROVE at <sha>"; texto depois da sha e "qualquer outra coisa": error.
+    # Item 4, rules 2 and 3: the verdict is exactly "APPROVE at <sha>"; text after the sha is "anything else": error.
     EXPECT="shipcraft/review error"
     v1_start codex
     pr_main; pr_feature
@@ -1944,7 +1944,7 @@ execution|review|"off"'
     shipcraft_pr
     review_failed_closed ;;
   v1-1.3-comando-do-runner-vem-da-base)
-    # Item 1, regra 3: o PR e julgado pela config do branch base tambem no comando da suite: o PR que filtra o teste que falha nao ganha shipcraft/ci verde.
+    # Item 1, rule 3: the PR is judged by the base branch's config for the suite command too: a PR that filters out the failing test does not get a green shipcraft/ci.
     EXPECT="shipcraft/ci not success; base command used"
     v1_start codex
     CFGS='execution|review|"off"'
@@ -1958,7 +1958,7 @@ execution|review|"off"'
     chk "shipcraft/ci is failure or error: the base command ran the failing test" match '^(failure|error)$' "$(st_state "$HEAD" shipcraft/ci)"
     pass ;;
   v1-1.3-config-da-ponta-do-branch-base)
-    # Item 1, regra 3: a config do branch base e a da PONTA dele (origin/<base>), nao a do merge-base: se a main passou a rodar todos os testes, o branch que nao rebaseou nao ganha shipcraft/ci verde.
+    # Item 1, rule 3: the base branch's config is the one at its TIP (origin/<base>), not at the merge-base: if main now runs every test, a branch that did not rebase does not get a green shipcraft/ci.
     EXPECT="shipcraft/ci not success; tip of base used"
     v1_start codex
     CFGS='execution|review|"off"
@@ -1975,7 +1975,7 @@ execution|review|"off"'
     chk "shipcraft/ci is failure or error: main's current command ran the failing test" match '^(failure|error)$' "$(st_state "$HEAD" shipcraft/ci)"
     pass ;;
   v1-4.3-recusa-do-revisor)
-    # Item 4, regra 3: o revisor que recusa (texto de recusa, sem veredito) vira error, uma so tentativa.
+    # Item 4, rule 3: a reviewer that refuses (refusal text, no verdict) becomes error, a single attempt.
     EXPECT="shipcraft/review error, no retry"
     v1_start codex
     pr_main; pr_feature
@@ -1983,7 +1983,7 @@ execution|review|"off"'
     shipcraft_pr
     review_failed_closed ;;
   v1-4.3-saida-nao-zero)
-    # Item 4, regra 3: cota estourada (saida diferente de zero) vira error, uma so tentativa.
+    # Item 4, rule 3: quota exceeded (non-zero exit) becomes error, a single attempt.
     EXPECT="shipcraft/review error, no retry"
     v1_start codex
     pr_main; pr_feature
@@ -1991,7 +1991,7 @@ execution|review|"off"'
     shipcraft_pr
     review_failed_closed ;;
   v1-4.3-tempo-esgotado)
-    # Item 4, regra 3: o revisor que passa de [review] tempo_max (segundos) e cortado e vira error.
+    # Item 4, rule 3: a reviewer that exceeds [review] timeout (seconds) is cut off and becomes error.
     EXPECT="shipcraft/review error after tempo_max"
     v1_start codex
     CFGS='review|timeout|2'
@@ -2003,7 +2003,7 @@ execution|review|"off"'
     chk "shipcraft pr gave up long before the reviewer would have answered (took ${ELAPSED}s)" test "$ELAPSED" -lt 30
     review_failed_closed ;;
   v1-4.3-pending-velho-refeito)
-    # Item 4, regra 3: um status pending mais velho que tempo_max e refeito no proximo shipcraft pr.
+    # Item 4, rule 3: a pending status older than timeout is redone on the next shipcraft pr.
     EXPECT="stale pending redone"
     v1_start codex
     CFGS='review|timeout|60'
@@ -2015,7 +2015,7 @@ execution|review|"off"'
     chk "shipcraft/review is now success" eq "$(st_state "$HEAD" shipcraft/review)" success
     pass ;;
   v1-4.4-patch-id-reaproveita)
-    # Itens 4.4 e 35.3: rebase com as same file versions reaproveita; versões diferentes exigem revisão nova.
+    # Items 4.4 and 35.3: a rebase with the same file versions reuses the verdict; different versions need a new review.
     EXPECT="verdict reused after rebase; redone after a change"
     v1_start codex
     pr_main; pr_feature
@@ -2041,7 +2041,7 @@ execution|review|"off"'
 
   # ======================================================== core: item 5
   v1-5.1-merge-com-os-dois)
-    # Item 5, regra 1: shipcraft merge faz o merge com shipcraft/ci e shipcraft/review em success no HEAD do PR.
+    # Item 5, rule 1: shipcraft merge merges with shipcraft/ci and shipcraft/review as success on the PR's HEAD.
     EXPECT="merged"
     merge_setup
     seed_ok "$HEADSHA" shipcraft/ci; seed_ok "$HEADSHA" shipcraft/review
@@ -2051,33 +2051,33 @@ execution|review|"off"'
     chk "the PR is merged" eq "$(H pr-field "$ST" "$PRN" state)" MERGED
     pass ;;
   v1-5.1-merge-sem-revisao-recusa)
-    # Item 5, regra 1: sem shipcraft/review em success o merge e recusado em tres linhas.
+    # Item 5, rule 1: without shipcraft/review as success the merge is refused in three lines.
     EXPECT="refused, not merged"
     merge_setup
     seed_ok "$HEADSHA" shipcraft/ci
     merge_must_refuse ;;
   v1-5.1-merge-revisao-failure-recusa)
-    # Item 5, regra 1: shipcraft/review em failure (CHANGES REQUESTED) tambem recusa o merge.
+    # Item 5, rule 1: shipcraft/review as failure (CHANGES REQUESTED) also refuses the merge.
     EXPECT="refused, not merged"
     merge_setup
     seed_ok "$HEADSHA" shipcraft/ci
     H seed-status "$ST" "$HEADSHA" shipcraft/review failure "CHANGES REQUESTED" 0
     merge_must_refuse ;;
   v1-5.1-merge-sem-ci-recusa)
-    # Item 5, regra 1: sem shipcraft/ci em success o merge e recusado.
+    # Item 5, rule 1: without shipcraft/ci as success the merge is refused.
     EXPECT="refused, not merged"
     merge_setup
     seed_ok "$HEADSHA" shipcraft/review
     merge_must_refuse ;;
   v1-5.1-merge-status-de-outro-commit)
-    # Item 5, regra 1: os dois success tem que estar no HEAD do PR; success num commit antigo nao vale.
+    # Item 5, rule 1: both successes must be on the PR's HEAD; success on an old commit does not count.
     EXPECT="refused, not merged"
     merge_setup
     OLD=$(git rev-parse "$BR~1")
     seed_ok "$OLD" shipcraft/ci; seed_ok "$OLD" shipcraft/review
     merge_must_refuse ;;
   v1-5.1-merge-camada-desligada-nao-exige)
-    # Item 1 (tabela) e item 5, regra 1: camada desligada na config da base nao e exigida pelo portao.
+    # Item 1 (table) and item 5, rule 1: a layer that is off in the base config is not required by the gate.
     EXPECT="merged without shipcraft/review"
     CFGS='execution|review|"off"'
     merge_setup
@@ -2087,7 +2087,7 @@ execution|review|"off"'
     chk "the PR is merged" eq "$(H pr-field "$ST" "$PRN" state)" MERGED
     pass ;;
   v1-5.2-sem-revisao-com-motivo)
-    # Item 5, regra 2: --no-review "<reason>" faz o merge sem a revisao e o reason vai para o PR e para a medicao.
+    # Item 5, rule 2: --no-review "<reason>" merges without review and the reason goes to the PR and to the measurement.
     EXPECT="merged; reason in the PR and in the jsonl"
     merge_setup
     seed_ok "$HEADSHA" shipcraft/ci
@@ -2098,7 +2098,7 @@ execution|review|"off"'
     chk "the reason went to the measurement (.git/shipcraft/runs.jsonl)" grep -q 'motivo-sem-revisao-4b2' .git/shipcraft/runs.jsonl
     pass ;;
   v1-5.2-sem-revisao-nao-vale-para-o-ci)
-    # Item 5, regra 2: o CI nao tem a saida --no-review.
+    # Item 5, rule 2: CI has no --no-review way out.
     EXPECT="refused, not merged"
     merge_setup
     seed_ok "$HEADSHA" shipcraft/review
@@ -2117,7 +2117,7 @@ execution|review|"off"'
     chk "branch protection was written with shipcraft/ci and shipcraft/review" eq "$(H protect-ok "$ST")" OK
     pass ;;
   v1-5.3-init-github-plano-gratis)
-    # Item 5, regras 3 e 4: no plano gratis (403) o init --github termina bem e nada fica marcado como obrigatorio.
+    # Item 5, rules 3 and 4: on the free plan (403) init --github ends fine and nothing is marked required.
     EXPECT="init ok, nothing marked required"
     v1_start codex
     remote_setup
@@ -2126,7 +2126,7 @@ execution|review|"off"'
     chk "no protection was set" eq "$(cat "$ST/protection")" 403
     pass ;;
   v1-5.4-status-nivel-de-protecao)
-    # Item 5, regra 4: shipcraft status diz o nivel real de protecao numa linha (sem protecao: o portao e o shipcraft merge).
+    # Item 5, rule 4: shipcraft status states the real protection level in one line (no protection: the gate is shipcraft merge).
     EXPECT="one honest line per level"
     v1_start codex
     pr_main
@@ -2141,7 +2141,7 @@ execution|review|"off"'
     chk "it no longer says there is no protection" clean_out_hasnt 'no branch protection'
     pass ;;
   v1-5.5-ci-na-main-avisa-merges)
-    # Item 5, regra 5: shipcraft ci na main avisa (sem recusar) dos merges que pularam o portao; cada um entra como escape na medicao.
+    # Item 5, rule 5: shipcraft ci on main warns (without refusing) about merges that skipped the gate; each one is an escape in the measurement.
     EXPECT="warns about PR 2 only; escape row"
     v1_start codex
     pr_main
@@ -2153,8 +2153,8 @@ execution|review|"off"'
     done
     git checkout -q main
     S1=$(git rev-parse br-1); S3=$(git rev-parse br-3)
-    seed_ok "$S1" shipcraft/ci; seed_ok "$S1" shipcraft/review      # PR 1: o caminho certo
-    seed_ok "$S3" shipcraft/ci                                 # PR 3: sem revisao, com --no-review
+    seed_ok "$S1" shipcraft/ci; seed_ok "$S1" shipcraft/review      # PR 1: the right path
+    seed_ok "$S3" shipcraft/ci                                 # PR 3: no review, with --no-review
     run_cmd TMO 120 shipcraft merge 1
     chk "PR 1 merged through shipcraft merge" rc_zero
     gh_quiet pr merge 2 --merge >> "$LOG" 2>&1 || fail "harness: merge of PR 2 outside the gate"
@@ -2172,7 +2172,7 @@ execution|review|"off"'
 
   # ======================================================== core: item 7
   v1-7.1-fila-um-slot)
-    # Item 7, regra 1: com slots = 1 (padrao), CI e revisao de projetos diferentes nunca rodam ao mesmo tempo.
+    # Item 7, rule 1: with slots = 1 (default), CI and review of different projects never run at the same time.
     EXPECT="max 1 execution at a time"
     queue_projects 2 "" 2.5 2
     queue_run_all
@@ -2180,7 +2180,7 @@ execution|review|"off"'
     chk "2 CI + 2 reviews ran, never two at a time" timeline_is 1 4
     pass ;;
   v1-7.1-fila-dois-slots)
-    # Item 7, regra 1: [machine] slots = 2 deixa duas execucoes juntas, nunca tres.
+    # Item 7, rule 1: [machine] slots = 2 allows two runs at once, never three.
     EXPECT="max 2 at a time"
     queue_projects 3 'machine|slots|2' 2.5 2
     mkdir -p "$HOME/.config/shipcraft"; printf '[machine]\nslots = 2\n' > "$HOME/.config/shipcraft/config.toml"
@@ -2189,7 +2189,7 @@ execution|review|"off"'
     chk "3 CI + 3 reviews ran, two at a time at most, and two at once did happen" timeline_is 2 6
     pass ;;
   v1-7.2-fila-posicao)
-    # Item 7, regra 2: quem espera na fila ve a posicao e o que esta rodando.
+    # Item 7, rule 2: whoever waits in the queue sees their position and what is running.
     EXPECT="waiting run shows queue position + the running one"
     queue_projects 2 "" 6 1
     ( queue_one alfa ) & PIDA=$!
@@ -2202,7 +2202,7 @@ execution|review|"off"'
     chk "it says what is running (the other project)" clean_out_has 'alfa'
     pass ;;
   v1-7.2-fila-tempo-libera)
-    # Item 7, regra 2: uma execucao que passa do secs maximo libera o slot para quem espera.
+    # Item 7, rule 2: a run that exceeds the maximum secs frees the slot for whoever waits.
     EXPECT="the next run starts after the timeout"
     queue_projects 2 'review|timeout|3' 0 0
     use_proj "$CW/proj/alfa" "$CW/stubs/alfa"; rev_cfg hang hang=40 timeline="$TLINE" name=alfa
@@ -2221,7 +2221,7 @@ execution|review|"off"'
     chk "beta's review is success" eq "$(st_state "$BH" shipcraft/review)" success
     pass ;;
   v1-7.2-ci-tempo-esgotado-libera)
-    # Item 7, regra 2 (spec 323bfc3): o CI local que passa de [execution] tempo_max_ci (segundos) e encerrado, vira shipcraft/ci error e libera o slot.
+    # Item 7, rule 2 (spec 323bfc3): local CI that exceeds [execution] ci_timeout (seconds) is stopped, becomes shipcraft/ci error and frees the slot.
     EXPECT="CI cut at tempo_max_ci; next run proceeds"
     PSL_ALFA=40
     queue_projects 2 'execution|ci_timeout|3' 0 0
@@ -2242,7 +2242,7 @@ execution|review|"off"'
     chk "beta's shipcraft/ci is success" eq "$(st_state "$BH" shipcraft/ci)" success
     pass ;;
   v1-3.4-ci-github-espera-success-e-revisa)
-    # Item 3, regra 4 (spec 323bfc3): com ci = github e revisao = local, o shipcraft pr espera o shipcraft/ci do GitHub no HEAD e, vindo success, roda a revisao.
+    # Item 3, rule 4 (spec 323bfc3): with ci = github and review = local, shipcraft pr waits for GitHub's shipcraft/ci on HEAD and, on success, runs the review.
     EXPECT="waits for shipcraft/ci success, then reviews"
     v1_start codex
     CFGS='execution|ci|"github"
@@ -2259,7 +2259,7 @@ execution|ci_timeout|60'
     chk "shipcraft did not publish shipcraft/ci itself (only the workflow's)" eq "$(H st-count "$ST" "$HEAD" shipcraft/ci)" 1
     pass ;;
   v1-3.4-ci-github-failure-nao-revisa)
-    # Item 3, regra 4 (spec 323bfc3): se o shipcraft/ci do GitHub no HEAD vem failure, a revisao local nao roda.
+    # Item 3, rule 4 (spec 323bfc3): if GitHub's shipcraft/ci on HEAD is failure, the local review does not run.
     EXPECT="no review when GitHub's shipcraft/ci is failure"
     v1_start codex
     CFGS='execution|ci|"github"
@@ -2274,7 +2274,7 @@ execution|ci_timeout|60'
     chk "shipcraft/review is not success" ne "$(st_state "$HEAD" shipcraft/review)" success
     pass ;;
   v1-3.4-ci-github-sem-status-nao-revisa)
-    # Item 3, regra 4 (spec 323bfc3): a espera tem limite (tempo_max_ci); sem o status a revisao nao roda e o shipcraft pr termina.
+    # Item 3, rule 4 (spec 323bfc3): the wait has a limit (ci_timeout); without the status the review does not run and shipcraft pr ends.
     EXPECT="gives up at tempo_max_ci, no review"
     v1_start codex
     CFGS='execution|ci|"github"
@@ -2290,10 +2290,10 @@ execution|ci_timeout|3'
     chk "shipcraft/review is not success" ne "$(st_state "$HEAD" shipcraft/review)" success
     pass ;;
   v1-7.3-hook-fora-da-fila)
-    # Item 7, regra 3: o hook nao entra na fila; roda mesmo com o slot ocupado por outro projeto.
+    # Item 7, rule 3: the hook does not queue; it runs even with the slot held by another project.
     EXPECT="hook commit runs while the slot is taken"
     queue_projects 1 "" 14 0
-    # o projeto "gama" so faz um ciclo RED/GREEN pelo hook
+    # project "gama" only does a RED/GREEN cycle through the hook
     G="$CW/proj/gama"; copy_base "$WORK/base/python" "$G"; stubs_for "$CW/stubs/gama" codex
     use_proj "$G" "$CW/stubs/gama"
     setup_red
@@ -2308,9 +2308,9 @@ execution|ci_timeout|3'
     wait $PIDA
     pass ;;
 
-  # ======================================================== core: item 9 (versao e monorepo)
+  # ======================================================== core: item 9 (version and monorepo)
   v1-9.1-monorepo-casos-por-suite)
-    # Item 9, regra 1: com varias suites o caso e identificado pela suite e pelo nome (o mesmo nome em duas suites e dois casos).
+    # Item 9, rule 1: with several suites a case is identified by suite and name (the same name in two suites is two cases).
     EXPECT="same test name in 2 suites = 2 cases"
     v1_start
     setup_init
@@ -2368,7 +2368,7 @@ TOML
     chk "refusal names the future version" grep -F -q "$future_min" "$OUT.last3"
     pass ;;
   v1-9.2-formato-da-trava)
-    # Item 9, regra 2: a versao do formato vai dentro de cada trava; uma trava num formato desconhecido e recusada em tres linhas.
+    # Item 9, rule 2: the format version goes inside each lock; a lock in an unknown format is refused in three lines.
     EXPECT="lock has a format version; unknown refused"
     v1_start
     setup_red
@@ -2401,8 +2401,8 @@ PY_LOCK
 
   # ======================================================== core: item 10
   v1-10.1-execucoes-jsonl)
-    # Item 10, regra 1: cada execucao (hook, ci, revisao) grava uma linha em .git/shipcraft/runs.jsonl, fora do versionamento.
-    EXPECT="rows for hook/ci/revisao x passou/recusou/erro"
+    # Item 10, rule 1: each run (hook, ci, review) writes a row to .git/shipcraft/runs.jsonl, outside version control.
+    EXPECT="rows for hook/ci/review x passed/refused/error"
     v1_start codex
     pr_main
     git checkout -q -b feature/jsonl
@@ -2435,7 +2435,7 @@ PY_LOCK
 
   # ======================================================== core: item 11
   v1-11.1-linha-de-tamanho)
-    # Item 11, regra 1: o resumo do shipcraft pr traz "Size: +A / -R product lines" do diff inteiro contra o merge-base (varios commits; o arquivo que entra e sai nao conta; o modificado conta as removidas).
+    # Item 11, rule 1: the shipcraft pr summary carries "Size: +A / -R product lines" for the whole diff against the merge-base (several commits; a file that comes and goes does not count; a modified one counts its removed lines).
     EXPECT="Size: +21 / -1 product lines"
     sz_start
     sz_branch
@@ -2450,7 +2450,7 @@ PY_LOCK
     chk "the summary says +21 / -1 (12 + 4 + 5 added; the 1-line textutil.py replaced; the draft that came and went does not count)" sz_size 21 1
     pass ;;
   v1-11.1-tamanho-desde-o-merge-base)
-    # Item 11, regra 1: o diff e contra o merge-base, nao contra a ponta da main (que andou); um novo shipcraft pr atualiza a linha.
+    # Item 11, rule 1: the diff is against the merge-base, not against main's tip (which moved); a new shipcraft pr updates the line.
     EXPECT="+8 / -0 with main ahead, then +12 / -0"
     sz_start
     sz_branch
@@ -2468,7 +2468,7 @@ PY_LOCK
     chk "the second shipcraft pr updates the line to +12 / -0" sz_size 12 0
     pass ;;
   v1-11.1-pr-so-de-teste)
-    # Item 11, regras 1 e 4: um PR sem linha de produto ainda traz a linha, com zeros, e product_lines = 0 no jsonl.
+    # Item 11, rules 1 and 4: a PR with no product line still carries the line, with zeros, and product_lines = 0 in the jsonl.
     EXPECT="Size: +0 / -0 product lines; product_lines = 0"
     sz_start
     sz_branch
@@ -2476,10 +2476,10 @@ PY_LOCK
     sz_commit "test: so um teste"
     sz_pr
     chk "the summary says +0 / -0" sz_size 0 0
-    chk "the ci and revisao rows carry product_lines = 0" sz_jsonl 0
+    chk "the ci and review rows carry product_lines = 0" sz_jsonl 0
     pass ;;
   v1-11.2-testes-e-apoio-fora)
-    # Item 11, regra 2: arquivos de teste e de apoio (globs do init) nao entram na conta; so o codigo de produto.
+    # Item 11, rule 2: test and support files (init globs) are left out of the count; only product code.
     EXPECT="Size: +6 / -0 product lines"
     sz_start
     sz_branch
@@ -2494,7 +2494,7 @@ PY_LOCK
     chk "only calc.py counts (test_*.py, *_test.py, conftest.py, helpers/ and fixtures/ are out)" sz_size 6 0
     pass ;;
   v1-11.2-globs-do-toml)
-    # Item 11, regra 2: "teste" e o que os globs do .shipcraft.toml dizem, nao nomes fixos: com test_globs = check_*.py e conftest.py, tests/test_extra.py e produto.
+    # Item 11, rule 2: "test" is what the .shipcraft.toml globs say, not fixed names: with test_globs = check_*.py and conftest.py, tests/test_extra.py is product.
     EXPECT="Size: +15 / -0 product lines"
     CFGS='-|test_globs|["**/check_*.py", "**/conftest.py"]'
     sz_start
@@ -2508,7 +2508,7 @@ PY_LOCK
     chk "calc.py and tests/test_extra.py count; check_calc.py and conftest.py do not" sz_size 15 0
     pass ;;
   v1-11.2-globs-de-suite)
-    # Item 11, regra 2: com [[suite]], os globs de cada suite sao relativos a raiz dela (ponto 17): so o que casa na raiz da suite e teste.
+    # Item 11, rule 2: with [[suite]], each suite's globs are relative to its root (point 17): only what matches under the suite root is a test.
     EXPECT="Size: +23 / -0 product lines"
     sz_start
     sz_monorepo_toml
@@ -2529,7 +2529,7 @@ PY_LOCK
     chk "product = a/mod.py 5 + a/test_stray.py 3 + b/mod.py 4 + tests/helper_root.py 11; suite a's tests/** and suite b's test_*.py/conftest.py are out" sz_size 23 0
     pass ;;
   v1-11.2-renomeado-sem-mudanca-fora)
-    # Item 11, regra 2: arquivo renomeado sem mudanca de conteudo nao conta (nem as adicionadas nem as removidas).
+    # Item 11, rule 2: a file renamed with no content change does not count (neither added nor removed lines).
     EXPECT="Size: +6 / -0 product lines"
     sz_start
     sz_gen legacy_big.py 50 l
@@ -2542,7 +2542,7 @@ PY_LOCK
     chk "the 50-line pure rename is out: +6 / -0, not +56 / -50" sz_size 6 0
     pass ;;
   v1-11.2-lockfile-fora)
-    # Item 11, regra 2: os sete lockfiles da lista nao contam (em qualquer pasta, no que entra e no que sai); o que nao esta na lista conta.
+    # Item 11, rule 2: the seven listed lockfiles do not count (in any folder, added or removed); one not on the list counts.
     EXPECT="Size: +17 / -0 product lines"
     sz_start
     sz_gen uv.lock 20 u
@@ -2559,7 +2559,7 @@ PY_LOCK
     chk "calc.py 5 + Gemfile.lock 12 (not in the list) count; the 7 listed lockfiles, in any folder, added or removed, do not" sz_size 17 0
     pass ;;
   v1-11.2-binario-fora)
-    # Item 11, regra 2: arquivo binario (o que o git trata como binario) nao conta, mesmo cheio de quebras de linha.
+    # Item 11, rule 2: a binary file (what git treats as binary) does not count, even full of line breaks.
     EXPECT="Size: +5 / -0 product lines"
     sz_start
     sz_branch
@@ -2572,7 +2572,7 @@ PY_LOCK
     chk "shipcraft pr did not choke on the binaries and only calc.py counts" sz_size 5 0
     pass ;;
   v1-11.3-aviso-acima-de-500)
-    # Item 11, regra 3: acima de 500 (adicionadas + removidas, aqui 300 + 201 = 501) o resumo traz o aviso, sem mudar codigo de saida nem status.
+    # Item 11, rule 3: above 500 (added + removed, here 300 + 201 = 501) the summary carries the warning, without changing the exit code or statuses.
     EXPECT="+300 / -201 and the warning; rc 0; statuses success"
     sz_start
     sz_gen legacy.py 250 l
@@ -2588,7 +2588,7 @@ PY_LOCK
     chk "shipcraft/review is still success" eq "$(st_state "$HEAD" shipcraft/review)" success
     pass ;;
   v1-11.3-sem-aviso-em-500)
-    # Item 11, regra 3: "acima de" e estrito: exatamente 500 (300 + 200) nao avisa; e as linhas de teste (300 aqui) nao entram na soma.
+    # Item 11, rule 3: "above" is strict: exactly 500 (300 + 200) does not warn; and test lines (300 here) are not in the sum.
     EXPECT="+300 / -200, no warning"
     sz_start
     sz_gen legacy.py 250 l
@@ -2604,7 +2604,7 @@ PY_LOCK
     chk "the warning appears nowhere in the PR" eq "$(H warn-count "$ST")" 0
     pass ;;
   v1-11.3-aviso-linhas-maior-na-config)
-    # Item 11, regra 3: [pr] aviso_linhas manda: com 1000, um PR de 600 linhas nao avisa.
+    # Item 11, rule 3: [pr] warn_lines rules: with 1000, a 600-line PR does not warn.
     EXPECT="+600 / -0, no warning with warn_lines = 1000"
     CFGS='pr|warn_lines|1000'
     sz_start
@@ -2617,7 +2617,7 @@ PY_LOCK
     chk "the warning appears nowhere in the PR" eq "$(H warn-count "$ST")" 0
     pass ;;
   v1-11.3-aviso-linhas-menor-na-config)
-    # Item 11, regra 3: [pr] aviso_linhas manda: com 40, um PR de 41 linhas (30 + 11) avisa.
+    # Item 11, rule 3: [pr] warn_lines rules: with 40, a 41-line PR (30 + 11) warns.
     EXPECT="+30 / -11 and the warning with warn_lines = 40"
     CFGS='pr|warn_lines|40'
     sz_start
@@ -2632,8 +2632,8 @@ PY_LOCK
     chk "the summary carries the warning: 41 is above the configured 40" eq "$(H size-warn "$ST")" SIM
     pass ;;
   v1-11.4-linhas-produto-no-jsonl)
-    # Item 11, regra 4: as linhas ci e revisao do shipcraft pr no runs.jsonl trazem product_lines = adicionadas + removidas (inteiro), a mesma soma do resumo.
-    EXPECT="Size: +12 / -3; product_lines = 15 on ci and revisao rows"
+    # Item 11, rule 4: the ci and review rows of shipcraft pr in runs.jsonl carry product_lines = added + removed (an integer), the same sum as the summary.
+    EXPECT="Size: +12 / -3; product_lines = 15 on ci and review rows"
     sz_start
     sz_gen legacy.py 10 l
     sz_main_commit "feat: um modulo de 10 linhas"
@@ -2644,12 +2644,12 @@ PY_LOCK
     sz_commit "feat: calc; poda o modulo; um teste"
     sz_pr
     chk "the summary says +12 / -3" sz_size 12 3
-    chk "the ci and revisao rows carry product_lines = 15 (an integer: 12 + 3, tests out)" sz_jsonl 15
+    chk "the ci and review rows carry product_lines = 15 (an integer: 12 + 3, tests out)" sz_jsonl 15
     pass ;;
 
   # ======================================================== core: item 15a
   v1-15a.1-recusa-antes-de-perguntar-e-escrever)
-    # Item 15a, regra 1: o init decide tudo antes de escrever e antes de perguntar; a recusa vem antes da tela do revisor e nao cria .shipcraft.toml, workflow nem .shipcraft/.
+    # Item 15a, rule 1: init decides everything before writing and before asking; the refusal comes before the reviewer screen and creates no .shipcraft.toml, workflow or .shipcraft/.
     EXPECT="refused without asking or writing"
     v1_start codex claude
     printf '#!/bin/sh\necho "hook do projeto"\n' > .git/hooks/commit-msg && chmod +x .git/hooks/commit-msg
@@ -2664,7 +2664,7 @@ PY_LOCK
     chk "the existing commit-msg hook was not modified" cmp -s .git/hooks/commit-msg "$CW/hook.orig"
     pass ;;
   v1-15a.1-decide-antes-e-desfaz-escrita-no-meio)
-    # Item 15a, regra 1 (borda): decidir antes de escrever (sem apagar arquivo preexistente nem bater em erro de escrita de .github antes de checar o hook) e desfazer o que ja escreveu se uma escrita falha no meio.
+    # Item 15a, rule 1 (edge): decide before writing (without deleting a pre-existing file or hitting a .github write error before checking the hook) and undo what was written if a write fails midway.
     EXPECT="decides before writing; rolls back partial writes"
     v1_start codex claude
     printf '# rascunho-preexistente\n' > .shipcraft.toml
@@ -2676,7 +2676,7 @@ PY_LOCK
     chmod 700 .github
     chk "shipcraft init refused" rc_nonzero
     msg_check || fail "decide-before-write: $MSGERR"
-    chk "refusal is hook-alheio (mentions shipcraft check), not an OS write error on .github" last3_has 'shipcraft check'
+    chk "refusal is the alien-hook one (mentions shipcraft check), not an OS write error on .github" last3_has 'shipcraft check'
     chk "init did not ask the reviewer" out_hasnt '(who reviews|provider|Which reviewer)'
     chk "pre-existing .shipcraft.toml was not overwritten or deleted" eq "$(cat .shipcraft.toml 2>/dev/null)" "# rascunho-preexistente"
     chk "lefthook.yml was not modified" cmp -s lefthook.yml "$CW/lh.orig"
@@ -2695,7 +2695,7 @@ PY_LOCK
     chk "nothing created inside .github" eq "$(find .github -mindepth 1 -print)" ""
     pass ;;
   v1-15a.1-falha-preserva-config-simbolica)
-    # Item 15a, regra 1 e ponto fixado 62: uma falha preserva o link preexistente de config, sem criar nem alterar seu alvo.
+    # Item 15a, rule 1 and fixed point 62: a failure keeps the pre-existing config symlink, without creating or changing its target.
     EXPECT="failed init preserves the config symlink and its absent or existing target"
     v1_start codex claude
     chmod 500 .git/hooks
@@ -2722,7 +2722,7 @@ PY_LOCK
     chmod 700 .git/hooks
     pass ;;
   v1-15a.2-hook-pre-commit-alheio)
-    # Item 15a, regra 2: outro hook no pre-commit (husky, framework pre-commit) e recusado em tres linhas citando shipcraft check, sem escrever nada.
+    # Item 15a, rule 2: another hook in pre-commit (husky, the pre-commit framework) is refused in three lines naming shipcraft check, writing nothing.
     EXPECT="husky and pre-commit hooks refused cleanly"
     v1_start codex claude
     cat > .git/hooks/commit-msg <<'SH'
@@ -2746,7 +2746,7 @@ SH
     chk "pre-commit framework hook untouched" cmp -s .git/hooks/commit-msg "$CW/precommit.orig"
     pass ;;
   v1-15a.2-hook-script-ou-link-quebrado)
-    # Item 15a, regra 2 (borda): um link simbolico quebrado ou um script qualquer no pre-commit tambem e recusado em tres linhas citando shipcraft check, sem escrever nada.
+    # Item 15a, rule 2 (edge): a broken symlink or any script in pre-commit is also refused in three lines naming shipcraft check, writing nothing.
     EXPECT="broken symlink and custom script refused cleanly"
     v1_start codex claude
     ln -s /caminho/inexistente/pre-commit .git/hooks/commit-msg
@@ -2762,7 +2762,7 @@ SH
     chk "non-executable hook untouched" cmp -s .git/hooks/commit-msg "$CW/script.orig"
     pass ;;
   v1-15a.2-core-hookspath-fora)
-    # Item 15a, regra 2: core.hooksPath apontando para fora de .git/hooks e recusado em tres linhas citando shipcraft check, sem escrever nada.
+    # Item 15a, rule 2: core.hooksPath pointing outside .git/hooks is refused in three lines naming shipcraft check, writing nothing.
     EXPECT="core.hooksPath outside .git/hooks refused"
     v1_start codex claude
     mkdir -p .githooks
@@ -2772,7 +2772,7 @@ SH
     chk "no pre-commit created in .git/hooks" test ! -e .git/hooks/commit-msg
     pass ;;
   v1-15a.2-core-hookspath-com-espacos)
-    # Item 15a, regras 2 e 3: so o valor exato .git/hooks e aceito; espacos no fim ou no inicio nao podem ser normalizados.
+    # Item 15a, rules 2 and 3: only the exact value .git/hooks is accepted; trailing or leading spaces must not be normalized.
     EXPECT="hooksPath with trailing or leading space refused before asking or writing"
     v1_start codex claude
     for hooks in '.git/hooks ' ' .git/hooks'; do
@@ -2787,7 +2787,7 @@ SH
     done
     pass ;;
   v1-15a.3-core-hookspath-grafias-equivalentes)
-    # Item 15a.3: grafias equivalentes nao sao o literal .git/hooks; cada uma recusa antes de perguntar ou escrever.
+    # Item 15a.3: equivalent spellings are not the literal .git/hooks; each one refuses before asking or writing.
     EXPECT="all three equivalent spellings refused without asking or writing"
     v1_start codex claude
     erros=""
@@ -2814,7 +2814,7 @@ SH
     chk "all spellings refused correctly (failures:$erros)" eq "$erros" ""
     pass ;;
   v1-15a.3-core-hookspath-exato)
-    # Item 15a.3 (borda): recusar tudo nao serve; .git/hooks literal integra normalmente.
+    # Item 15a.3 (edge): refusing everything is not enough; the literal .git/hooks integrates normally.
     EXPECT="literal .git/hooks accepted with config, locks and executable hook"
     v1_start codex claude
     git config core.hooksPath .git/hooks
@@ -2829,7 +2829,7 @@ SH
     chk "installed hook invokes shipcraft check" grep -E -q 'shipcraft.*check' .git/hooks/commit-msg
     pass ;;
   v1-15a.2-core-hookspath-absoluto-e-git-hooks)
-    # Item 15a, regra 2 (borda): core.hooksPath absoluto fora de .git/hooks (ou com hook shipcraft fora de .git/hooks) e recusado; apontando para .git/hooks e aceito.
+    # Item 15a, rule 2 (edge): an absolute core.hooksPath outside .git/hooks (even with a shipcraft hook there) is refused; pointing to .git/hooks is accepted.
     EXPECT="outside paths refused; .git/hooks accepted"
     v1_start codex claude
     mkdir -p "$CW/ext-hooks"
@@ -2845,8 +2845,8 @@ SH
     chk ".git/hooks/commit-msg installed" test -x .git/hooks/commit-msg
     pass ;;
   v1-15a.2-husky-ou-pre-commit-na-raiz)
-    # Itens 15a.2 e 25: husky sem layout 9 recusa; repos em bloco com hooks vazio integra sem launcher instalado.
-    EXPECT="husky sem layout 9 recusa; pre-commit em bloco integra sem launcher"
+    # Items 15a.2 and 25: husky without the v9 layout refuses; block-style repos with empty hooks integrates with no launcher installed.
+    EXPECT="husky without v9 layout refuses; block-style pre-commit integrates without launcher"
     v1_start codex claude
     mkdir -p .husky && printf 'npx lint-staged\n' > .husky/pre-commit
     init_must_refuse_hook ".husky/ at root without installed hook"
@@ -2854,12 +2854,12 @@ SH
     rm -rf .husky
     printf 'repos:\n  - repo: local\n    hooks: []\n' > .pre-commit-config.yaml
     cp .pre-commit-config.yaml "$CW/pcc.orig"
-    must_accept ".pre-commit-config.yaml em bloco integra sem launcher (item 25)" cmd shipcraft init
-    chk "prefixo preservado e par local exato do item 25" "$PY" -c 'import pathlib,sys,yaml; p=pathlib.Path(".pre-commit-config.yaml"); assert p.read_bytes().startswith(pathlib.Path(sys.argv[1]).read_bytes()); repos=yaml.safe_load(p.read_bytes())["repos"]; assert repos[0] == {"repo":"local","hooks":[]}; expected=[dict(id=i,name=n,entry=c,language="system",always_run=True,pass_filenames=False,stages=[e]) for i,n,c,e in [("shipcraft-check","shipcraft check","shipcraft check --commit-msg","commit-msg"),("shipcraft-fecha","shipcraft close","shipcraft close","post-commit")]]; assert len(repos)==2 and repos[1]["repo"]=="local" and sorted(repos[1]["hooks"],key=lambda h:h["id"])==sorted(expected,key=lambda h:h["id"])' "$CW/pcc.orig"
+    must_accept "block-style .pre-commit-config.yaml integrates without launcher (item 25)" cmd shipcraft init
+    chk "prefix kept and the exact local pair of item 25" "$PY" -c 'import pathlib,sys,yaml; p=pathlib.Path(".pre-commit-config.yaml"); assert p.read_bytes().startswith(pathlib.Path(sys.argv[1]).read_bytes()); repos=yaml.safe_load(p.read_bytes())["repos"]; assert repos[0] == {"repo":"local","hooks":[]}; expected=[dict(id=i,name=n,entry=c,language="system",always_run=True,pass_filenames=False,stages=[e]) for i,n,c,e in [("shipcraft-check","shipcraft check","shipcraft check --commit-msg","commit-msg"),("shipcraft-fecha","shipcraft close","shipcraft close","post-commit")]]; assert len(repos)==2 and repos[1]["repo"]=="local" and sorted(repos[1]["hooks"],key=lambda h:h["id"])==sorted(expected,key=lambda h:h["id"])' "$CW/pcc.orig"
     chk "no hook installed in .git/hooks" test ! -e .git/hooks/commit-msg
     pass ;;
   v1-15a.2-husky-vazio-ou-junto-com-lefthook)
-    # Item 15a, regra 2 (borda): .husky/ na raiz mesmo vazio, ou .husky/ e .pre-commit-config.yaml na raiz junto com lefthook.yml, sao recusados sem tocar em nada.
+    # Item 15a, rule 2 (edge): .husky/ at the root even when empty, or .husky/ and .pre-commit-config.yaml at the root together with lefthook.yml, are refused without touching anything.
     EXPECT="empty .husky/ and coexistence with lefthook.yml refused"
     v1_start codex claude
     mkdir -p .husky
@@ -2876,7 +2876,7 @@ SH
     chk "lefthook.yml was not modified" cmp -s lefthook.yml "$CW/lh.orig"
     pass ;;
   v1-15a.2-lefthook-dois-nomes-ou-hook-alheio)
-    # Item 15a, regra 2 (e 15b, ponto 1): dois arquivos do lefthook juntos na raiz, lefthook na raiz com outro pre-commit instalado, ou hook do lefthook sem config na raiz sao recusados sem tocar em nada.
+    # Item 15a, rule 2 (and 15b, point 1): two lefthook files together at the root, lefthook at the root with another pre-commit installed, or a lefthook hook with no config at the root are refused without touching anything.
     EXPECT="two lefthook files or mismatched hook refused"
     v1_start codex claude
     printf 'pre-commit:\n  commands:\n    a:\n      run: echo a\n' > "$CW/lh1"
@@ -2902,10 +2902,10 @@ SH
     chk "lefthook hook in .git/hooks/commit-msg untouched" cmp -s .git/hooks/commit-msg "$CW/lhhook.orig"
     pass ;;
   v1-15a.2-lefthook-condicoes-do-15b-ponto-1)
-    # Item 15a, regra 2 (borda, item 15b ponto 1): arquivo do lefthook com YAML invalido, extends, jobs ou filtro/chave extra no bloco pre-commit e recusado sem tocar no arquivo.
+    # Item 15a, rule 2 (edge, item 15b point 1): a lefthook file with invalid YAML, extends, jobs or an extra filter/key in the pre-commit block is refused without touching the file.
     EXPECT="each failing condition of 15b.1 refused cleanly"
     v1_start codex claude
-    check_bad_lh() { # check_bad_lh <nome-do-arquivo> <rotulo> <conteudo>
+    check_bad_lh() { # check_bad_lh <file-name> <label> <content>
       local fn="$1" lbl="$2" body="$3"
       printf '%s\n' "$body" > "$fn"
       cp "$fn" "$CW/lh.bad"
@@ -2917,14 +2917,14 @@ SH
     check_bad_lh lefthook.yml "invalid YAML" "$(printf 'pre-commit:\n  commands: [unclosed')"
     check_bad_lh .lefthook.yml "extends" "$(printf 'extends:\n  - base.yml\npre-commit:\n  commands:\n    lint:\n      run: echo ok')"
     check_bad_lh .lefthook.yaml "top-level jobs" "$(printf 'jobs:\n  - name: lint\n    run: echo ok\npre-commit:\n  commands:\n    lint:\n      run: echo ok')"
-    must_accept "parallel agora integra pelo commit-msg (item 20)" cmd "$PY" "$ACEITE/tools/item20.py" rota.parallel-true
+    must_accept "parallel now integrates through commit-msg (item 20)" cmd "$PY" "$ACEITE/tools/item20.py" rota.parallel-true
     pass ;;
 
   *) OBS="harness: unknown case $CASE"; finish FAIL ;;
   esac
 }
 
-# ---------------------------------------------------------------- ajudantes do item 15a
+# ---------------------------------------------------------------- item 15a helpers
 out_hasnt() { ! grep -E -q -- "$1" "$OUT" || { echo "output unexpectedly matches /$1/"; return 1; }; }
 init_untouched() {
   local p
@@ -2932,7 +2932,7 @@ init_untouched() {
     [ ! -e "$p" ] && [ ! -L "$p" ] || { echo "$p was created"; return 1; }
   done
 }
-init_literal_refused() { # retorna sem encerrar o caso, para sondar todas as grafias mesmo no RED
+init_literal_refused() { # returns without ending the case, to probe every spelling even at RED
   MSGERR="accepted (rc=0)"
   [ "$RC" -ne 0 ] || return 1
   msg_check || return 1
@@ -2943,7 +2943,7 @@ init_literal_refused() { # retorna sem encerrar o caso, para sondar todas as gra
     [ ! -e .git/hooks/commit-msg ] && [ ! -L .git/hooks/commit-msg ] &&
     cmp -s .git/config "$1"
 }
-init_must_refuse_hook() { # recusa hook-alheio: rc != 0, 3 linhas com shipcraft check, sem criar nada e sem perguntar revisor
+init_must_refuse_hook() { # alien-hook refusal: rc != 0, 3 lines with shipcraft check, nothing created and no reviewer question
   local label="$1"
   run_cmd_stdin /dev/null shipcraft init
   [ "$RC" -ne 0 ] || fail "$label: accepted (rc=0)"
@@ -2953,9 +2953,9 @@ init_must_refuse_hook() { # recusa hook-alheio: rc != 0, 3 linhas com shipcraft 
   chk "$label: did not ask the reviewer before refusing" out_hasnt '(who reviews|provider|Which reviewer|created \.shipcraft\.toml)'
 }
 
-# ---------------------------------------------------------------- ajudantes dos casos v1 maiores
+# ---------------------------------------------------------------- helpers for the larger v1 cases
 tl_has_not() { ! H tl-has "$@"; }
-# a saida sem os caminhos da propria bateria (o nome do caso tem "fila" e numeros)
+# the output without the battery's own paths (the case name has "fila" and numbers)
 clean_out() { sed -e "s|$CW|.|g" -e "s|$T|.|g" -e "s|$WORK|.|g" "$OUT"; }
 clean_out_hasi() { clean_out | grep -E -i -q -- "$1" || { echo "output lacks /$1/ (i)"; return 1; }; }
 clean_out_hasnt() { ! clean_out | grep -E -i -q -- "$1" || { echo "output has /$1/"; return 1; }; }
@@ -2968,7 +2968,7 @@ shown_local() {
   H st-dump "$ST" | grep -q 'on this machine' && return 0
   echo "'on this machine' appears nowhere"; return 1
 }
-review_failed_closed() { # a revisao falhou fechada: error com motivo, uma tentativa, nunca success
+review_failed_closed() { # the review failed closed: error with a reason, one attempt, never success
   HEAD=$(git rev-parse HEAD)
   chk "the reviewer ran exactly once (no retry)" eq "$(rev_n)" 1
   chk "shipcraft/review is error on the HEAD sha" eq "$(st_state "$HEAD" shipcraft/review)" error
@@ -2976,7 +2976,7 @@ review_failed_closed() { # a revisao falhou fechada: error com motivo, uma tenta
   chk "shipcraft/review never reached success" eq "$(H st-count-state "$ST" "$HEAD" shipcraft/review success)" 0
   pass
 }
-merge_setup() { # um PR de fora com o branch no origin; a main limpa no checkout
+merge_setup() { # an outside PR with the branch on origin; a clean main checked out
   v1_start codex
   pr_main; pr_feature
   pr_outside "$BR"
@@ -2990,8 +2990,8 @@ merge_must_refuse() {
   chk "the PR is still open" eq "$(H pr-field "$ST" "$PRN" state)" OPEN
   pass
 }
-# Varios projetos na mesma maquina (mesmo HOME) para os casos de fila.
-# queue_projects <n> <cfg extra> <segundos da sonda de CI> <segundos do revisor>
+# Several projects on the same machine (same HOME) for the queue cases.
+# queue_projects <n> <extra cfg> <CI probe seconds> <reviewer seconds>
 queue_projects() {
   local n="$1" extra="$2" psl="$3" rsl="$4" names="alfa beta gama" name i=0
   TLINE="$CW/timeline.log"; : > "$TLINE"
@@ -3008,19 +3008,19 @@ queue_projects() {
     rev_cfg approve sleep="$rsl" timeline="$TLINE" name="$name"
   done
 }
-queue_one() { # queue_one <nome>: shipcraft pr nesse projeto; saida e codigo em $CW/out-<nome> e rc-<nome>
+queue_one() { # queue_one <name>: shipcraft pr in that project; output and code in $CW/out-<name> and rc-<name>
   local name="$1"
   use_proj "$CW/proj/$name" "$CW/stubs/$name"
   git rev-parse HEAD > "$ST/sha"
   TMO 240 shipcraft pr --title "Titulo-PR-6d1" --body "$CW/body.md" > "$CW/out-$name" 2>&1
   echo $? > "$CW/rc-$name"
 }
-queue_run_all() { # todos ao mesmo tempo
+queue_run_all() { # all at the same time
   local name
   for name in $QNAMES; do ( queue_one "$name" ) & done
   wait
 }
-queue_wait_start() { # queue_wait_start <nome> <camada>: espera a linha "start" na linha do secs (ate 90 s)
+queue_wait_start() { # queue_wait_start <name> <layer>: waits for the "start" line in the timeline (up to 90 s)
   local i=0
   while ! H tl-has "$TLINE" "$1" "$2" start; do
     if [ -f "$CW/rc-$1" ]; then
@@ -3037,13 +3037,13 @@ timeline_is() { # timeline_is <max> <min intervals>
   [ "$n" -ge "$2" ] || { echo "$o (want at least $2 intervals)"; return 1; }
 }
 
-# ---------------------------------------------------------------- ajudantes do item 11 (tamanho do PR)
-sz_gen() { # sz_gen <file> <n> [prefixo]: n linhas de python valido (<prefixo><i> = <i>), as pastas criadas
+# ---------------------------------------------------------------- item 11 helpers (PR size)
+sz_gen() { # sz_gen <file> <n> [prefix]: n lines of valid python (<prefix><i> = <i>), folders created
   mkdir -p "$(dirname "$1")"
   awk -v n="$2" -v p="${3:-v}" 'BEGIN { for (i = 1; i <= n; i++) printf "%s%d = %d\n", p, i, i }' > "$1"
 }
 sz_start() { v1_start codex; pr_main; }
-sz_main_commit() { # commit na main e push para o origin (a main do "GitHub" anda)
+sz_main_commit() { # commit on main and push to origin ("GitHub"'s main moves)
   must_accept "$1 (main)" commit commit_all "$1"
   git push -q origin main >> "$LOG" 2>&1 || fail "harness: push main"
   git fetch -q origin
@@ -3051,19 +3051,19 @@ sz_main_commit() { # commit na main e push para o origin (a main do "GitHub" and
 sz_branch() { BR=feature/size; git checkout -q -b "$BR" || fail "harness: checkout -b $BR"; }
 sz_commit() { must_accept "$1" commit commit_all "$1"; }
 sz_pr() { shipcraft_pr; chk "shipcraft pr succeeded" rc_zero; HEAD=$(git rev-parse HEAD); }
-sz_size() { # sz_size <adicionadas> <removidas>: a linha "Size:" do ultimo resumo no PR
+sz_size() { # sz_size <added> <removed>: the "Size:" line of the last summary in the PR
   local l
   l=$(H size-line "$ST") || { echo "$l"; return 1; }
   match "Size: \\+$1 / -$2 product lines" "$l" || { echo "the line is: $l"; return 1; }
 }
-sz_jsonl() { # sz_jsonl <total>: as linhas ci e revisao do commit do HEAD levam product_lines = total (inteiro)
+sz_jsonl() { # sz_jsonl <total>: the ci and review rows of the HEAD commit carry product_lines = total (an integer)
   local c v
   for c in ci review; do
     v=$(H jsonl-field .git/shipcraft/runs.jsonl "$c" "$HEAD" product_lines | sort -u) || { echo "$v"; return 1; }
     [ "$v" = "$1" ] || { echo "$c row(s): product_lines = $v, want $1"; return 1; }
   done
 }
-sz_monorepo_toml() { # um monorepo de duas suites; a revisao continua local (codex)
+sz_monorepo_toml() { # a two-suite monorepo; review stays local (codex)
   cat > .shipcraft.toml <<'TOML'
 shipcraft_min = "1.0"
 lang = "python"
@@ -3094,17 +3094,17 @@ globs = ["**/test_*.py", "**/conftest.py"]
 TOML
 }
 
-# ---------------------------------------------------------------- itens, descobertos
-# Cada item fica em lib/item<N>.sh, lido em ordem de nome: item<N>_cases lista os ids
-# (todos v1-<N>.*), item<N>_case roda um deles e item<N>_langs, se existir, diz onde
-# rodam (core, python, node, go; sem ela, core). Item novo nao muda run.sh nem v1.sh.
+# ---------------------------------------------------------------- items, discovered
+# Each item lives in lib/item<N>.sh, sourced in name order: item<N>_cases lists the ids
+# (all v1-<N>.*), item<N>_case runs one of them and item<N>_langs, if present, says where
+# they run (core, python, node, go; without it, core). A new item changes neither run.sh nor v1.sh.
 ITEMS=""
 for _f in "$ACEITE"/lib/item*.sh; do
   [ -f "$_f" ] || continue
   _n="${_f##*/item}"; ITEMS="$ITEMS ${_n%.sh}"
   . "$_f"
 done
-item_cases() { # item_cases <core|python|node|go>: os ids dos itens que rodam ali
+item_cases() { # item_cases <core|python|node|go>: the ids of the items that run there
   local _item
   for _item in $ITEMS; do
     if type "item${_item}_langs" >/dev/null 2>&1; then

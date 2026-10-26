@@ -18,7 +18,7 @@ pub enum Snapshot {
 }
 
 impl Snapshot {
-    /// For messages: "na árvore", "no índice", "no commit 1a2b3c4".
+    /// For messages: "in the tree", "in the index", "in commit 1a2b3c4".
     pub fn describe(&self) -> String {
         match self {
             Snapshot::Tree => "in the tree".to_string(),

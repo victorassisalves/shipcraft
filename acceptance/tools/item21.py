@@ -39,7 +39,7 @@ def executable(path, body):
     path.chmod(0o755)
 
 
-def refused(p, prefixes=('shipcraft recusou:', 'Por quê:', 'Como seguir:')):
+def refused(p, prefixes=('shipcraft refused:', 'Why:', 'Next:')):
     assert p.returncode != 0, 'deveria recusar'
     lines = [x for x in (p.stdout + p.stderr).splitlines() if x.strip()][-3:]
     assert len(lines) == 3 and all(line.startswith(prefix) for line, prefix in zip(lines, prefixes)), lines
@@ -99,7 +99,7 @@ if CASE == 'versao-min-numerica':
     sys.exit(0)
 
 RELEASE = CASE.startswith('release-')
-script_name = 'release/publica.sh' if RELEASE else 'instalar.sh'
+script_name = 'release/publish.sh' if RELEASE else 'install.sh'
 script = SOURCE / script_name
 assert script.is_file(), f'item 21 ausente na base: {script_name}'
 repo = ROOT / 'repo local'
@@ -187,7 +187,7 @@ if RELEASE:
         deletes = data()['deleted']
         if CASE == 'release-incerto':
             assert not deletes, 'apagou recurso sem confirmação de autoria'
-            assert any(w in (p.stdout+p.stderr).lower() for w in ('confer','verifi')), 'falta orientação para conferir'
+            assert any(w in (p.stdout+p.stderr).lower() for w in ('confer','verifi','check')), 'falta orientação para conferir'
         else:
             assert deletes and all('v1.2.10' in x or '321' in x for x in deletes), 'rollback deve apagar apenas release própria'
     else:
@@ -276,14 +276,14 @@ before = installed.stat()
 if CASE == 'instala-permissao':
     installed.parent.chmod(0o500)
     assert not os.access(installed.parent, os.W_OK), 'fixture requer usuário sem privilégio de escrita'
-p = invoke(*(['--remover'] if CASE == 'remove' else ['--versao','v1.2.10'] if CASE == 'instala-versao' else []))
+p = invoke(*(['--uninstall'] if CASE == 'remove' else ['--version','v1.2.10'] if CASE == 'instala-versao' else []))
 if CASE == 'instala-permissao':
     installed.parent.chmod(0o700)
 if CASE == 'remove':
     assert p.returncode == 0 and not installed.exists(), 'remoção falhou'
     assert (installed.parent).is_dir() and (assets / 'SHA256SUMS').exists(), 'removeu algo além do binário'
     lines = [s for s in (p.stdout+p.stderr).splitlines() if s.strip()]
-    assert len(lines) == 1 and 'projeto' in lines[0].lower() and 'commit' in lines[0].lower(), 'aviso aos projetos ausente'
+    assert len(lines) == 1 and 'project' in lines[0].lower() and 'commit' in lines[0].lower(), 'aviso aos projetos ausente'
     assert not calls('gh'), 'remoção dependeu de GitHub'
 elif CASE in ('instala-linux','instala-soma','instala-linha','instala-duplicada','instala-extra','instala-aninhado','instala-modo','instala-version','instala-extracao','instala-destino','instala-permissao'):
     refused(p)
@@ -298,7 +298,7 @@ else:
     assert installed.read_bytes() == new, 'não instalou binário esperado'
     assert os.access(installed, os.X_OK), 'binário não executável'
     requests = calls('gh')
-    wanted_repo = env.get('SHIPCRAFT_REPO','victorassisalves/shipcraft-v2')
+    wanted_repo = env.get('SHIPCRAFT_REPO','victorassisalves/shipcraft')
     assert requests and all(wanted_repo in ' '.join(c['args']) for c in requests), 'repositório não ficou fixo'
     downloads = [c for c in requests if c['args'][:2] == ['release','download']]
     assert downloads and all('v1.2.10' in c['args'] for c in downloads), 'downloads não presos à versão resolvida'
@@ -311,7 +311,7 @@ else:
     if CASE == 'instala-igual':
         after = installed.stat()
         assert (after.st_ino,after.st_mtime_ns) == (before.st_ino,before.st_mtime_ns), 'mesma versão/soma foi substituída'
-        assert 'já' in (p.stdout+p.stderr).lower() or 'ja' in (p.stdout+p.stderr).lower(), 'não anunciou já instalado'
+        assert 'already' in (p.stdout+p.stderr).lower(), 'did not announce already installed'
     else:
         assert installed.stat().st_ino != before.st_ino, 'troca não foi por rename de arquivo novo'
         probes = [json.loads(x) for x in (ROOT / 'version-probe').read_text().splitlines()]

@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Stub do agente revisor (codex, claude, gemini) da bateria de aceitacao da v1.
+"""Stub of the reviewer agent (codex, claude, gemini) for the v1 acceptance battery.
 
-A bateria copia este arquivo como `codex`, `claude` e/ou `gemini` numa pasta do
-PATH do caso. O comportamento vem de <pasta>/state/reviewer.json:
+The battery copies this file as `codex`, `claude` and/or `gemini` into a folder on
+the case's PATH. Behavior comes from <folder>/state/reviewer.json:
   mode      approve | changes | preamble | blankline | suffix | malformed | refuse | exit1 | quota | hang
-  blocking  numero em "Blocking: N" (padrao 0 em approve, 2 em changes)
-  sleep     segundos de espera antes de responder (padrao 0)
-  timeline  arquivo compartilhado onde gravar "<nome> revisao start|end <t>"
-  name      rotulo para a timeline
-O veredito leva a sha de <pasta>/state/sha (ou `git rev-parse HEAD` no cwd).
-Cada chamada vai para <pasta>/state/reviewer.calls.jsonl, com argv, cwd, stdin e o
-conteudo dos arquivos citados no argv ou no stdin: e o que a bateria le para
-conferir a brief. O stub aceita qualquer argumento.
+  blocking  number in "Blocking: N" (default 0 for approve, 2 for changes)
+  sleep     seconds to wait before answering (default 0)
+  timeline  shared file to write "<name> revisao start|end <t>" to
+  name      label for the timeline
+The verdict carries the sha from <folder>/state/sha (or `git rev-parse HEAD` in the cwd).
+Each call goes to <folder>/state/reviewer.calls.jsonl, with argv, cwd, stdin and the
+contents of the files named in argv or stdin: that is what the battery reads to
+check the brief. The stub accepts any argument.
 """
 import json, os, re, select, subprocess, sys, time
 
@@ -92,20 +92,20 @@ def main():
     time.sleep(float(c.get("sleep", 0)))
     sha = sha_now()
     tokens = int(c.get("tokens", 4321))
-    body = "REVIEW-BODY-MARKER-3a9: nada a apontar alem do que consta acima.\n"
+    body = "REVIEW-BODY-MARKER-3a9: nothing to point out beyond the above.\n"
     out, rc = "", 0
     if mode == "approve":
         out = "APPROVE at %s\nBlocking: %s\n%s" % (sha, c.get("blocking", 0), body)
     elif mode == "changes":
-        out = "CHANGES REQUESTED at %s\nBlocking: %s\n%s1. REVIEW-FINDING-MARKER-77c: falta tratar o caso vazio.\n" % (sha, c.get("blocking", 2), body)
+        out = "CHANGES REQUESTED at %s\nBlocking: %s\n%s1. REVIEW-FINDING-MARKER-77c: the empty case is not handled.\n" % (sha, c.get("blocking", 2), body)
     elif mode == "preamble":
-        out = "Lendo os arquivos do repositorio...\nAPPROVE at %s\nBlocking: 0\n%s" % (sha, body)
+        out = "Reading the repository files...\nAPPROVE at %s\nBlocking: 0\n%s" % (sha, body)
     elif mode == "blankline":
         out = "\nAPPROVE at %s\nBlocking: 0\n%s" % (sha, body)
     elif mode == "suffix":
         out = "APPROVE at %s unexpected-suffix\nBlocking: 0\n%s" % (sha, body)
     elif mode == "malformed":
-        out = "LGTM, pode subir!\n"
+        out = "LGTM, ship it!\n"
     elif mode == "refuse":
         out = "I'm sorry, but I can't assist with reviewing this code.\n"
     elif mode == "exit1":
@@ -121,7 +121,7 @@ def main():
     if out:
         sys.stdout.write("tokens used: %d\n" % tokens)
         sys.stderr.write("tokens used\n%d\n" % tokens)
-    # codex-style: resposta tambem num arquivo (-o / --output-last-message)
+    # codex-style: the answer also goes to a file (-o / --output-last-message)
     for i, a in enumerate(argv):
         if a in ("-o", "--output-last-message", "--output-file") and i + 1 < len(argv):
             try:

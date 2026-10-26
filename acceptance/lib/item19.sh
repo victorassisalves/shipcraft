@@ -31,9 +31,9 @@ i19_branch() {
 }
 i19_refusal() {
   msg_check || fail "$MSGERR"
-  chk 'recusa: o que houve' grep -q '^shipcraft refused:' "$OUT.last3"
-  chk 'recusa: por que' grep -q '^Why:' "$OUT.last3"
-  chk 'recusa: como seguir' grep -q '^Next:' "$OUT.last3"
+  chk 'refusal: what happened' grep -q '^shipcraft refused:' "$OUT.last3"
+  chk 'refusal: why' grep -q '^Why:' "$OUT.last3"
+  chk 'refusal: next step' grep -q '^Next:' "$OUT.last3"
 }
 item19_case() {
   local k="${CASE#v1-19.}"
@@ -43,7 +43,7 @@ item19_case() {
 }
 
 
-# 19.1 / brief RED 8: grafias relativas equivalentes aceitas pelo executor.
+# 19.1 / RED brief 8: equivalent relative spellings the runner accepts.
 i19_root() {
   local root
   case "$1" in
@@ -75,23 +75,23 @@ EOF
   i19_commit 'test: base verde do contrato Markdown'
   BASE=$(head_rev)
   run_cmd TMO 30 shipcraft ci --base "$BASE" --pr
-  chk 'executor aceita a raiz e base verde' rc_zero
-  chk 'base executou suite' eq "$(cat "$CW/docs-runs")" ran
+  chk 'runner accepts the root and the base is green' rc_zero
+  chk 'base ran the suite' eq "$(cat "$CW/docs-runs")" ran
   i19_branch
   printf 'bad\n' > docs/contract.md
   i19_commit 'test: contrato Markdown vermelho'
-  chk 'PR muda somente o teste Markdown' eq "$(git diff --name-only "$BASE" HEAD)" docs/contract.md
+  chk 'PR changes only the Markdown test' eq "$(git diff --name-only "$BASE" HEAD)" docs/contract.md
   : > "$CW/docs-runs"
   : > .git/shipcraft/runs.jsonl
   run_cmd TMO 30 shipcraft ci --base "$BASE" --pr
-  chk 'PR protegido recusa HEAD vermelho' rc_nonzero
+  chk 'protected PR refuses red HEAD' rc_nonzero
   i19_refusal
-  chk 'recusa pela suite vermelha' out_has 'suite fails at HEAD'
-  chk 'PR executou suite uma vez' eq "$(cat "$CW/docs-runs")" ran
+  chk 'refused for the red suite' out_has 'suite fails at HEAD'
+  chk 'PR ran the suite once' eq "$(cat "$CW/docs-runs")" ran
   pass
 }
 
-# Rodada 4: validação da raiz na árvore Git, sem resolver pelo filesystem.
+# Round 4: root validated in the Git tree, not resolved through the filesystem.
 i19_tree() {
   local root=docs path=docs/contract.md
   case "$1" in
@@ -132,21 +132,21 @@ EOF
   i19_branch
   printf 'bad\n' > "$path"
   i19_commit 'test: mudança única de Markdown'
-  chk 'PR muda somente um Markdown' eq "$(git diff --name-only "$BASE" HEAD)" "$path"
+  chk 'PR changes only one Markdown file' eq "$(git diff --name-only "$BASE" HEAD)" "$path"
   : > "$CW/tree-runs"
   run_cmd TMO 30 shipcraft ci --base "$BASE" --pr
   if [ "$1" = arvore-pai ] || [ "$1" = arvore-absoluta ]; then
-    # Item 30.3 (5a54b4b): raiz inválida recusa antes de qualquer suíte.
-    chk 'configuração inválida recusada' rc_nonzero
+    # Item 30.3 (5a54b4b): an invalid root refuses before any suite.
+    chk 'invalid config refused' rc_nonzero
     i19_refusal
-    chk 'recusa identifica configuração' out_has '(config|\.shipcraft\.toml)'
-    chk 'recusa identifica chave raiz' out_has 'root'
-    chk 'recusa identifica valor inválido' grep -F -q -- "$root" "$OUT"
-    chk 'configuração inválida não executa sentinela' test ! -s "$CW/tree-runs"
+    chk 'refusal names the config' out_has '(config|\.shipcraft\.toml)'
+    chk 'refusal names the root key' out_has 'root'
+    chk 'refusal names the invalid value' grep -F -q -- "$root" "$OUT"
+    chk 'invalid config does not run the sentinel' test ! -s "$CW/tree-runs"
   else
-    chk 'HEAD vermelho recusado' rc_nonzero
+    chk 'red HEAD refused' rc_nonzero
     i19_refusal
-    chk 'suíte executada antes da recusa' eq "$(cat "$CW/tree-runs")" ran
+    chk 'suite ran before the refusal' eq "$(cat "$CW/tree-runs")" ran
   fi
   pass
 }

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""junit.py <work dir> <saida.xml> <segundos do timeout>: o JUnit da bateria.
+"""junit.py <work dir> <out.xml> <timeout seconds>: the battery's JUnit report.
 
-Um testcase por caso do plano (classname = perfil, name = id do caso), na ordem do
-plano: PASS passa, FAIL vira failure, erro de harness ou caso sem resultado (crash ou
-timeout) vira error. Os casos que SHIPCRAFT_ACCEPTANCE_CASES deixou de fora viram skipped. O
-tempo de cada caso vai do inicio (starts/) ao arquivo de resultado."""
+One testcase per planned case (classname = profile, name = case id), in plan
+order: PASS passes, FAIL becomes failure, a harness error or a case with no result (crash
+or timeout) becomes error. Cases that SHIPCRAFT_ACCEPTANCE_CASES left out become skipped. Each
+case's time runs from its start (starts/) to its result file."""
 import os, sys, tempfile, time
 from xml.sax.saxutils import escape, quoteattr
 
@@ -23,7 +23,7 @@ def start_of(key):
         return None
 
 
-cases = []  # (perfil, id, estado, tempo, mensagem, detalhe)
+cases = []  # (profile, id, state, time, message, detail)
 with open(os.path.join(work, 'plan')) as f:
     for line in f:
         if not line.strip():

@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Bateria de aceitacao do shipcraft, versao 1 (docs/spec.md; a v0 esta em
-# docs/spec.md e continua valendo onde a v1 nao a muda).
+# Shipcraft acceptance battery, version 1 (docs/spec.md; v0 is also in
+# docs/spec.md and still holds wherever v1 does not change it).
 #
 # usage: run.sh <path-to-shipcraft-binary> [core|python|node|go|all]
-#   core    = os casos que nao dependem da linguagem (itens 1 a 5, 7, 9.2 e 10 da v1,
-#             a monorepo de 9.1), rodados sobre o alvo Python
-#   python, node, go = os casos da v0 mais os itens 6, 8 e 9.1 por linguagem
+#   core    = the language-independent cases (v1 items 1 to 5, 7, 9.2 and 10,
+#             the 9.1 monorepo), run on the Python target
+#   python, node, go = the v0 cases plus items 6, 8 and 9.1 per language
 #
-# Offline: gh e os agentes revisores sao stubs em acceptance/stubs/ (ver README.md). So a
-# montagem dos alvos (pip, npm, go install) precisa de rede, ou de SHIPCRAFT_ACCEPTANCE_CACHE.
+# Offline: gh and the reviewer agents are stubs in acceptance/stubs/ (see README.md). Only
+# building the targets (pip, npm, go install) needs the network, or SHIPCRAFT_ACCEPTANCE_CACHE.
 #
 # Every case runs against a fresh target project built under $TMPDIR. Nothing is
 # written outside one work dir under $TMPDIR, except the green reuse record below
@@ -17,9 +17,9 @@
 # failed cases and logs remain. Shared setup is removed at exit. SHIPCRAFT_ACCEPTANCE_KEEP=1
 # keeps everything.
 #
-# Reuso: SHIPCRAFT_ACCEPTANCE_REUSE=0 desliga gravação e status acceptance/local.
-# Métrica: baterias inteiras por head, meta 1. Reverter ao ocorrer
-# um escape que a bateria pegaria e o reuso deixou passar.
+# Reuse: SHIPCRAFT_ACCEPTANCE_REUSE=0 turns off recording and the acceptance/local status.
+# Metric: full batteries per head, target 1. Revert if an escape happens that the
+# battery would have caught and reuse let through.
 #
 # Env:
 #   SHIPCRAFT_ACCEPTANCE_CLONE=0  disable base clones; use cp -R (default: clone, copy on failure)
@@ -413,7 +413,7 @@ run_case() {
   case "$CASE" in r-legacy-config-*) rename_case; return ;; esac
   case "$CASE" in e1-*) english_case; return ;; esac
   local _item
-  for _item in $ITEMS; do # os itens de lib/item<N>.sh: v1-<N>.* vai para item<N>_case
+  for _item in $ITEMS; do # the items in lib/item<N>.sh: v1-<N>.* goes to item<N>_case
     case "$CASE" in "v1-$_item."*) "item${_item}_case"; return ;; esac
   done
   case "$CASE" in
@@ -526,9 +526,9 @@ run_case() {
     pass ;;
 
   edit-tree)
-    # ADAPTADO pela v1, item 6, regra 1 ("arquivos fora do commit nao bloqueiam e nao
-    # afetam o resultado"): na v0 a edicao so na arvore era recusada; na v1 o hook
-    # julga o indice, entao o commit sai, com o teste original, e a trava fecha.
+    # ADAPTED by v1, item 6, rule 1 ("files outside the commit do not block and do not
+    # affect the result"): in v0 a tree-only edit was refused; in v1 the hook judges
+    # the index, so the commit goes through, with the original test, and the lock closes.
     EXPECT="accepted (v1): unstaged edit ignored"
     setup_red
     cp "$TESTFILE" "$CW/orig"
@@ -755,7 +755,7 @@ if [ "${1:-}" = __case ]; then
     export VIRTUAL_ENV="$T/.venv"; PATH="$T/.venv/bin:$PATH"; export PATH
   fi
   echo "# $TL $CASE in $T" > "$LOG"
-  if [ "$TL" = core ]; then # a fila e por maquina (por HOME): cada caso core tem a sua maquina
+  if [ "$TL" = core ]; then # the queue is per machine (per HOME): each core case gets its own machine
     mkdir -p "$CW/home/.config" "$CW/tmp"
     cp "$GIT_CONFIG_GLOBAL" "$CW/home/.gitconfig"
     export HOME="$CW/home" XDG_CONFIG_HOME="$CW/home/.config" XDG_STATE_HOME="$CW/home/.state" \
@@ -1030,7 +1030,7 @@ except OSError:
     sys.exit(1)
 PY_CACHE
   then
-    echo "run.sh: resultado salvo: $REUSE_ID ($total/$total, $REUSE_SECONDS s)"
+    echo "run.sh: result saved: $REUSE_ID ($total/$total, $REUSE_SECONDS s)"
     HOME="$REUSE_HOME" XDG_CONFIG_HOME="$REUSE_XDG" python3 - "$REUSE_GH" "$REUSE_SHA" "$total" "$REUSE_SECONDS" <<'PY_STATUS'
 import subprocess, sys
 try:

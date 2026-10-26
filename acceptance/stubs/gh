@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Stub do `gh` da bateria de aceitacao da v1 (docs/spec.md).
+"""Stub of `gh` for the v1 acceptance battery (docs/spec.md).
 
-Offline e deterministico: nunca fala com a rede. O estado do "GitHub" fica em
-<pasta deste script>/state/ (uma pasta por caso). Todo comando e registrado em
-state/calls.log; os que mudam algo tambem em state/writes.log.
+Offline and deterministic: it never touches the network. The "GitHub" state lives in
+<this script's folder>/state/ (one folder per case). Every command is logged in
+state/calls.log; the ones that change something also go to state/writes.log.
 
-Superficie suportada (o que nao esta aqui sai com codigo 1 e a mensagem
+Supported surface (anything not listed here exits with code 1 and the message
 "acceptance-stub: unsupported gh: ..."; see acceptance/README.md):
   gh auth status
   gh repo view [--json F] [-q JQ]
@@ -14,27 +14,27 @@ Superficie suportada (o que nao esta aqui sai com codigo 1 e a mensagem
   gh pr view   [N|BRANCH|URL] [--json F] [-q JQ]
   gh pr edit   [N] [--title T] [--body B | --body-file F|-]
   gh pr comment [N] (--body B | --body-file F|-) [--edit-last]
-  gh pr review [N] --comment (--body B | --body-file F|-)       (conta como comentario)
+  gh pr review [N] --comment (--body B | --body-file F|-)       (counts as a comment)
   gh pr merge  [N] (--merge|--squash|--rebase) [--delete-branch] [--subject S] [--body B]
-  gh pr checkout N [-b NOME]      gh pr diff [N]
-  gh api CAMINHO [-X M] [-f k=v] [-F k=v] [--input F|-] [-q JQ] [--paginate]
+  gh pr checkout N [-b NAME]      gh pr diff [N]
+  gh api PATH [-X M] [-f k=v] [-F k=v] [--input F|-] [-q JQ] [--paginate]
     repos/O/R                                   GET
     repos/O/R/pulls[?head=O:B&state=S]          GET, POST
     repos/O/R/pulls/N                           GET, PATCH
     repos/O/R/pulls/N/merge                     PUT
     repos/O/R/pulls/N/commits                   GET
     repos/O/R/issues/N/comments                 GET, POST
-    repos/O/R/pulls/N/reviews                   POST (conta como comentario)
+    repos/O/R/pulls/N/reviews                   POST (counts as a comment)
     repos/O/R/statuses/SHA                      POST
-    repos/O/R/commits/SHA/statuses              GET (lista, mais novo primeiro)
-    repos/O/R/commits/SHA/status                GET (combinado)
-    repos/O/R/commits/SHA/check-runs            GET (sempre vazio)
+    repos/O/R/commits/SHA/statuses              GET (list, newest first)
+    repos/O/R/commits/SHA/status                GET (combined)
+    repos/O/R/commits/SHA/check-runs            GET (always empty)
     repos/O/R/commits/SHA/pulls                 GET
     repos/O/R/commits/REF | git/ref/heads/B | branches/B   GET
     repos/O/R/branches/B/protection[/...]       GET, PUT, POST, PATCH, DELETE
     repos/O/R/rulesets                          GET, POST
     user                                        GET
-{owner} {repo} {branch} nos caminhos viram acme proj main.
+{owner} {repo} {branch} in paths become acme proj main.
 """
 import json, os, re, subprocess, sys, tempfile, time
 
@@ -136,7 +136,7 @@ def unsupported(what):
     fail("acceptance-stub: unsupported gh: " + what + "  (see acceptance/README.md, 'GitHub CLI')")
 
 
-# ------------------------------------------------------------------ registro
+# ------------------------------------------------------------------ logging
 def log_call(kind, text):
     if QUIET:
         return
@@ -265,7 +265,7 @@ def status_json(s):
             "creator": {"login": "victor"}}
 
 
-# ------------------------------------------------------------------ saida
+# ------------------------------------------------------------------ output
 def jq_out(data, jq):
     txt = json.dumps(data)
     if jq:
@@ -341,7 +341,7 @@ def body_of(o):
     return o.get("body")
 
 
-# ------------------------------------------------------------------ git real: merge
+# ------------------------------------------------------------------ real git: merge
 def do_merge(p, method, subject=None, body=None):
     tmp = tempfile.mkdtemp(prefix="stubmerge.")
     w = os.path.join(tmp, "w")
@@ -384,7 +384,7 @@ def mark_merged(p, oid, delete=False):
         ogit("update-ref", "-d", "refs/heads/" + p["headRefName"])
 
 
-# ------------------------------------------------------------------ comandos
+# ------------------------------------------------------------------ commands
 def cmd_pr(args):
     if not args:
         unsupported("pr")
@@ -584,7 +584,7 @@ def parse_api(args):
             if o["path"] is None:
                 o["path"] = a
             else:
-                unsupported("argumento extra " + a)
+                unsupported("extra argument " + a)
             i += 1
     return o
 
@@ -675,7 +675,7 @@ def cmd_api(args):
             head = str(payload.get("head", "")).split(":")[-1]
             args2 = ["create", "--title", str(payload.get("title", "")), "--body", str(payload.get("body", "")),
                      "--head", head, "--base", str(payload.get("base", "main"))]
-            # reaproveita o cmd_pr, mas devolve JSON
+            # reuses cmd_pr, but returns JSON
             import io
             buf, old = io.StringIO(), sys.stdout
             sys.stdout = buf
@@ -745,7 +745,7 @@ def cmd_api(args):
             append("comments.jsonl", {"pr": int(n), "id": len(cs) + 1, "t": now(), "body": payload.get("body", "")})
             w("comment")
         out({"id": len(cs) + 1, "body": payload.get("body", ""), "state": "COMMENTED"}); return
-    # --- comentarios
+    # --- comments
     m2 = re.match(r"^issues/(\d+)/comments$", rest)
     if m2:
         n = m2.group(1)
@@ -811,7 +811,7 @@ def cmd_api(args):
         out({"sha": sha, "name": ref, "object": {"sha": sha, "type": "commit"}, "commit": {"sha": sha},
              "protected": mode == "full"})
         return
-    # --- protecao
+    # --- protection
     m2 = re.match(r"^(branches/[^/]+/protection(?:/.*)?|rulesets(?:/.*)?)$", rest)
     if m2:
         mode = readfile("protection", "403")
@@ -842,7 +842,7 @@ def cmd_api(args):
 
 def main():
     if not ARGV:
-        unsupported("(sem argumentos)")
+        unsupported("(no arguments)")
     if os.environ.get("SHIPCRAFT_STUB_FAIL") == "1":
         fail("acceptance-stub: injected failure", 1)
     sync_pull_refs()

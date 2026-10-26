@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fixtures reais de npm/TypeScript; nunca simula a saída do compilador."""
+"""Real npm/TypeScript fixtures; never fakes the compiler output."""
 import json, pathlib, sys
 p = pathlib.Path('.')
 mode = sys.argv[1]
@@ -135,7 +135,7 @@ else:
         d['workspaces']=42 if mode=='workspace-invalid' else (["packages/*",7] if mode=='workspace-nontext' else {'packages':['packages/*',False]})
         write('package.json',json.dumps(d)); negative='package.json'; expected=[]
 write('.gitignore', 'node_modules/\n**/dist/\n**/*.tsbuildinfo\n')
-# Fora da árvore, expectativas não são entrada do produto.
+# Outside the tree, so the expectations are not product input.
 pathlib.Path(sys.argv[2]).write_text(' '.join(expected))
 pathlib.Path(sys.argv[3]).write_text(negative)
 

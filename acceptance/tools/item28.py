@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Item 28: Git real; falha de consulta injetada somente no limite do Git."""
+"""Item 28: real Git; query failure injected only at the Git boundary."""
 import json
 import os
 from pathlib import Path
@@ -24,7 +24,7 @@ def run(args, env=None, ok=True):
                        text=True, timeout=60)
     print('$', shlex.join(map(str, args)), '\n', p.stdout, flush=True)
     if ok:
-        assert p.returncode == 0, f'saída {p.returncode}: {args}'
+        assert p.returncode == 0, f'exit {p.returncode}: {args}'
     return p
 
 
@@ -45,7 +45,7 @@ def write(rel, content='trava que não precisa ser lida\n'):
 
 
 def quote(path):
-    # O contrato exige aspas mesmo quando shlex.quote dispensaria as aspas.
+    # The contract requires quotes even where shlex.quote would leave them out.
     return "'" + path.replace("'", "'\\''") + "'"
 
 
@@ -66,35 +66,35 @@ def hook(env=None):
 
 
 def check_output(p, baseline, expected, extra=0, query_error=False):
-    assert p.returncode == baseline.returncode, 'aviso mudou o código de saída'
+    assert p.returncode == baseline.returncode, 'warning changed the exit code'
     lines = p.stdout.splitlines()
     warns = [line for line in lines if line.startswith('shipcraft: warning:') and not re.search(r'\band \d+ more\b', line)]
     if query_error:
-        assert len(warns) == 1, f'esperado um aviso de consulta: {lines}'
+        assert len(warns) == 1, f'expected one query warning: {lines}'
         assert re.fullmatch(r'shipcraft: warning: could not read \.shipcraft/locks/ \(.+\)\.', warns[0]), warns
-        assert 'item28-consulta-falhou' in warns[0], 'motivo do git perdido'
+        assert 'item28-consulta-falhou' in warns[0], 'git reason lost'
     else:
-        assert warns == expected, f'avisos esperados {expected!r}, recebidos {warns!r}'
+        assert warns == expected, f'expected warnings {expected!r}, got {warns!r}'
     counter = [line for line in lines if re.search(r'\band \d+ more\b', line)]
-    assert len(counter) == (1 if extra else 0), f'contador indevido/ausente: {counter}'
+    assert len(counter) == (1 if extra else 0), f'unexpected/missing counter: {counter}'
     if extra:
         assert re.search(rf'\band {extra} more\b', counter[0]), counter
-    # Avisos e contador têm de vir antes de qualquer saída do julgamento.
+    # Warnings and the counter must come before any judging output.
     prefix = len(warns) + len(counter)
-    assert set(lines[:prefix]) == set(warns + counter), f'aviso tardio: {lines}'
+    assert set(lines[:prefix]) == set(warns + counter), f'late warning: {lines}'
     if baseline.returncode:
         last = [line for line in lines if line.strip()][-3:]
         old = [line for line in baseline.stdout.splitlines() if line.strip()][-3:]
-        assert last == old, f'aviso mudou a recusa: {last!r} != {old!r}'
+        assert last == old, f'warning changed the refusal: {last!r} != {old!r}'
         assert last[0].startswith('shipcraft refused:') and last[1].startswith('Why:') and last[2].startswith('Next:'), last
     elif mode not in ('only', 'only-ignorado'):
-        # Tempos e caminhos da cópia podem mudar; o veredito final não.
+        # Times and copy paths may change; the final verdict may not.
         tail = [line for line in lines[prefix:] if line.strip()][-1:]
         old = [line for line in baseline.stdout.splitlines() if line.strip()][-1:]
-        assert tail == old, f'julgamento mudou: {tail!r} != {old!r}'
+        assert tail == old, f'judging changed: {tail!r} != {old!r}'
 
 
-# .gitkeep é vazio por definição; removê-lo isola a regra que conta blobs vazios.
+# .gitkeep is empty by definition; removing it isolates the rule that counts empty blobs.
 keep = locks / '.gitkeep'
 if keep.exists():
     keep.unlink()
@@ -116,7 +116,7 @@ elif mode == 'global':
     excludes.write_text('.shipcraft/locks/*.json\n')
     git('config', 'core.excludesFile', excludes)
 elif mode == 'recusa':
-    # Não testa o valor que o init escreve; pede uma versão certamente futura.
+    # Does not test the value init writes; asks for a version that is surely in the future.
     from h import toml_load
     current = toml_load(Path(__file__).resolve().parents[2] / 'nucleo/Cargo.toml')['package']['version']
     future = str(int(current.split('.')[0]) + 10) + '.0.0'
@@ -124,21 +124,21 @@ elif mode == 'recusa':
     cfg.write_text(re.sub(r'shipcraft_min\s*=\s*"[^"]*"', f'shipcraft_min = "{future}"', cfg.read_text()))
     git('add', '.shipcraft.toml')
 elif mode == 'copia':
-    # O índice mantém o stub vermelho; a árvore suja tem a implementação verde.
+    # The index keeps the red stub; the dirty tree has the green implementation.
     write('textutil.py', 'import re, unicodedata\ndef slugify(text):\n    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()\n    return re.sub(r"[^a-zA-Z0-9]+", "-", text).strip("-").lower()\n')
 elif mode == 'rastreado':
     write('.shipcraft/locks/rastreada.txt')
     git('add', '.shipcraft/locks/rastreada.txt')
 
 baseline = hook()
-assert 'shipcraft: warning:' not in baseline.stdout, f'controle já tinha aviso: {baseline.stdout}'
-assert (baseline.returncode != 0) == (mode == 'recusa'), 'fixture com veredito inesperado'
+assert 'shipcraft: warning:' not in baseline.stdout, f'control already had a warning: {baseline.stdout}'
+assert (baseline.returncode != 0) == (mode == 'recusa'), 'fixture with an unexpected verdict'
 if mode in ('sem-arquivos', 'rastreado'):
     check_output(hook(), baseline, [])
     sys.exit(0)
 
 if mode in ('only', 'only-ignorado'):
-    # O Git constrói e passa seu índice temporário ao hook de commit --only.
+    # Git builds its temporary index and passes it to the commit --only hook.
     hooks = repo / '.git/item28-hooks'
     hooks.mkdir()
     installed = hooks / ('pre-commit' if route == 'pre' else 'commit-msg')
@@ -154,18 +154,18 @@ if mode in ('only', 'only-ignorado'):
     path = '.shipcraft/locks/fora-do-only.txt'
     write(path)
     git('add', '-f', path)
-    assert 'shipcraft: warning:' not in hook().stdout, 'arquivo não vazio já está no índice normal'
+    assert 'shipcraft: warning:' not in hook().stdout, 'non-empty file is already in the normal index'
     write('item28-pendente.txt', 'julgado\n')
     result = git('-c', f'core.hooksPath={hooks}', 'commit', '--only', '-qm', 'chore: julgado', '--', 'item28-pendente.txt', ok=False)
-    assert receipt.read_text().strip() and not receipt.read_text().strip().endswith('/index'), 'Git não forneceu índice temporário'
+    assert receipt.read_text().strip() and not receipt.read_text().strip().endswith('/index'), 'Git did not provide a temporary index'
     check_output(result, before, [warning(path, mode == 'only-ignorado')])
-    assert git('ls-tree', '--name-only', 'HEAD', '--', path).stdout == '', 'trava entrou no commit --only'
-    assert path in git('ls-files', '--', path).stdout, 'índice normal foi perdido'
+    assert git('ls-tree', '--name-only', 'HEAD', '--', path).stdout == '', 'lock got into the commit --only'
+    assert path in git('ls-files', '--', path).stdout, 'normal index was lost'
     sys.exit(0)
 
 entries = []
 if mode in ('cinco', 'seis', 'sete'):
-    # C.json vem antes de a.json em bytes, sem colisão em APFS sem caixa.
+    # C.json sorts before a.json by bytes, with no clash on case-insensitive APFS.
     names = ['Z.txt', 'a.txt', 'z.json', 'C.json', 'a.json', 'b.md', 'b.json']
     size = {'cinco': 5, 'seis': 6, 'sete': 7}[mode]
     for name in reversed(names[:size]):
@@ -201,7 +201,7 @@ else:
         git('add', path)
     entries.append((path, mode in ('gitignore', 'info', 'global')))
 
-# Sonda do limite externo: delega todo Git, salvo a consulta cuja falha é testada.
+# Probe at the outer boundary: delegates all of Git except the query whose failure is tested.
 env = base_env
 if mode in ('consulta-outros', 'consulta-ignorados', 'copia'):
     bindir = scratch / 'git-probe'
@@ -222,7 +222,7 @@ if mode in ('consulta-outros', 'consulta-ignorados', 'copia'):
     wrapper.chmod(0o755)
     env = dict(base_env, PATH=str(bindir) + os.pathsep + base_env['PATH'])
     if mode.startswith('consulta-'):
-        # Sem arquivos: a única linha é o aviso de que não conseguiu consultar.
+        # No files: the only line is the warning that the query failed.
         (repo / entries[0][0]).unlink()
         entries = []
 
@@ -237,18 +237,18 @@ try:
             run(['sh', '-c', command])
         for path, _ in entries:
             staged = git('show', ':' + path).stdout
-            assert staged == (repo / path).read_text(), 'comando colado adicionou outro conteúdo'
+            assert staged == (repo / path).read_text(), 'pasted command added other content'
     if mode == 'copia':
         rows = [json.loads(line) for line in trace.read_text().splitlines()]
-        assert rows, 'consulta Git não observada'
+        assert rows, 'Git query not observed'
         for row in rows:
             effective = Path(row['cwd'])
             for i, arg in enumerate(row['args'][:-1]):
                 if arg == '-C':
                     effective = effective / row['args'][i + 1]
             effective = effective.resolve()
-            assert effective == repo or repo in effective.parents, 'consulta feita na cópia julgada'
-        assert 'unicodedata.normalize' in (repo / 'textutil.py').read_text(), 'hook mudou árvore original'
+            assert effective == repo or repo in effective.parents, 'query ran in the judged copy'
+        assert 'unicodedata.normalize' in (repo / 'textutil.py').read_text(), 'hook changed the original tree'
 finally:
     if mode == 'ilegivel':
         (repo / entries[0][0]).chmod(0o644)

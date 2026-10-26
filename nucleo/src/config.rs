@@ -1,5 +1,5 @@
 //! `.shipcraft.toml`: how the suites run, which files are tests, and where each
-//! layer runs (`[execucao]`, `[papeis]`, `[revisao]`, `[maquina]`).
+//! layer runs (`[execution]`, `[roles]`, `[review]`, `[machine]`).
 
 use crate::git::{Repo, Snapshot};
 use crate::glob;
@@ -571,7 +571,7 @@ globs = ["tests/**"]
 
     #[test]
     fn not_toml_or_a_suite_without_comando_is_a_refusal() {
-        for text in ["isto não é toml", "[[suite]]\nroot = \"a\"\n"] {
+        for text in ["this is not toml", "[[suite]]\nroot = \"a\"\n"] {
             match Config::parse(text) {
                 Err(crate::refusal::Stop::Refused(r)) => assert_eq!(r.code, "config-invalid", "{text}"),
                 _ => panic!("{text}"),

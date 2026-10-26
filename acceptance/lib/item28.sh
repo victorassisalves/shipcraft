@@ -1,4 +1,4 @@
-# Item 28, spec 119a6d6: consultas Git na árvore original; só aviso.
+# Item 28, spec 119a6d6: Git queries on the original tree; warning only.
 item28_cases() {
   local route mode
   for route in pre msg; do
@@ -9,9 +9,9 @@ item28_cases() {
 }
 item28_case() {
   local mode="${CASE#v1-28.}"
-  EXPECT="aviso do item 28 preserva o julgamento e o índice"
+  EXPECT="item 28 warning keeps the judgment and the index"
   v1_start codex
   case "$mode" in *-copia) setup_red ;; *) setup_init ;; esac
-  must_accept 'item 28 caixa-preta' cmd "$PY" "$ACEITE/tools/item28.py" "$mode" "$(command -v shipcraft)" "$CW"
+  must_accept 'item 28 black box' cmd "$PY" "$ACEITE/tools/item28.py" "$mode" "$(command -v shipcraft)" "$CW"
   pass
 }

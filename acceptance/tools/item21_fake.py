@@ -108,7 +108,7 @@ if args[:2] == ['release','view']:
     if '--jq' in args or '-q' in args:
         print(version)
     else:
-        print(json.dumps(dict(tagName=version,id=321,databaseId=321,url='https://github.com/victorassisalves/shipcraft-v2/releases/tag/'+version)))
+        print(json.dumps(dict(tagName=version,id=321,databaseId=321,url='https://github.com/victorassisalves/shipcraft/releases/tag/'+version)))
     sys.exit(0)
 if args[:2] == ['release','download']:
     assert 'v1.2.10' in args, 'download sem tag fixada'
@@ -137,7 +137,7 @@ if args[:2] == ['release','create']:
     save()
     if case == 'release-incerto':
         print('conexão perdida',file=sys.stderr); sys.exit(74)
-    print('https://github.com/victorassisalves/shipcraft-v2/releases/tag/v1.2.10')
+    print('https://github.com/victorassisalves/shipcraft/releases/tag/v1.2.10')
     if case == 'release-rollback':
         print('falha depois de receber identificação',file=sys.stderr); sys.exit(75)
     sys.exit(0)

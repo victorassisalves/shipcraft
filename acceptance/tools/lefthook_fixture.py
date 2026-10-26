@@ -15,7 +15,7 @@ def snapshot():
     return result
 
 
-# lefthook v1.11.13: internal/templates/hook.tmpl, sem rc, exe fixo ou roots.
+# lefthook v1.11.13: internal/templates/hook.tmpl, without rc, fixed exe or roots.
 HOOK = '''#!/bin/sh
 
 if [ "$LEFTHOOK_VERBOSE" = "1" -o "$LEFTHOOK_VERBOSE" = "true" ]; then
