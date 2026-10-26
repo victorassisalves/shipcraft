@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Ajudantes da bateria de aceitacao da v1: le o estado dos stubs, confere o
-runs.jsonl, edita o .shipcraft.toml. Uso: h.py <subcomando> args...
-Sai com 0 quando a conferencia passa e 1 quando nao (com o motivo no stdout)."""
+"""Helpers for the v1 acceptance battery: read the stubs' state, check
+runs.jsonl, edit .shipcraft.toml. Usage: h.py <subcommand> args...
+Exits 0 when the check passes and 1 when it does not (with the reason on stdout)."""
 import json, os, re, sys, time
 
 
@@ -142,7 +142,7 @@ def cmd_rev_calls(a):
 
 
 def cmd_rev_cfg(a):
-    """rev_cfg FILE MODE [k=v ...]: grava o reviewer.json do stub."""
+    """rev_cfg FILE MODE [k=v ...]: writes the stub's reviewer.json."""
     d = {"mode": a[1]}
     for kv in a[2:]:
         k, _, v = kv.partition("=")
@@ -240,47 +240,47 @@ def cmd_tl_has(a):
 
 
 def cmd_jsonl_check(a):
-    """jsonl_check FILE BRANCHES SHAS_FILE: formato de cada linha e as combinacoes esperadas.
-    BRANCHES: lista separada por virgula; o ultimo e o branch das linhas de ci e revisao."""
+    """jsonl_check FILE BRANCHES SHAS_FILE: the format of each row and the expected combinations.
+    BRANCHES: comma-separated list; the last one is the branch of the ci and review rows."""
     rows = jl(a[0])
     branches = a[1].split(",")
     shas = set(open(a[2]).read().split())
     if not rows:
-        die("o runs.jsonl esta vazio ou nao existe")
+        die("runs.jsonl is empty or missing")
     seen = set()
     for i, r in enumerate(rows):
         for k in ("layer", "secs", "result", "code", "branch", "commit"):
             if k not in r:
-                die("linha %d sem a chave %r: %s" % (i + 1, k, r))
+                die("row %d lacks the key %r: %s" % (i + 1, k, r))
         if r["layer"] not in ("hook", "ci", "review"):
             if r.get("escape") is True or r["layer"] == "merge":
                 continue
-            die("linha %d: camada %r fora de hook|ci|revisao" % (i + 1, r["layer"]))
+            die("row %d: layer %r not in hook|ci|review" % (i + 1, r["layer"]))
         if r["result"] not in ("passed", "refused", "error"):
-            die("linha %d: resultado %r fora de passou|recusou|erro" % (i + 1, r["result"]))
+            die("row %d: result %r not in passed|refused|error" % (i + 1, r["result"]))
         if isinstance(r["secs"], bool) or not isinstance(r["secs"], (int, float)) or r["secs"] < 0:
-            die("linha %d: tempo nao e numero >= 0: %r" % (i + 1, r["secs"]))
+            die("row %d: secs is not a number >= 0: %r" % (i + 1, r["secs"]))
         if not isinstance(r["commit"], str):
-            die("linha %d: commit nao e texto: %r" % (i + 1, r["commit"]))
+            die("row %d: commit is not a string: %r" % (i + 1, r["commit"]))
         if r["layer"] != "hook" and not r["commit"]:
-            die("linha %d: commit vazio numa linha de %s" % (i + 1, r["layer"]))
+            die("row %d: empty commit in a %s row" % (i + 1, r["layer"]))
         if r["branch"] not in branches:
-            die("linha %d: branch %r, esperado um de %r" % (i + 1, r["branch"], branches))
+            die("row %d: branch %r, expected one of %r" % (i + 1, r["branch"], branches))
         if r["layer"] != "hook" and r["branch"] != branches[-1]:
-            die("linha %d: branch %r, esperado %r" % (i + 1, r["branch"], branches[-1]))
+            die("row %d: branch %r, expected %r" % (i + 1, r["branch"], branches[-1]))
         if r["layer"] == "review" and "tokens" not in r:
-            die("linha %d: linha da revisao sem a chave tokens" % (i + 1))
+            die("row %d: review row without the tokens key" % (i + 1))
         if r["result"] == "refused" and not (isinstance(r["code"], str) and r["code"]):
-            die("linha %d: recusa sem codigo: %r" % (i + 1, r))
+            die("row %d: refusal without a code: %r" % (i + 1, r))
         seen.add((r["layer"], r["result"]))
     want = [("hook", "passed"), ("hook", "refused"), ("ci", "passed"), ("ci", "refused"),
             ("review", "passed"), ("review", "refused"), ("review", "error")]
     miss = [w for w in want if w not in seen]
     if miss:
-        die("faltam linhas para: %s (vistas: %s)" % (miss, sorted(seen)))
+        die("rows missing for: %s (seen: %s)" % (miss, sorted(seen)))
     ci_ok = [r for r in rows if r.get("layer") == "ci" and r["result"] == "passed"]
     if not any(r["commit"] in shas for r in ci_ok):
-        die("nenhuma linha ci/passou tem como commit uma sha vista pela bateria: %s" % [r["commit"] for r in ci_ok])
+        die("no ci/passed row has as its commit a sha the battery saw: %s" % [r["commit"] for r in ci_ok])
     print("OK")
 
 
@@ -295,7 +295,7 @@ def cmd_lock_key(a):
     d = json.load(open(a[0]))
     k = lock_key(d)
     if not k:
-        die("a trava nao tem chave de versao do formato (esperado uma chave com 'vers' ou 'format'): %s" % list(d))
+        die("the lock has no format version key (expected a key with 'vers' or 'format'): %s" % list(d))
     print(k)
 
 
@@ -304,21 +304,21 @@ def cmd_lock_bump(a):
     d = json.load(open(p))
     k = lock_key(d)
     if not k:
-        die("sem chave de versao")
+        die("no version key")
     d[k] = 999 if isinstance(d[k], int) and not isinstance(d[k], bool) else "999.0"
-    # preserva a formatacao legivel da trava
+    # keep the lock's readable formatting
     json.dump(d, open(p, "w"), indent=2)
     open(p, "a").write("\n")
 
 
 def cmd_has_summary(a):
-    """Existe um texto publicado que fala das tres camadas e dos tokens?"""
+    """Is there a posted text that covers the three layers and the tokens?"""
     for w in writes(a[0], "comment,pr-edit,pr-create"):
         t = w["text"]
         if re.search(r"(?i)hook", t) and re.search(r"(?i)\bci\b", t) and re.search(r"(?i)review", t) and re.search(r"(?i)tokens", t):
             print("OK")
             return
-    die("nenhum texto publicado no PR cita hook, ci, revis* e tokens")
+    die("no text posted to the PR mentions hook, ci, review and tokens")
 
 
 AVISO_TAMANHO = "Smaller PRs usually get faster reviews; consider splitting."
@@ -329,10 +329,10 @@ def size_texts(st):
 
 
 def cmd_size_line(a):
-    """size_line STATE: a linha 'Size:' do ultimo texto publicado no PR que a traz."""
+    """size_line STATE: the 'Size:' line of the last text posted to the PR that has one."""
     ts = size_texts(a[0])
     if not ts:
-        die("nenhum texto publicado no PR traz a linha 'Size:'")
+        die("no text posted to the PR has the 'Size:' line")
     for l in ts[-1].splitlines():
         if "Size:" in l:
             print(l.strip())
@@ -340,23 +340,23 @@ def cmd_size_line(a):
 
 
 def cmd_size_warn(a):
-    """size_warn STATE: SIM/NAO, o ultimo texto com 'Size:' traz o aviso de PR grande?"""
+    """size_warn STATE: SIM/NAO (yes/no), does the last text with 'Size:' carry the large-PR warning?"""
     ts = size_texts(a[0])
     if not ts:
-        die("nenhum texto publicado no PR traz a linha 'Size:'")
+        die("no text posted to the PR has the 'Size:' line")
     print("SIM" if AVISO_TAMANHO in ts[-1] else "NAO")
 
 
 def cmd_warn_count(a):
-    """warn_count STATE: em quantos textos publicados (qualquer tipo) o aviso aparece."""
+    """warn_count STATE: in how many posted texts (any kind) the warning appears."""
     print(len([w for w in writes(a[0]) if AVISO_TAMANHO in w["text"]]))
 
 
 def cmd_jsonl_field(a):
-    """jsonl_field FILE CAMADA COMMIT CHAVE: o valor (JSON) da chave em cada linha da camada nesse commit; MISSING se a chave falta."""
+    """jsonl_field FILE LAYER COMMIT KEY: the value (JSON) of the key in each row of that layer at that commit; MISSING if the key is absent."""
     rows = [r for r in jl(a[0]) if r.get("layer") == a[1] and r.get("commit") == a[2]]
     if not rows:
-        die("nenhuma linha %s para o commit %s" % (a[1], a[2][:10]))
+        die("no %s row for commit %s" % (a[1], a[2][:10]))
     for r in rows:
         print(json.dumps(r[a[3]]) if a[3] in r else "MISSING")
 
@@ -366,12 +366,12 @@ def cmd_mutating_reads(a):
 
 
 def cmd_text_has(a):
-    """text_has STATE KINDS REGEX: algum texto publicado casa?"""
+    """text_has STATE KINDS REGEX: does any posted text match?"""
     for w in writes(a[0], a[1] if a[1] != "-" else None):
         if re.search(a[2], w["text"]):
             print("OK")
             return
-    die("nenhum texto publicado (%s) casa %r" % (a[1], a[2]))
+    die("no posted text (%s) matches %r" % (a[1], a[2]))
 
 
 def cmd_protect_ok(a):
@@ -390,17 +390,17 @@ def cmd_escape_rows(a):
 
 
 def cmd_lock_failing(a):
-    """lock_failing TRAVA: imprime, um por linha, os casos de failing_at_red (item 13)."""
+    """lock_failing LOCK: prints the failing_at_red cases, one per line (item 13)."""
     d = json.load(open(a[0]))
     if "failing_at_red" not in d:
-        die("a trava nao tem failing_at_red: %s" % list(d))
+        die("the lock has no failing_at_red: %s" % list(d))
     for c in d["failing_at_red"]:
         print(c)
 
 
 def cmd_npx_check(a):
-    """npx_check ARQUIVO...: todo `npx` escrito traz `--` antes do primeiro argumento que nao e flag
-    da propria npx (item 12). Imprime NPX=<n> e, para cada comando ruim, BAD <file>: <comando>."""
+    """npx_check FILE...: every `npx` written has `--` before the first argument that is not
+    an npx flag (item 12). Prints NPX=<n> and, for each bad command, BAD <file>: <command>."""
     n, bad = 0, []
     for path in a:
         try:
@@ -425,24 +425,24 @@ def cmd_npx_check(a):
 
 
 def cmd_verifica_check(a):
-    """verifica_check ARQUIVO AGULHA: a checagem do projeto inteiro esta em `verifica` (de alguma suite ou do
-    primeiro nivel) e em nenhum test_command / comando (item 13.1, ultimo ponto)."""
+    """verifica_check FILE NEEDLE: the whole-project check is in `verifica` (of some suite or of the
+    top level) and in no test_command / command (item 13.1, last point)."""
     d = toml_load(a[0])
     needle = a[1]
-    tables = [("(topo)", d.get("test_command"), d.get("check"))]
+    tables = [("(top)", d.get("test_command"), d.get("check"))]
     tables += [(s.get("name"), s.get("command"), s.get("check")) for s in d.get("suite", [])]
     with_v = [n for n, c, v in tables if isinstance(v, str) and needle in v]
     if not with_v:
-        die("nenhum `verifica` traz %r: %s" % (needle, [(n, v) for n, c, v in tables]))
+        die("no `verifica` has %r: %s" % (needle, [(n, v) for n, c, v in tables]))
     bad = [n for n, c, v in tables if isinstance(c, str) and needle.split()[0] in c and needle in c]
     if bad:
-        die("o comando de teste de %s ainda traz %r" % (bad, needle))
-    print("OK verifica em %s" % with_v)
+        die("the test command of %s still has %r" % (bad, needle))
+    print("OK verifica in %s" % with_v)
 
 
 CMDS = {k[4:].replace("_", "-"): v for k, v in globals().items() if k.startswith("cmd_")}
 
 if __name__ == "__main__":
     if len(sys.argv) < 2 or sys.argv[1] not in CMDS:
-        die("uso: h.py <%s>" % "|".join(sorted(CMDS)), 2)
+        die("usage: h.py <%s>" % "|".join(sorted(CMDS)), 2)
     CMDS[sys.argv[1]](sys.argv[2:])

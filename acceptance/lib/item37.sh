@@ -1,10 +1,10 @@
-# Item 37: reutiliza exclusivamente o sandbox offline do item 21.
+# Item 37: reuses only the offline sandbox of item 21.
 item37_cases() {
   for c in release-comum release-prefixo release-preso; do echo "v1-37.$c"; done
 }
 item37_case() {
-  EXPECT='pacotes dos dois alvos com só shipcraft, inclusive com xattr no macOS'
-  must_accept 'item 37: tarfile e atributo na entrada do tar' cmd "$PY" - "$ACEITE" "${CASE#v1-37.}" "$(command -v shipcraft)" <<'PY37'
+  EXPECT='packages for both targets hold only shipcraft, xattr on macOS included'
+  must_accept 'item 37: tarfile and attribute on the tar entry' cmd "$PY" - "$ACEITE" "${CASE#v1-37.}" "$(command -v shipcraft)" <<'PY37'
 import os
 from pathlib import Path
 import runpy
@@ -15,13 +15,13 @@ import tempfile
 aceite, case, binary = sys.argv[1:]
 aceite = Path(aceite).resolve()
 real_tar = shutil.which('tar')
-# As cópias são só ferramentas de teste; release/ e item21 permanecem intactos.
+# The copies are test tools only; release/ and item21 stay untouched.
 with tempfile.TemporaryDirectory(prefix='item37-', dir=os.environ['TMPDIR']) as scratch:
     scratch = Path(scratch)
     probe = scratch / 'tar.jsonl'
     fake = (aceite / 'tools/item21_fake.py').read_text()
     needle = '    dest.chmod(0o755)\n'
-    assert fake.count(needle) == 1, 'sandbox item21 mudou: rever sonda de build'
+    assert fake.count(needle) == 1, 'item21 sandbox changed: review the build probe'
     fake = fake.replace(needle, needle + '''    if sys.platform == 'darwin':
         try:
             subprocess.run(['/usr/bin/xattr','-w','com.shipcraft.aceite37','item37',str(dest)], check=True, capture_output=True)
@@ -68,8 +68,8 @@ os.execv(os.environ['I37_TAR'],[os.environ['I37_TAR'],*args])
     finally:
         rows = [json.loads(s) for s in probe.read_text().splitlines()] if probe.exists() else []
         exercised = sys.platform == 'darwin' and real_tar == '/usr/bin/tar' and sum(any(r['attrs']) for r in rows) == 2
-        print('item37: atributo conferido na entrada dos dois pacotes' if exercised else
-              'item37: defeito não exercitado on this machine; conferência tarfile mantida', flush=True)
+        print('item37: attribute checked on the entry of both packages' if exercised else
+              'item37: defect not exercised on this machine; tarfile check kept', flush=True)
 PY37
   pass
 }

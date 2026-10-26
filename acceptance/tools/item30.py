@@ -1,4 +1,4 @@
-"""Apoio caixa-preta do item 30: config e caminhos da trava observada."""
+"""Black-box helper for item 30: config and the paths in the observed lock."""
 import json
 import pathlib
 import re
@@ -71,11 +71,11 @@ elif mode == 'locked':
         if isinstance(value, list):
             return any(contains(v) for v in value)
         return value == path
-    assert contains(data), f'caminho ausente: {path}'
+    assert contains(data), f'path missing: {path}'
 elif mode == 'brief':
     brief = pathlib.Path(args[0]).read_text()
     root = args[1]
-    # 30.3 exige cd e comando dentro do mesmo subshell, ligados por &&.
+    # 30.3 requires cd and the command inside the same subshell, joined by &&.
     quoted = ["'" + root.replace("'", escape) + "'" for escape in ["'\"'\"'", "'\\''"]]
     assert any(re.search(r"\(cd\s+" + re.escape(q) + r"\s+&&\s+[^\n]+\)", brief) for q in quoted), brief
     assert './packages//api/' not in brief, brief

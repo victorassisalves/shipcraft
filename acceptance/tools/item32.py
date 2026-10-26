@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Item 32: Go/gotestsum reais; só as falhas do leitor são simuladas."""
+"""Item 32: real Go/gotestsum; only the reader's failures are simulated."""
 import json
 import os
 from pathlib import Path
@@ -44,7 +44,7 @@ def setup():
         result = subprocess.run(['go', 'mod', 'edit', '-json', str(module.resolve())], check=True, capture_output=True, text=True)
         assert json.loads(result.stdout)['Module']['Path'] == 'example.com/textutil'
     else:
-        # Apenas a execução dos testes fica em GOPATH; o leitor continua vendo o go.mod real.
+        # Only the test run uses GOPATH; the reader still sees the real go.mod.
         os.environ['GO111MODULE'] = 'off'
     command = 'gotestsum --junitfile {junit} -- -count=1 ./...'
     if no_module:
@@ -100,9 +100,9 @@ def verify():
             assert not any(c[0] == 'go' and c[1:4] == ['mod', 'edit', '-json'] for c in calls), calls
         return
     for args in commands:
-        assert './...' not in args, ('filtro de pacote ausente', args)
-        assert '-run' in args, ('filtro de nomes do item 13 ausente', args)
-    # O caminho absoluto pode ser o da cópia julgada; o subcaminho do pacote é estável.
+        assert './...' not in args, ('package filter missing', args)
+        assert '-run' in args, ('item 13 name filter missing', args)
+    # The absolute path may be the judged copy's; the package subpath is stable.
     assert all(any(arg.endswith('/a') or arg == './a' for arg in args) for args in commands), commands
 
 

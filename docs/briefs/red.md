@@ -23,4 +23,4 @@ The coordinator includes this brief when assigning a spec item's acceptance case
     nohup perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV or die' env -u SHIPCRAFT_ACCEPTANCE_CASES -u SHIPCRAFT_ACCEPTANCE_REUSE SHIPCRAFT_ACCEPTANCE_JOBS=4 nice -n 10 bash acceptance/run.sh <binary> all > <log> 2>&1 &
     ```
 
-    Follow the log or reuse cache without waiting in the foreground. After resuming a seat, inspect its existing log before starting another run. Include the final `run.sh: resultado salvo: <id> (...)` line in the report.
+    Follow the log or reuse cache without waiting in the foreground. After resuming a seat, inspect its existing log before starting another run. Include the final `run.sh: result saved: <id> (...)` line in the report.

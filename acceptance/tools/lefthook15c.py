@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Item 15c. Hook real v1.11.13; executor minimo offline dos commands."""
+"""Item 15c. Real v1.11.13 hook; minimal offline runner for the commands."""
 import os
 from pathlib import Path
 import subprocess
@@ -24,18 +24,18 @@ def hook_sem_exec(case):
     path.write_text(yaml.safe_dump(data, default_flow_style=False, sort_keys=False))
     hp.write_text(HOOK)
     hp.chmod(0o644)
-    assert not os.access(hp, os.X_OK), 'fixture do hook deve estar sem execucao'
+    assert not os.access(hp, os.X_OK), 'the hook fixture must not be executable'
     p = run('shipcraft', 'status' if status else 'init')
-    assert p.returncode == 0, 'init/status recusou hook lefthook sem execucao'
+    assert p.returncode == 0, 'init/status refused a non-executable lefthook hook'
     if status:
         out = (p.stdout + p.stderr).lower()
-        assert 'hook through lefthook' not in out and 'missing' in out, 'status deve indicar missing hook quando lefthook nao tem bit de execucao'
+        assert 'hook through lefthook' not in out and 'missing' in out, 'status must say missing hook when lefthook lacks the execute bit'
     else:
         commands = yaml.safe_load(path.read_text())['pre-commit']['commands']
-        assert commands.get('shipcraft', {}).get('run') == 'shipcraft check', 'init nao integrou shipcraft check com hook sem execucao'
-        assert commands['projeto'] == data['pre-commit']['commands']['projeto'], 'init alterou comando do projeto'
-        assert sum('lefthook install' in line for line in (p.stdout + p.stderr).splitlines()) == 1, 'hook sem execucao: falta orientacao em uma linha para lefthook install'
-    assert hp.read_text() == HOOK and hp.stat().st_mode & 0o777 == 0o644, 'init/status alterou hook lefthook sem execucao'
+        assert commands.get('shipcraft', {}).get('run') == 'shipcraft check', 'init did not integrate shipcraft check with a non-executable hook'
+        assert commands['projeto'] == data['pre-commit']['commands']['projeto'], 'init changed the project command'
+        assert sum('lefthook install' in line for line in (p.stdout + p.stderr).splitlines()) == 1, 'non-executable hook: missing the one-line lefthook install hint'
+    assert hp.read_text() == HOOK and hp.stat().st_mode & 0o777 == 0o644, 'init/status changed the non-executable lefthook hook'
 
 
 def main(case):

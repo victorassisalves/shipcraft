@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Item 22: contrato observado no processo da suíte; sem ler o núcleo."""
+"""Item 22: contract observed in the suite process; without reading the core."""
 import json
 import os
 from pathlib import Path
@@ -14,7 +14,7 @@ def run(*args, ok=True, env=None):
     p = subprocess.run(args, text=True, capture_output=True, timeout=90, env=env)
     print('$', shlex.join(args), '\n', p.stdout, p.stderr, flush=True)
     if ok:
-        assert p.returncode == 0, f'saída {p.returncode}: {args}'
+        assert p.returncode == 0, f'exit {p.returncode}: {args}'
     return p
 
 
@@ -68,7 +68,7 @@ def clear():
 def main(case, binary):
     os.environ['ITEM22_LOG'] = str(Path(os.environ['TMPDIR']) / 'item22-observed.jsonl')
     clear()
-    # Um projeto próprio, com versão mínima própria; não testa a versão escrita pelo init.
+    # A project of its own, with its own minimum version; it does not test the version init writes.
     root = Path('item22-project')
     root.mkdir()
     os.chdir(root)
@@ -107,7 +107,7 @@ def main(case, binary):
     Path('value').write_text('red')
     Path('.gitignore').write_text('.reports/\n')
     py = shlex.quote(sys.executable)
-    # Exemplo bash: NUL preservado, uma chamada só; ausência significa suíte inteira.
+    # Bash example: NUL kept, a single call; absence means the whole suite.
     Path('suite.sh').write_text('''#!/usr/bin/env bash
 args=()
 if [ -n "${SHIPCRAFT_CASES:-}" ]; then
@@ -158,22 +158,22 @@ exec ''' + py + ''' runner.py --runner "$1" "${args[@]}"
         git('commit', '-qm', 'test: build')
     if case.startswith('filtra-invalido'):
         p = run(binary, 'red', ok=False)
-        assert p.returncode != 0, 'filtra inválido aceito'
-        assert not rows(), 'config inválida executou comando'
+        assert p.returncode != 0, 'invalid filter accepted'
+        assert not rows(), 'invalid config ran a command'
         assert 'filter' in p.stdout + p.stderr
         return
     inherited = dict(os.environ, SHIPCRAFT_CASES='/inexistente/herdado-casos', SHIPCRAFT_FILES='/inexistente/herdado-arquivos')
     run(binary, 'red', env=inherited if case in ('ambiente-red', 'ambiente-build') else None)
     if case in ('ambiente-red', 'ambiente-build'):
-        assert rows() and all(all(v is None for v in r['env'].values()) for r in rows()), 'ambiente herdado chegou ao RED'
+        assert rows() and all(all(v is None for v in r['env'].values()) for r in rows()), 'inherited environment reached RED'
         if case == 'ambiente-build':
-            assert any(r['argv'] == ['probe', 'build'] for r in rows()), 'build não executou'
+            assert any(r['argv'] == ['probe', 'build'] for r in rows()), 'build did not run'
         return
     locks = list(Path('.shipcraft/locks').glob('*.json'))
     assert len(locks) == 1
     if case == 'bash':
-        assert len(rows()) == 2, 'RED deve rodar verifica e uma suíte'
-        assert all('--selected' not in r['argv'] for r in rows()), 'sem variável não executou suíte inteira'
+        assert len(rows()) == 2, 'RED must run verifica and one suite'
+        assert all('--selected' not in r['argv'] for r in rows()), 'without the variable it did not run the whole suite'
     d = json.loads(locks[0].read_text())
     assert len(d['failing_at_red']) == len({((c.get('class', '') + '::' if c.get('class') else '') + c['name']) for c in data if c.get('red')}) * (2 if case == 'duas-suites' else 1), d
     git('add', '.')
@@ -190,7 +190,7 @@ exec ''' + py + ''' runner.py --runner "$1" "${args[@]}"
         git('commit', '-qm', 'test: segundo RED registrado')
         git('cherry-pick', first)
         locks = list(Path('.shipcraft/locks').glob('*.json'))
-        assert len(locks) == 2, 'fixture não criou duas travas reais'
+        assert len(locks) == 2, 'fixture did not create two real locks'
         first_data = data
         data = data[:-1] + second + [data[-1]]
         Path('cases.json').write_text(json.dumps(data))
@@ -213,17 +213,17 @@ exec ''' + py + ''' runner.py --runner "$1" "${args[@]}"
     p = run(binary, 'check', ok=False, env=inherited if case.startswith('ambiente') else None)
     observed = [r for r in rows() if r['argv'][0] != 'probe']
     if case == 'copia-indice':
-        assert observed and all(r['phase'] == 'green' and Path(r['cwd']) != Path.cwd() for r in observed), 'não julgou cópia do índice'
+        assert observed and all(r['phase'] == 'green' and Path(r['cwd']) != Path.cwd() for r in observed), 'did not judge a copy of the index'
     if case == 'arvore':
-        assert observed and all(Path(r['cwd']) == Path.cwd() for r in observed), 'árvore limpa não foi usada'
-    assert observed, 'suíte não executou'
+        assert observed and all(Path(r['cwd']) == Path.cwd() for r in observed), 'the clean tree was not used'
+    assert observed, 'suite did not run'
     for r in observed:
         for v in r['env'].values():
             if v and v['hex'] is not None:
-                assert not Path(v['path']).exists(), 'temporário sobreviveu à execução'
+                assert not Path(v['path']).exists(), 'temporary file survived the run'
     if case.startswith('sumiu') or case in ('pulado', 'pulado-parcial'):
-        assert p.returncode != 0, 'RED ausente/pulado fechou'
-        assert all(json.loads(f.read_text()).get('state') == 'open' for f in locks), 'recusa fechou trava'
+        assert p.returncode != 0, 'missing/skipped RED closed'
+        assert all(json.loads(f.read_text()).get('state') == 'open' for f in locks), 'refusal closed the lock'
         lines = [x for x in (p.stdout + p.stderr).splitlines() if x.strip()][-3:]
         assert len(lines) == 3 and lines[0].startswith('shipcraft refused:') and lines[1].startswith('Why:') and lines[2].startswith('Next:'), lines
         assert not Path(git('rev-parse', '--git-path', 'shipcraft/close')).exists()
@@ -235,10 +235,10 @@ exec ''' + py + ''' runner.py --runner "$1" "${args[@]}"
             assert events[-1]['code'] == 'case-missing', events[-1]
             assert ('the command filters by case' in out) == (case in ('sumiu-comando', 'sumiu-parcial')), out
         return
-    assert p.returncode == 0, 'hook GREEN recusado'
-    assert all(json.loads(f.read_text()).get('state') == 'closed' for f in locks), 'trava não fechou'
+    assert p.returncode == 0, 'GREEN hook refused'
+    assert all(json.loads(f.read_text()).get('state') == 'closed' for f in locks), 'lock did not close'
     if case == 'temporario-falha':
-        assert all(all(v is None for v in r['env'].values()) for r in observed), 'fallback parcial'
+        assert all(all(v is None for v in r['env'].values()) for r in observed), 'partial fallback'
         return
     if case.startswith('filtro-'):
         args = observed[-1]['argv']
@@ -248,16 +248,16 @@ exec ''' + py + ''' runner.py --runner "$1" "${args[@]}"
             if runner_name == 'go':
                 assert './...' in args, args
         else:
-            assert changed or (runner_name == 'go' and './...' not in args), 'filtro shipcraft desapareceu: ' + repr(args)
+            assert changed or (runner_name == 'go' and './...' not in args), 'shipcraft filter disappeared: ' + repr(args)
         return
     if case in ('ambiente-ci', 'ambiente-verifica'):
-        # Sem hook: CI executa sobre HEAD; valor herdado não pode chegar nem ao verifica.
+        # No hook: CI runs on HEAD; an inherited value must not reach even verifica.
         git('commit', '-qm', 'feat: GREEN')
         clear()
         run(binary, 'ci', '--base', base, env=inherited, ok=False)
-        assert rows(), 'CI não executou comandos'
-        assert any(r['argv'] == ['probe', 'verifica'] for r in rows()), 'verifica não executou'
-        assert all(all(v is None for v in r['env'].values()) for r in rows()), 'ambiente herdado chegou ao CI'
+        assert rows(), 'CI ran no commands'
+        assert any(r['argv'] == ['probe', 'verifica'] for r in rows()), 'verifica did not run'
+        assert all(all(v is None for v in r['env'].values()) for r in rows()), 'inherited environment reached CI'
         return
     want = sorted(set(((c.get('class', '') + '::' if c.get('class') else '') + c['name']).encode() for c in data if c.get('red')))
     covered = set()
@@ -266,10 +266,10 @@ exec ''' + py + ''' runner.py --runner "$1" "${args[@]}"
         want = sorted(set(((c.get('class', '') + '::' if c.get('class') else '') + c['name']).encode() for c in local if c.get('red')))
         val = r['env']['SHIPCRAFT_CASES']
         if not want:
-            assert all(v is None for v in r['env'].values()), 'lista vazia recebeu variável herdada'
+            assert all(v is None for v in r['env'].values()), 'empty list received an inherited variable'
             continue
-        assert val is not None, 'SHIPCRAFT_CASES ausente no hook'
-        assert val['hex'] is not None, 'variável herdada chegou à suíte: ' + repr(val)
+        assert val is not None, 'SHIPCRAFT_CASES missing in the hook'
+        assert val['hex'] is not None, 'inherited variable reached the suite: ' + repr(val)
         got = bytes.fromhex(val['hex'])
         if case == 'varias-travas':
             groups = [sorted(set((c['class'] + '::' + c['name']).encode() for c in group if c.get('red'))) for group in (first_data, second, data)]
@@ -281,22 +281,22 @@ exec ''' + py + ''' runner.py --runner "$1" "${args[@]}"
             if v:
                 assert Path(v['path']).is_absolute()
                 assert Path(v['path']).parent == temp_root, (v, str(temp_root))
-                assert not Path(v['path']).exists(), 'temporário sobreviveu'
+                assert not Path(v['path']).exists(), 'temporary file survived'
         files = r['env']['SHIPCRAFT_FILES']
-        # Sem classname, o id 'sem classe' fica em SHIPCRAFT_CASES, mas o mapa é parcial.
+        # Without classname, the id 'sem classe' stays in SHIPCRAFT_CASES, but the map is partial.
         if case in ('sem-mapa', 'parcial', 'bytes-borda', 'bash'):
-            assert files is None, 'mapa incompleto exportou arquivos'
+            assert files is None, 'incomplete map exported files'
         else:
-            assert files is not None, 'SHIPCRAFT_FILES ausente com mapa completo'
+            assert files is not None, 'SHIPCRAFT_FILES missing with a complete map'
             expected = sorted(set(str(Path(r['cwd'], c['file'])).encode() for c in local if c.get('red')))
             assert bytes.fromhex(files['hex']) == b''.join(x + b'\0' for x in expected), files
     if case == 'varias-travas':
-        assert covered == set(want), 'faltou executar casos de uma trava'
+        assert covered == set(want), 'cases of one lock were not run'
     if case == 'duas-suites':
         assert {Path(r['cwd']).name for r in observed} >= {'pacote com espaço'}, observed
         assert len({r['cwd'] for r in observed}) == 2, observed
     if case == 'bash':
-        assert len(observed) == 1, 'runner chamado em lotes'
+        assert len(observed) == 1, 'runner called in batches'
         assert observed[0]['argv'][1:] == ['--selected'] + [x.decode() for x in want]
 
 

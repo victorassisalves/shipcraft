@@ -1,4 +1,4 @@
-# Item 33, spec cfc254b: sugestão segura de restauração da trava no hook.
+# Item 33, spec cfc254b: safe suggestion to restore the lock in the hook.
 item33_cases() {
   local r v
   for r in editada apagada fechada; do
@@ -24,7 +24,7 @@ item33_case() {
   case "$variant" in
     nova|sem-head)
       setup_init; L stub; L spec_test
-      must_accept 'RED sem commit da trava' cmd shipcraft red
+      must_accept 'RED without a lock commit' cmd shipcraft red
       [ "$variant" != sem-head ] || git update-ref -d refs/heads/main
       want=nao ;;
     *) setup_red ;;
@@ -34,27 +34,27 @@ item33_case() {
     espaco|acento|aspas|nome-seguro)
       local name
       case "$variant" in espaco) name='trava com espaco.json' ;; acento) name='ação.json' ;; aspas) name="aspas'\".json" ;; *) name='Trava_09.v2-A.json' ;; esac
-      git mv -- "$lf" ".shipcraft/locks/$name" || fail 'harness: renome'
+      git mv -- "$lf" ".shipcraft/locks/$name" || fail 'harness: rename'
       lf=".shipcraft/locks/$name"
-      must_accept 'renome de fixture' commit git -c core.hooksPath=/dev/null commit -qm 'test: nome da trava'
+      must_accept 'fixture rename' commit git -c core.hooksPath=/dev/null commit -qm 'test: nome da trava'
       [ "$variant" = nome-seguro ] || want=nao ;;
     duas)
       cp "$lf" .shipcraft/locks/aaa-33.json
       git mv -- "$lf" .shipcraft/locks/zzz-33.json
       lf=.shipcraft/locks/aaa-33.json; other=.shipcraft/locks/zzz-33.json
       git add -A
-      must_accept 'duas travas da fixture' commit git -c core.hooksPath=/dev/null commit -qm 'test: duas travas' ;;
+      must_accept 'two fixture locks' commit git -c core.hooksPath=/dev/null commit -qm 'test: duas travas' ;;
     merge)
       git checkout -q -b lado-33
       L implement
-      must_accept 'fecha no segundo pai' commit commit_all 'feat: segundo pai verde'
+      must_accept 'closes on the second parent' commit commit_all 'feat: segundo pai verde'
       git checkout -q main
       printf 'primeiro pai\n' > primeiro-pai.txt
-      must_accept 'primeiro pai permanece RED' commit commit_all 'chore: primeiro pai'
-      must_accept 'merge em andamento' cmd git merge --no-ff --no-commit lado-33
-      chk 'merge tem segundo pai' test -f .git/MERGE_HEAD
-      chk 'HEAD é primeiro pai com trava aberta' one_lock_head_state open
-      chk 'segundo pai tem trava diferente' "$PY" - "$lf" <<'PARENTS'
+      must_accept 'first parent stays RED' commit commit_all 'chore: primeiro pai'
+      must_accept 'merge in progress' cmd git merge --no-ff --no-commit lado-33
+      chk 'merge has a second parent' test -f .git/MERGE_HEAD
+      chk 'HEAD is the first parent with an open lock' one_lock_head_state open
+      chk 'second parent has a different lock' "$PY" - "$lf" <<'PARENTS'
 import subprocess,sys,json
 p=sys.argv[1]
 a=subprocess.check_output(['git','show','HEAD:'+p]);b=subprocess.check_output(['git','show','MERGE_HEAD:'+p])
@@ -64,8 +64,8 @@ PARENTS
   esac
   if [ "$kind" = fechada ] && [ "$variant" != merge ]; then
     L implement
-    must_accept 'trava fechada válida pelo hook' commit commit_all 'feat: fecha'
-    must_accept 'volta ao primeiro RED com índice GREEN' cmd git reset --soft HEAD^
+    must_accept 'lock validly closed by the hook' commit commit_all 'feat: fecha'
+    must_accept 'back to the first RED with a GREEN index' cmd git reset --soft HEAD^
   fi
   case "$kind" in
     editada) i33_edit "$lf"; [ -z "$other" ] || i33_edit "$other" ;;
@@ -74,7 +74,7 @@ PARENTS
   esac
   git add -A
   if [ "$variant" = subpasta ]; then
-    # Árvore diferente do índice: git add -A não pode ressuscitar a cópia antiga.
+    # Tree differs from the index: git add -A must not bring back the old copy.
     "$PY" - "$lf" <<'TREE'
 import pathlib,sys
 p=pathlib.Path(sys.argv[1])
@@ -87,14 +87,14 @@ TREE
 import subprocess,sys,pathlib
 sha=subprocess.check_output(['git','rev-parse','HEAD:'+sys.argv[1]],text=True).strip()
 p=pathlib.Path(subprocess.check_output(['git','rev-parse','--git-path','objects'],text=True).strip())/sha[:2]/sha[2:]
-assert p.is_file(), 'fixture precisa de blob solto'
+assert p.is_file(), 'fixture needs a loose blob'
 p.unlink()
 assert subprocess.run(['git','cat-file','-e',sha],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode!=0
 MISSING
   fi
   if [ "$variant" = ci ]; then
     want=nao
-    must_accept 'commit inválido só para julgar histórico' commit git -c core.hooksPath=/dev/null commit -qm 'test: histórico recusável'
+    must_accept 'invalid commit only to judge history' commit git -c core.hooksPath=/dev/null commit -qm 'test: histórico recusável'
     run_cmd shipcraft ci --base "$BASE"
   else
     run_cmd shipcraft check
@@ -102,16 +102,16 @@ MISSING
   if [ "$kind/$variant" = fechada/merge ]; then
     # The hook judges a merge against both parents, as CI does: a lock closed on the
     # merged branch is not an edit. A red suite after the merge is CI's suite-red.
-    chk 'merge com trava fechada no segundo pai aceita, como no CI' rc_zero
+    chk 'merge with a lock closed on the second parent accepts, as in CI' rc_zero
     pass
   fi
-  chk 'mesmo veredito de recusa' rc_nonzero
-  chk 'contrato do texto, métrica e restauração' "$PY" - "$OUT" "$kind" "$variant" "$lf" "$other" "$want" <<'CHECK33'
+  chk 'same refusal verdict' rc_nonzero
+  chk 'text, metric and restore contract' "$PY" - "$OUT" "$kind" "$variant" "$lf" "$other" "$want" <<'CHECK33'
 import sys,json,subprocess,pathlib,shlex
 out,kind,variant,lf,other,want=sys.argv[1:]
 raw=pathlib.Path(out).read_text()
 if variant=='head-ilegivel':
-    # Na main a falta do blob aborta antes da recusa de trava; preservar este erro.
+    # On main the missing blob aborts before the lock refusal; keep this error.
     rows=[json.loads(l) for l in pathlib.Path('.git/shipcraft/runs.jsonl').read_text().splitlines()]
     assert rows[-1]['code']=='error' and rows[-1]['layer']=='hook',rows[-1]
     assert 'shipcraft: error:' in raw and 'git cat-file blob' in raw and lf in raw,raw
@@ -123,7 +123,7 @@ code={'editada':'lock-edited','apagada':'lock-deleted','fechada':'lock-closed-re
 rows=[json.loads(l) for l in pathlib.Path('.git/shipcraft/runs.jsonl').read_text().splitlines()]
 row=rows[-1]
 assert row['code']==code and row['layer']==('ci' if variant=='ci' else 'hook'),row
-# Duas travas: usa a que a própria recusa identificou; a outra deve continuar mexida.
+# Two locks: use the one the refusal itself named; the other must stay changed.
 if other:
     mentioned=[p for p in (lf,other) if p in lines[0]]
     assert len(mentioned)==1,lines
@@ -147,16 +147,16 @@ if want=='nao':
     assert lines[2]==old and 'git restore' not in raw,raw
 else:
     assert lines[2].count(command)==1 and lines[2].count('git restore')==1,lines[2]
-    # O conteúdo anterior não é sobrescrito pelo comando, nem aparece depois dele.
+    # The earlier content is not overwritten by the command, nor does it appear after it.
     assert lines[2].index(command)>=len(old),lines[2]
     before=subprocess.check_output(['git','show','HEAD:'+lf])
     sub=pathlib.Path('subpasta/mais-fundo');sub.mkdir(parents=True,exist_ok=True)
     subprocess.run(shlex.split(command),cwd='.' if variant=='comum' else sub,check=True)
-    assert pathlib.Path(lf).read_bytes()==before,'árvore não restaurada'
-    assert subprocess.check_output(['git','show',':'+lf])==before,'índice não restaurado'
+    assert pathlib.Path(lf).read_bytes()==before,'tree not restored'
+    assert subprocess.check_output(['git','show',':'+lf])==before,'index not restored'
     if other:
         now=subprocess.run(['git','diff','--cached','--quiet','HEAD','--',other])
-        assert now.returncode==1,'comando restaurou a segunda trava também'
+        assert now.returncode==1,'command also restored the second lock'
 CHECK33
   pass
 }

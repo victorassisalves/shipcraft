@@ -168,7 +168,7 @@ fn write_lists(tmp: &Path, lists: [BTreeSet<String>; 2]) -> Vec<(&'static str, P
 }
 
 /// Runs a build command with `sh` in `dir`, its output on stderr; on failure,
-/// how it ended ("saiu com 2", "morreu pelo sinal 15").
+/// how it ended ("exited with 2", "killed by signal 15").
 pub fn run_build(command: &str, dir: &Path) -> Result<std::result::Result<(), String>> {
     let ran = shell(command, dir, false, &[])?;
     Ok(if ran.status.success() { Ok(()) } else { Err(ended(ran.status)) })

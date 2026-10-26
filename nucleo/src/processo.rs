@@ -25,7 +25,7 @@ pub fn run_for(cmd: &mut Command, limit: Duration) -> Result<End> {
             return Ok(End::Exited(status.code().unwrap_or_else(|| 128 + status.signal().unwrap_or(0))));
         }
         if started.elapsed() >= limit {
-            // Kill the whole group sc2 created at spawn, by system call: a shell `kill -- -pgid` is not
+            // Kill the whole group shipcraft created at spawn, by system call: a shell `kill -- -pgid` is not
             // understood by every /bin/sh (dash), and then the group survived the timeout.
             if let Err(e) = kill_group(child.id()) {
                 eprintln!("shipcraft: could not stop the process group {}: {e}", child.id());

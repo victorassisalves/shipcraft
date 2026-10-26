@@ -45,7 +45,7 @@ fn command<'a>(doc: &'a Value, block: &str) -> Option<&'a Value> {
 /// that are missing; any doubt refuses, nothing written (rule 17).
 pub fn plan(repo: &Repo, file: &str, text: String) -> Result<Plan> {
     let stop = |problem: String| alien(format!("{file} {problem}"), &problem);
-    let doc: Value = parse(&text).map_err(|_| failed(format!("{file} sumiu durante a leitura")))?;
+    let doc: Value = parse(&text).map_err(|_| failed(format!("{file} disappeared while it was read")))?;
     let mut top = match doc {
         Value::Mapping(top) => top,
         Value::Null => Mapping::new(),

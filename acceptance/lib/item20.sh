@@ -1,4 +1,4 @@
-# Item 20: escolha da rota, escrita atomica e diagnosticos.
+# Item 20: route choice, atomic write and diagnostics.
 item20_cases() {
   echo v1-20.rota.parallel-true
   echo v1-20.rota.ausente
@@ -89,11 +89,11 @@ item20_cases() {
 }
 item20_case() {
   local scenario="${CASE//sc2/shipcraft}"
-  EXPECT="contrato do item 20"
+  EXPECT="item 20 contract"
   v1_start codex
   if [ "$CASE" = v1-20.trava ]; then
     setup_red
   fi
-  must_accept "$CASE caixa-preta" cmd "$PY" "$ACEITE/tools/item20.py" "${scenario#v1-20.}"
+  must_accept "$CASE black box" cmd "$PY" "$ACEITE/tools/item20.py" "${scenario#v1-20.}"
   pass
 }

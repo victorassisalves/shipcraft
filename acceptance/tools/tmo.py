@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""tmo.py <segundos> <comando...>: roda o comando num grupo de processos proprio
-e o mata (SIGKILL no grupo) se passar do tempo. Sai com 124 no tempo esgotado."""
+"""tmo.py <seconds> <command...>: runs the command in its own process group
+and kills it (SIGKILL to the group) if it runs out of time. Exits 124 on timeout."""
 import os, signal, subprocess, sys
 
 secs = float(sys.argv[1])
@@ -13,5 +13,5 @@ except subprocess.TimeoutExpired:
     except Exception:
         pass
     p.wait()
-    sys.stderr.write("tmo: tempo esgotado (%ss): %s\n" % (sys.argv[1], " ".join(sys.argv[2:])))
+    sys.stderr.write("tmo: timed out (%ss): %s\n" % (sys.argv[1], " ".join(sys.argv[2:])))
     sys.exit(124)

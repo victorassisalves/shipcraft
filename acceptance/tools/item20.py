@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Item 20: init/status caixa-preta; template lefthook v1.11.13 do 15b."""
+"""Item 20: init/status black box; lefthook v1.11.13 template from 15b."""
 import re
 import shutil
 import subprocess
@@ -38,8 +38,8 @@ def pair(data):
 
 def check_pair(data):
     for event in EVENTS:
-        assert ((data.get(event) or {}).get('commands') or {}).get('shipcraft') == {'run': RUNS[event]}, 'comando incorreto: ' + event
-    assert 'shipcraft' not in (data.get('pre-commit') or {}).get('commands', {}), 'duplicou shipcraft no pre-commit'
+        assert ((data.get(event) or {}).get('commands') or {}).get('shipcraft') == {'run': RUNS[event]}, 'wrong command: ' + event
+    assert 'shipcraft' not in (data.get('pre-commit') or {}).get('commands', {}), 'duplicated shipcraft in pre-commit'
 
 
 def main(case):
@@ -63,12 +63,12 @@ def main(case):
             data['pre-commit'].update(skip=True, jobs=[{'run': 'echo job'}], scripts={'x': {'runner': 'bash'}})
     elif kind == 'vazio':
         event, value = parts[1:]
-        # O outro bloco ja tem um comando de projeto: nao pode ser perdido.
+        # The other block already has a project command: it must not be lost.
         other = next(e for e in EVENTS if e != event)
         data[other] = {'commands': {'mensagem': {'run': 'echo mensagem'}}}
         if value != 'ausente':
             if value == 'commands-vazio':
-                refuse = True  # 8aa952f: mapa vazio inline continua sendo flow.
+                refuse = True  # 8aa952f: an inline empty map is still flow style.
             data[event] = {'nulo': None, 'commands-nulo': {'commands': None},
                            'commands-vazio': {'commands': {}}}[value]
     elif kind == 'bloco':
@@ -97,18 +97,18 @@ def main(case):
             refuse, reason = True, event
     elif kind in ('min', 'min-alto', 'rollback'):
         p, _ = run('shipcraft', 'init')
-        assert p.returncode == 0, 'fixture init inicial'
+        assert p.returncode == 0, 'fixture: initial init'
         # The plain-git init installed shipcraft's own hooks; lefthook installs its own.
         for e in EVENTS:
             Path('.git/hooks', e).unlink(missing_ok=True)
         cfg = Path('.shipcraft.toml')
         text = cfg.read_text()
-        assert re.search(r'^shipcraft_min\s*=', text, re.M), 'fixture sem shipcraft_min'
+        assert re.search(r'^shipcraft_min\s*=', text, re.M), 'fixture without shipcraft_min'
         minimum = FUTURE_MIN if kind == 'min-alto' else '0.0'
         cfg.write_text(re.sub(r'^shipcraft_min\s*=.*$', 'shipcraft_min = "' + minimum + '"', text, flags=re.M) + '\n# comentario preservado\n')
         old_config = tomli.loads(cfg.read_text())
         if kind == 'rollback':
-            # Falha posterior (item 27: sem .github): .shipcraft vira arquivo e o init nao cria .shipcraft/locks.
+            # Later failure (item 27: no .github): .shipcraft becomes a file and init cannot create .shipcraft/locks.
             shutil.rmtree('.shipcraft')
             Path('.shipcraft').write_bytes(b'nao substituir\r\n')
     elif kind in ('duplo', 'trava'):
@@ -119,7 +119,7 @@ def main(case):
             Path('.git/hooks/pre-commit').unlink(missing_ok=True)
     elif kind == 'status':
         p, _ = run('shipcraft', 'init')
-        assert p.returncode == 0, 'fixture status: init inicial falhou'
+        assert p.returncode == 0, 'fixture status: initial init failed'
         Path('.git/hooks/pre-commit').unlink(missing_ok=True)
         pair(data)
         for e in EVENTS:
@@ -164,7 +164,7 @@ def main(case):
                    'ancora': base.replace('lint:', 'lint: &lint'),
                    'fim': base + '...\n'}[value]
     else:
-        raise AssertionError('caso desconhecido: ' + case)
+        raise AssertionError('unknown case: ' + case)
     path = Path('lefthook.yml')
     path.write_bytes((raw if raw is not None else yaml.safe_dump(data, sort_keys=False)).encode())
     before = snapshot()
@@ -172,56 +172,56 @@ def main(case):
         p, out = run('shipcraft', 'status')
         assert p.returncode == 0
         if parts[1] == 'completo':
-            assert 'hook through lefthook (commit-msg)' in out.lower(), 'status nao reconheceu rota'
+            assert 'hook through lefthook (commit-msg)' in out.lower(), 'status did not recognize the route'
         else:
-            assert 'missing hook' in out.lower() and 'hook through lefthook' not in out.lower(), 'status anuncia hook incompleto'
-            assert parts[2] in out, 'status nao identifica evento que falta'
-            if parts[1] in ('comando', 'ambos', 'invalido'): assert 'command' in out.lower(), 'status nao identifica comando ausente'
+            assert 'missing hook' in out.lower() and 'hook through lefthook' not in out.lower(), 'status announces an incomplete hook'
+            assert parts[2] in out, 'status does not name the missing event'
+            if parts[1] in ('comando', 'ambos', 'invalido'): assert 'command' in out.lower(), 'status does not name the missing command'
             if parts[1] in ('hook', 'ambos', 'sem-exec'):
                 detail = out.lower().replace('missing hook', '')
-                assert 'hook' in detail or 'lefthook install' in detail, 'status nao explica launcher ausente'
-        assert snapshot() == before, 'status escreveu'
+                assert 'hook' in detail or 'lefthook install' in detail, 'status does not explain the missing launcher'
+        assert snapshot() == before, 'status wrote something'
         return
     p, out = run('shipcraft', 'init', *(['--github'] if kind == 'rollback' else []))
     if refuse or kind == 'rollback':
-        assert p.returncode != 0, 'aceitou configuracao que deve recusar'
-        assert snapshot() == before, 'recusa/rollback mudou bytes, modos ou .git/shipcraft'
+        assert p.returncode != 0, 'accepted a configuration it must refuse'
+        assert snapshot() == before, 'refusal/rollback changed bytes, modes or .git/shipcraft'
         if kind == 'rollback':
-            assert '.shipcraft/locks' in out, 'nao chegou a falha posterior da transacao'
-            assert not Path('.github').exists(), 'criou .github'
+            assert '.shipcraft/locks' in out, 'did not reach the later transaction failure'
+            assert not Path('.github').exists(), 'created .github'
             return
         lines = [x for x in out.splitlines() if x.strip()]
-        assert len(lines) == 3, 'recusa deve ter tres linhas, antes de perguntar'
-        assert not re.search(r'(put|place|add|insert).*shipcraft check.*pre-commit', lines[-1], re.I), 'orientou shipcraft check no pre-commit paralelo'
-        if reason: assert reason in lines[-1], 'terceira linha nao identifica impedimento: ' + reason
-        if kind == 'trava': assert re.search(r'close', lines[-1], re.I), 'deve mandar fechar trava antes'
+        assert len(lines) == 3, 'refusal must have three lines, before asking'
+        assert not re.search(r'(put|place|add|insert).*shipcraft check.*pre-commit', lines[-1], re.I), 'advised shipcraft check in the parallel pre-commit'
+        if reason: assert reason in lines[-1], 'third line does not name the blocker: ' + reason
+        if kind == 'trava': assert re.search(r'close', lines[-1], re.I), 'must say to close the lock first'
         return
-    assert p.returncode == 0, 'recusou integracao segura'
+    assert p.returncode == 0, 'refused a safe integration'
     after = yaml.safe_load(path.read_text())
     check_pair(after)
     if kind == 'yaml':
-        assert before['lefthook.yml'][1] in path.read_bytes(), 'reformatou bytes originais do YAML'
-    assert 'commands: {}' not in path.read_text(), 'nao escreveu bloco vazio em bloco'
-    assert after['pre-commit'] == data['pre-commit'], 'alterou pre-commit'
+        assert before['lefthook.yml'][1] in path.read_bytes(), 'reformatted the original YAML bytes'
+    assert 'commands: {}' not in path.read_text(), 'did not write the empty block in block style'
+    assert after['pre-commit'] == data['pre-commit'], 'changed pre-commit'
     for e in EVENTS:
         for name, command in ((data.get(e) or {}).get('commands') or {}).items():
-            assert after[e]['commands'][name] == command, 'alterou comando existente'
+            assert after[e]['commands'][name] == command, 'changed an existing command'
     config = tomli.loads(Path('.shipcraft.toml').read_text())
-    assert re.fullmatch(r'\d+\.\d+', str(config['shipcraft_min'])), 'shipcraft_min fora do formato 9.2'
+    assert re.fullmatch(r'\d+\.\d+', str(config['shipcraft_min'])), 'shipcraft_min not in the 9.2 format'
     expected = FUTURE_MIN if kind == 'min-alto' else CURRENT_MIN
     assert config['shipcraft_min'] == expected, 'shipcraft_min must match package major/minor and preserve higher requirements'
     if kind in ('min', 'min-alto'):
-        assert {k:v for k,v in config.items() if k != 'shipcraft_min'} == {k:v for k,v in old_config.items() if k != 'shipcraft_min'}, 'mudou restante do TOML'
-        assert '# comentario preservado' in Path('.shipcraft.toml').read_text(), 'apagou comentario existente'
-    assert 'lefthook.yml' in out, 'lista para commit omite lefthook'
+        assert {k:v for k,v in config.items() if k != 'shipcraft_min'} == {k:v for k,v in old_config.items() if k != 'shipcraft_min'}, 'changed the rest of the TOML'
+        assert '# comentario preservado' in Path('.shipcraft.toml').read_text(), 'deleted an existing comment'
+    assert 'lefthook.yml' in out, 'the list to commit leaves out lefthook'
     missing = [e for e in ('pre-commit', *EVENTS) if not Path('.git/hooks', e).exists() or not Path('.git/hooks', e).stat().st_mode & 0o111]
     notices = [line for line in out.splitlines() if 'lefthook install' in line]
     if missing:
-        assert len(notices) == 1 and all(e in notices[0] for e in missing), 'aviso unico deve listar hooks que faltam'
-    assert {k:v for k,v in snapshot().items() if k.startswith('.git/hooks/')} == {k:v for k,v in before.items() if k.startswith('.git/hooks/')}, 'init alterou hooks'
+        assert len(notices) == 1 and all(e in notices[0] for e in missing), 'the single notice must list the missing hooks'
+    assert {k:v for k,v in snapshot().items() if k.startswith('.git/hooks/')} == {k:v for k,v in before.items() if k.startswith('.git/hooks/')}, 'init changed hooks'
     stable = (path.read_bytes(), Path('.shipcraft.toml').read_bytes())
     p, _ = run('shipcraft', 'init')
-    assert p.returncode == 0 and stable == (path.read_bytes(), Path('.shipcraft.toml').read_bytes()), 'init nao idempotente'
+    assert p.returncode == 0 and stable == (path.read_bytes(), Path('.shipcraft.toml').read_bytes()), 'init is not idempotent'
 
 
 if __name__ == '__main__':
