@@ -16,6 +16,8 @@ Exit 0 means every selected case passed. The last line is `run.sh: total: N of M
 
 Requirements: git, Perl, Python 3; Node/npm and Go for their profiles. GitHub and reviewer calls are offline stubs. Only target setup (pip, npm, gotestsum installation) needs network access. `SHIPCRAFT_ACCEPTANCE_CACHE=<absolute-dir>` shares dependency downloads.
 
+In CI, `acceptance/scope.sh <base>` scopes each PR by impact: only docs (`docs/`, root `*.md`, `LICENSE`, the points) runs nothing; only `acceptance/lib/item*.sh` files run those items' cases; anything else, or any doubt, runs the whole battery. Main and the daily run always run everything.
+
 The runner uses `nice` and at most four parallel cases (`SHIPCRAFT_ACCEPTANCE_JOBS`, default/cap 4). Each case has a timeout (`SHIPCRAFT_ACCEPTANCE_CASE_TIMEOUT`, default 900 s). Temporary work, case repositories, isolated HOME, caches and GOPATH live beneath `${TMPDIR:-/tmp}/shipcraft.noindex/`. Passing cases remove their `t/` and `cw/` directories immediately; failures and logs remain for diagnosis. Shared setup is removed at exit. `SHIPCRAFT_ACCEPTANCE_KEEP=1` retains everything. Base copies use macOS `cp -cR` or Linux `cp -R --reflink=auto`, falling back to `cp -R`; `SHIPCRAFT_ACCEPTANCE_CLONE=0` always uses the fallback.
 
 `SHIPCRAFT_ACCEPTANCE_CASES="id-a id-b"` selects a slice. Unset or empty means all cases, including normal reuse-cache recording. `SHIPCRAFT_ACCEPTANCE_VERBOSE=1` prints failed-log tails (enabled automatically in GitHub Actions).

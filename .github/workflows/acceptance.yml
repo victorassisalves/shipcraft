@@ -1,7 +1,9 @@
 name: acceptance
 
-# The offline black-box battery against nucleo/. Linux runs it on every PR and on main,
-# in 10 shards (about 3 minutes), and gates the merge. macOS runs it once a day and on
+# The offline black-box battery against nucleo/. Linux gates every PR by impact
+# (acceptance/scope.sh): a PR that changes only docs runs nothing, one that changes only
+# battery item files runs those items, anything else runs the whole battery in 10 shards
+# (about 3 minutes). Main always runs the whole battery. macOS runs it once a day and on
 # demand: GitHub's free macOS runners are few and slow to start.
 # GitHub-hosted runners only: this is a public repository, so self-hosted runners
 # must never be attached to it (a fork PR would run code on that machine).
@@ -61,15 +63,37 @@ jobs:
           SHIPCRAFT_ACCEPTANCE_VERBOSE: "1"
         run: bash acceptance/run.sh "$PWD/nucleo/target/release/shipcraft" all
 
+  # What this run covers: PRs by impact, everything else in full.
+  scope:
+    runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.scope.outputs.mode }}
+      cases: ${{ steps.scope.outputs.cases }}
+      shards: ${{ steps.scope.outputs.shards }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: scope
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            bash acceptance/scope.sh "origin/$BASE_REF" HEAD | tee -a "$GITHUB_OUTPUT"
+          else
+            printf 'mode=full\ncases=\nshards=[1,2,3,4,5,6,7,8,9,10]\n' | tee -a "$GITHUB_OUTPUT"
+          fi
+
   linux:
-    name: linux ${{ matrix.shard }}/10
+    needs: scope
+    if: needs.scope.outputs.mode != 'none'
+    name: linux ${{ matrix.shard }}/${{ strategy.job-total }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-        of: [10]
+        shard: ${{ fromJSON(needs.scope.outputs.shards) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -92,19 +116,27 @@ jobs:
       - name: Build the core
         run: cargo build --release -j 4 --manifest-path nucleo/Cargo.toml
 
-      - name: Run the acceptance suite (shard ${{ matrix.shard }}/${{ matrix.of }})
+      - name: Run the acceptance suite (shard ${{ matrix.shard }}/${{ strategy.job-total }}, ${{ needs.scope.outputs.mode }})
         env:
           SHIPCRAFT_ACCEPTANCE_JOBS: "4"
-          SHIPCRAFT_ACCEPTANCE_SHARD: "${{ matrix.shard }}/${{ matrix.of }}"
+          SHIPCRAFT_ACCEPTANCE_SHARD: "${{ matrix.shard }}/${{ strategy.job-total }}"
+          SHIPCRAFT_ACCEPTANCE_CASES: ${{ needs.scope.outputs.cases }}
           SHIPCRAFT_ACCEPTANCE_VERBOSE: "1"
         run: bash acceptance/run.sh "$PWD/nucleo/target/release/shipcraft" all
 
-  # The single check branch protection requires: green only when every Linux shard passed.
+  # The single check branch protection requires: green when every Linux shard passed,
+  # or when the scope found nothing the battery covers.
   gate:
     name: acceptance
-    needs: linux
+    needs: [scope, linux]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Every Linux shard passed
-        run: test "${{ needs.linux.result }}" = success
+      - name: Every Linux shard passed, or nothing to run
+        run: |
+          test "${{ needs.scope.result }}" = success
+          if [ "${{ needs.scope.outputs.mode }}" = none ]; then
+            test "${{ needs.linux.result }}" = skipped
+          else
+            test "${{ needs.linux.result }}" = success
+          fi
