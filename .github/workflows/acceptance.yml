@@ -1,0 +1,59 @@
+name: acceptance
+
+# The offline black-box battery against nucleo/, on every PR and on main.
+# GitHub-hosted runners only: this is a public repository, so self-hosted runners
+# must never be attached to it (a fork PR would run code on that machine).
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: acceptance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  acceptance:
+    name: acceptance (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos, linux]
+    runs-on: ${{ matrix.os == 'macos' && 'macos-latest' || 'ubuntu-latest' }}
+    # Linux has known open defects (the timeout kill through sh, see docs/spec.md "Known limits"
+    # and the next items); it reports but does not gate until they are fixed.
+    continue-on-error: ${{ matrix.os == 'linux' }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go (Go targets)
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Set up Node (vitest targets)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Set up Python (pytest targets)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build the core
+        run: cargo build --release -j 4 --manifest-path nucleo/Cargo.toml
+
+      - name: Run the acceptance suite
+        env:
+          SHIPCRAFT_ACCEPTANCE_JOBS: "4"
+          SHIPCRAFT_ACCEPTANCE_VERBOSE: "1"
+        run: bash acceptance/run.sh "$PWD/nucleo/target/release/shipcraft" all
