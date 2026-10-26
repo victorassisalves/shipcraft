@@ -28,6 +28,7 @@
 #   SHIPCRAFT_ACCEPTANCE_CACHE    absolute dir for pip/npm/go caches, reused across runs
 #   SHIPCRAFT_ACCEPTANCE_VERBOSE=1  print the log tail of each failing case (on in GitHub Actions)
 #   SHIPCRAFT_ACCEPTANCE_CASES    space-separated case ids to run (default: all)
+#   SHIPCRAFT_ACCEPTANCE_SHARD    k/n: run only shard k of n (round robin), for split CI runs
 #   SHIPCRAFT_ACCEPTANCE_CASE_TIMEOUT  seconds before a case is killed (default 900)
 #   SHIPCRAFT_ACCEPTANCE_JUNIT    write a JUnit report there: one testcase per case (classname =
 #                       profile, name = case id); FAIL = failure, harness error or no result
@@ -943,10 +944,21 @@ done
 
 # ---- run the cases, at most $JOBS at a time, each under nice.
 : > "$WORK/plan"
+# SHIPCRAFT_ACCEPTANCE_SHARD=k/n runs every n-th case starting at the k-th (round robin over all
+# languages), so CI can split the battery across n machines. A sharded run never saves a reuse result.
+SHARD_K=0; SHARD_N=1; g=0
+if [ -n "${SHIPCRAFT_ACCEPTANCE_SHARD:-}" ]; then
+  SHARD_K=${SHIPCRAFT_ACCEPTANCE_SHARD%/*}; SHARD_N=${SHIPCRAFT_ACCEPTANCE_SHARD#*/}
+  case "$SHARD_K/$SHARD_N" in *[!0-9/]*|/*|*/) echo "run.sh: SHIPCRAFT_ACCEPTANCE_SHARD must be k/n" >&2; exit 2 ;; esac
+  [ "$SHARD_K" -ge 1 ] && [ "$SHARD_K" -le "$SHARD_N" ] || { echo "run.sh: shard k must be 1..n" >&2; exit 2; }
+fi
 for l in $LANGS; do
   i=0
   for c in $(case_list "$l"); do
-    i=$((i + 1))
+    i=$((i + 1)); g=$((g + 1))
+    if [ "$SHARD_N" -gt 1 ] && [ $(( (g - 1) % SHARD_N + 1 )) -ne "$SHARD_K" ]; then
+      [ -n "$JUNIT" ] && echo "$l $c" >> "$WORK/skipped"; continue
+    fi
     if [ -n "${SHIPCRAFT_ACCEPTANCE_CASES:-}" ]; then
       case " $SHIPCRAFT_ACCEPTANCE_CASES " in *" $c "*) ;; *) [ -n "$JUNIT" ] && echo "$l $c" >> "$WORK/skipped"; continue ;; esac
     fi
@@ -991,7 +1003,7 @@ if [ -n "$JUNIT" ]; then
 fi
 # Only a complete green run of an unchanged, committed tree is reusable.
 if [ "${SHIPCRAFT_ACCEPTANCE_REUSE:-1}" != 0 ] && [ "$WHICH" = all ] \
-  && [ -z "${SHIPCRAFT_ACCEPTANCE_CASES:-}" ] && [ "$failn" -eq 0 ] \
+  && [ -z "${SHIPCRAFT_ACCEPTANCE_CASES:-}" ] && [ -z "${SHIPCRAFT_ACCEPTANCE_SHARD:-}" ] && [ "$failn" -eq 0 ] \
   && [ "$pass" -eq "$total" ] && [ "$total" -gt 0 ] \
   && [ -n "$REUSE_ID" ] && [ -z "$REUSE_CLEAN" ] \
   && [ "$(git -C "$REUSE_REPO" rev-parse HEAD)" = "$REUSE_SHA" ] \

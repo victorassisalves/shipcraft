@@ -1,6 +1,7 @@
 name: acceptance
 
-# The offline black-box battery against nucleo/, on every PR and on main.
+# The offline black-box battery against nucleo/, on every PR and on main, split into
+# 10 shards per OS so a run takes minutes, not half an hour.
 # GitHub-hosted runners only: this is a public repository, so self-hosted runners
 # must never be attached to it (a fork PR would run code on that machine).
 on:
@@ -19,17 +20,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  acceptance:
-    name: acceptance (${{ matrix.os }})
+  macos:
+    name: macos ${{ matrix.shard }}/10
+    runs-on: macos-latest
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        os: [macos, linux]
-    runs-on: ${{ matrix.os == 'macos' && 'macos-latest' || 'ubuntu-latest' }}
-    # Linux has known open defects (the timeout kill through sh, see docs/spec.md "Known limits"
-    # and the next items); it reports but does not gate until they are fixed.
-    continue-on-error: ${{ matrix.os == 'linux' }}
-    timeout-minutes: 60
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     steps:
       - uses: actions/checkout@v4
 
@@ -52,8 +50,59 @@ jobs:
       - name: Build the core
         run: cargo build --release -j 4 --manifest-path nucleo/Cargo.toml
 
-      - name: Run the acceptance suite
+      - name: Run the acceptance suite (shard ${{ matrix.shard }}/10)
         env:
           SHIPCRAFT_ACCEPTANCE_JOBS: "4"
+          SHIPCRAFT_ACCEPTANCE_SHARD: "${{ matrix.shard }}/10"
           SHIPCRAFT_ACCEPTANCE_VERBOSE: "1"
         run: bash acceptance/run.sh "$PWD/nucleo/target/release/shipcraft" all
+
+  # Linux has known open defects (the timeout kill through sh, see docs/spec.md "Known
+  # limits"); it reports but does not gate until they are fixed.
+  linux:
+    name: linux ${{ matrix.shard }}/10
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go (Go targets)
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Set up Node (vitest targets)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Set up Python (pytest targets)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build the core
+        run: cargo build --release -j 4 --manifest-path nucleo/Cargo.toml
+
+      - name: Run the acceptance suite (shard ${{ matrix.shard }}/10)
+        env:
+          SHIPCRAFT_ACCEPTANCE_JOBS: "4"
+          SHIPCRAFT_ACCEPTANCE_SHARD: "${{ matrix.shard }}/10"
+          SHIPCRAFT_ACCEPTANCE_VERBOSE: "1"
+        run: bash acceptance/run.sh "$PWD/nucleo/target/release/shipcraft" all
+
+  # The single check branch protection requires: green only when every macOS shard passed.
+  gate:
+    name: acceptance (macos)
+    needs: macos
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every macOS shard passed
+        run: test "${{ needs.macos.result }}" = success
