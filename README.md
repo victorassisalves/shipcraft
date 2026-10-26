@@ -102,7 +102,6 @@ shipcraft merge 42
 | `shipcraft review [--pr <n>]` | Runs the review on the local HEAD (to catch blockers before opening the PR) or on any PR. |
 | `shipcraft merge <pr> [--no-review "<reason>"]` | Merges only when CI and review are green on the PR's head. `--no-review "<reason>"` is the recorded way out, and the reason shows up in the PR and in the numbers. |
 | `shipcraft status` | The open locks, and how protected the repository really is (branch protection or only `shipcraft merge`). |
-| `shipcraft dashboard [--port <n>]` | Live local metrics: hook and CI times, refusals by code, PR sizes. |
 
 ## Languages, runners and hook managers
 
@@ -158,7 +157,7 @@ On a public repository (or a paid GitHub plan), `shipcraft init --github` also m
 
 ## Measured, not asserted
 
-Shipcraft records every hook, CI and review run in `.git/shipcraft/runs.jsonl`: layer, result, refusal code and time. Nothing is sent anywhere. `shipcraft dashboard` reads that log. A `shipcraft report` command that gives time-to-main per item is next on the roadmap.
+Shipcraft records every hook, CI and review run in `.git/shipcraft/runs.jsonl`: layer, result, refusal code and time. Nothing is sent anywhere. `shipcraft pr` puts the branch's numbers in the PR summary. A `shipcraft report` command that gives time-to-main per item is next on the roadmap.
 
 Every rule in Shipcraft has to pay for itself. It ships with the metric that justifies it and the condition that removes it. Rules that don't catch anything in practice get deleted.
 

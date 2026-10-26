@@ -24,7 +24,6 @@ mod lock;
 mod marca;
 mod medicao;
 mod merge;
-mod painel;
 mod pr;
 mod processo;
 mod red;
@@ -43,7 +42,7 @@ const USAGE: &str =
     "usage: shipcraft --version | shipcraft init [--lang python|node|go] [--github] | shipcraft red | shipcraft check [--commit-msg <file>] | shipcraft close
      | shipcraft ci --base <ref> [--pr]
      | shipcraft pr [--title <t>] [--body <file>] | shipcraft review [--pr <n>]
-     | shipcraft merge <pr> [--no-review \"<reason>\"] | shipcraft status | shipcraft dashboard [--port <n>]";
+     | shipcraft merge <pr> [--no-review \"<reason>\"] | shipcraft status";
 
 fn main() -> ExitCode {
     // Item 22.2: the lists reach only the hook's suite, never a value inherited.
@@ -108,8 +107,6 @@ fn run(args: &[&str]) -> Result<()> {
         ["merge", n, "--no-review", motivo] => merge::merge(&Repo::open()?, n, Some(motivo)),
         ["status"] => merge::status(&Repo::open()?),
         // Item 23: records no row, as `init`, `red` and `fecha`.
-        ["dashboard"] => painel::run(Repo::open()?, None),
-        ["dashboard", "--port", n] => painel::run(Repo::open()?, Some(n)),
         // Item 21.1: any folder, no repository nor .shipcraft.toml needed.
         ["--version"] => {
             println!("{}", version_line());
