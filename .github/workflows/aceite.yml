@@ -1,0 +1,45 @@
+name: acceptance
+
+# Offline black-box battery against nucleo/. Local acceptance/local status is
+# the merge gate. Scheduled Linux coverage and manual dispatch remain available;
+# no per-PR run is added here.
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    name: acceptance (core)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go (Go targets)
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Set up Node (vitest targets)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Set up Python (pytest targets)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build the core
+        working-directory: nucleo
+        run: cargo build --release -j 4
+
+      - name: Run the acceptance suite
+        env:
+          SHIPCRAFT_ACCEPTANCE_JOBS: "4"
+        run: bash acceptance/run.sh "$PWD/nucleo/target/release/shipcraft" all

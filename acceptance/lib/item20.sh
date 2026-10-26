@@ -1,0 +1,109 @@
+# Item 20: escolha da rota, escrita atomica e diagnosticos.
+item20_cases() {
+  echo v1-20.rota.parallel-true
+  echo v1-20.rota.parallel-false
+  echo v1-20.rota.ausente
+  echo v1-20.rota.zero
+  echo v1-20.rota.negativa
+  echo v1-20.rota.maxima
+  echo v1-20.rota.commit-msg
+  echo v1-20.rota.post-commit
+  echo v1-20.rota.pre-restricoes
+  echo v1-20.rota.pre-antiga-ignora-novos
+  echo v1-20.tipo.parallel
+  echo v1-20.tipo.comando
+  echo v1-20.tipo.texto
+  echo v1-20.tipo.decimal
+  echo v1-20.tipo.booleano
+  echo v1-20.vazio.commit-msg.ausente
+  echo v1-20.vazio.commit-msg.nulo
+  echo v1-20.vazio.commit-msg.commands-nulo
+  echo v1-20.vazio.commit-msg.commands-vazio
+  echo v1-20.bloco.commit-msg.parallel
+  echo v1-20.bloco.commit-msg.piped
+  echo v1-20.bloco.commit-msg.jobs
+  echo v1-20.bloco.commit-msg.scripts
+  echo v1-20.bloco.commit-msg.glob
+  echo v1-20.bloco.commit-msg.files
+  echo v1-20.bloco.commit-msg.skip
+  echo v1-20.bloco.commit-msg.only
+  echo v1-20.bloco.commit-msg.exclude
+  echo v1-20.sc2.commit-msg.run
+  echo v1-20.sc2.commit-msg.priority
+  echo v1-20.sc2.commit-msg.skip
+  echo v1-20.hook.commit-msg.alheio
+  echo v1-20.hook.commit-msg.link
+  echo v1-20.hook.commit-msg.sem-exec
+  echo v1-20.hook.commit-msg.sem-args
+  echo v1-20.hook.commit-msg.com-args
+  echo v1-20.status.comando.commit-msg
+  echo v1-20.status.hook.commit-msg
+  echo v1-20.status.ambos.commit-msg
+  echo v1-20.status.sem-exec.commit-msg
+  echo v1-20.vazio.post-commit.ausente
+  echo v1-20.vazio.post-commit.nulo
+  echo v1-20.vazio.post-commit.commands-nulo
+  echo v1-20.vazio.post-commit.commands-vazio
+  echo v1-20.bloco.post-commit.parallel
+  echo v1-20.bloco.post-commit.piped
+  echo v1-20.bloco.post-commit.jobs
+  echo v1-20.bloco.post-commit.scripts
+  echo v1-20.bloco.post-commit.glob
+  echo v1-20.bloco.post-commit.files
+  echo v1-20.bloco.post-commit.skip
+  echo v1-20.bloco.post-commit.only
+  echo v1-20.bloco.post-commit.exclude
+  echo v1-20.sc2.post-commit.run
+  echo v1-20.sc2.post-commit.priority
+  echo v1-20.sc2.post-commit.skip
+  echo v1-20.hook.post-commit.alheio
+  echo v1-20.hook.post-commit.link
+  echo v1-20.hook.post-commit.sem-exec
+  echo v1-20.hook.post-commit.sem-args
+  echo v1-20.hook.post-commit.com-args
+  echo v1-20.status.comando.post-commit
+  echo v1-20.status.hook.post-commit
+  echo v1-20.status.ambos.post-commit
+  echo v1-20.status.sem-exec.post-commit
+  echo v1-20.hook.pre-commit.alheio
+  echo v1-20.hook.pre-commit.link
+  echo v1-20.yaml.crlf
+  echo v1-20.yaml.bom
+  echo v1-20.yaml.comentario
+  echo v1-20.yaml.literal
+  echo v1-20.yaml.repetida
+  echo v1-20.yaml.flow
+  echo v1-20.yaml.aspas
+  echo v1-20.yaml.ancora
+  echo v1-20.yaml.fim
+  echo v1-20.min
+  echo v1-20.min-alto
+  echo v1-20.rollback
+  echo v1-20.duplo
+  echo v1-20.trava
+  echo v1-20.status.invalido.commit-msg
+  echo v1-20.status.invalido.post-commit
+  echo v1-20.hook.pre-commit.alheio-antiga
+  echo v1-20.yaml.cr
+  echo v1-20.yaml.ls
+  echo v1-20.yaml.ps
+  echo v1-20.fonte.local
+  echo v1-20.fonte.duplo
+  echo v1-20.fonte.husky
+  echo v1-20.fonte.link
+  echo v1-20.fonte.remotes
+  echo v1-20.fonte.rc
+  echo v1-20.fonte.jobs
+  echo v1-20.yaml.repetida-comando
+  echo v1-20.status.completo
+}
+item20_case() {
+  local scenario="${CASE//sc2/shipcraft}"
+  EXPECT="contrato do item 20"
+  v1_start codex
+  if [ "$CASE" = v1-20.trava ]; then
+    setup_red
+  fi
+  must_accept "$CASE caixa-preta" cmd "$PY" "$ACEITE/tools/item20.py" "${scenario#v1-20.}"
+  pass
+}

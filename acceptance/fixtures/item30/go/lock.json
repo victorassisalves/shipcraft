@@ -1,0 +1,17 @@
+{
+  "format": 2,
+  "state": "open",
+  "files": {
+    ".shipcraft.toml": "cc23597859839f6906f615a217400a817863eb15d8e7957c5ca6acf833e73f8c"
+  },
+  "cases": [
+    "contrato-30:example.com/textutil::TestPackageBuilds",
+    "contrato-30:example.com/textutil::TestSlugBasic",
+    "contrato-30:example.com/textutil::TestSlugSpaces"
+  ],
+  "failing_at_red": [
+    "contrato-30:example.com/textutil::TestSlugBasic",
+    "contrato-30:example.com/textutil::TestSlugSpaces"
+  ],
+  "seal": "5427a5532bd45f6f19a145ccb73728c2d830484bf3c702226b63119a3da2a251"
+}

@@ -1,0 +1,17 @@
+{
+  "format": 2,
+  "state": "open",
+  "files": {
+    ".shipcraft.toml": "a04b023569d04e66ce5e69c98e876d36b0665c134becb1384fb48ca32fb25305"
+  },
+  "cases": [
+    "contrato-30:tests.test_slug::test_slug_basic",
+    "contrato-30:tests.test_slug::test_slug_spaces",
+    "contrato-30:tests.test_smoke::test_module_imports"
+  ],
+  "failing_at_red": [
+    "contrato-30:tests.test_slug::test_slug_basic",
+    "contrato-30:tests.test_slug::test_slug_spaces"
+  ],
+  "seal": "01f087e0aa34112acfa3e7d12d20969d3d9f3a719ea8608271b9a4b6522e7d78"
+}

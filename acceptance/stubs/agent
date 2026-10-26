@@ -1,0 +1,137 @@
+#!/usr/bin/env python3
+"""Stub do agente revisor (codex, claude, gemini) da bateria de aceitacao da v1.
+
+A bateria copia este arquivo como `codex`, `claude` e/ou `gemini` numa pasta do
+PATH do caso. O comportamento vem de <pasta>/state/reviewer.json:
+  mode      approve | changes | preamble | blankline | suffix | malformed | refuse | exit1 | quota | hang
+  blocking  numero em "Blocking: N" (padrao 0 em approve, 2 em changes)
+  sleep     segundos de espera antes de responder (padrao 0)
+  timeline  arquivo compartilhado onde gravar "<nome> revisao start|end <t>"
+  name      rotulo para a timeline
+O veredito leva a sha de <pasta>/state/sha (ou `git rev-parse HEAD` no cwd).
+Cada chamada vai para <pasta>/state/reviewer.calls.jsonl, com argv, cwd, stdin e o
+conteudo dos arquivos citados no argv ou no stdin: e o que a bateria le para
+conferir a brief. O stub aceita qualquer argumento.
+"""
+import json, os, re, select, subprocess, sys, time
+
+HERE = os.path.dirname(os.path.abspath(sys.argv[0]))
+ST = os.path.join(HERE, "state")
+ME = os.path.basename(sys.argv[0])
+
+
+def conf():
+    try:
+        with open(os.path.join(ST, "reviewer.json")) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def read_stdin():
+    if sys.stdin is None or sys.stdin.isatty():
+        return ""
+    chunks = []
+    fd = sys.stdin.fileno()
+    while True:
+        r, _, _ = select.select([fd], [], [], 1.5)
+        if not r:
+            break
+        b = os.read(fd, 65536)
+        if not b:
+            break
+        chunks.append(b)
+    return b"".join(chunks).decode("utf-8", "replace")
+
+
+def sha_now():
+    try:
+        with open(os.path.join(ST, "sha")) as f:
+            s = f.read().strip()
+            if s:
+                return s
+    except Exception:
+        pass
+    r = subprocess.run(["git", "rev-parse", "HEAD"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True)
+    return r.stdout.strip() or "0" * 40
+
+
+def file_args(argv, stdin):
+    files = {}
+    cands = list(argv)
+    cands += re.findall(r"(?<![\w.])/[^\s\"'`<>|;]+", " ".join(argv) + "\n" + stdin)
+    for a in cands:
+        for piece in (a, a.split("=", 1)[-1]):
+            if piece.startswith("@"):
+                piece = piece[1:]
+            if os.path.isfile(piece) and os.path.getsize(piece) < 2_000_000 and piece not in files:
+                try:
+                    with open(piece, errors="replace") as f:
+                        files[piece] = f.read()
+                except Exception:
+                    pass
+    return files
+
+
+def timeline(c, what):
+    if c.get("timeline"):
+        with open(c["timeline"], "a") as f:
+            f.write("%s revisao %s %.3f\n" % (c.get("name", ME), what, time.time()))
+
+
+def main():
+    c = conf()
+    argv = sys.argv[1:]
+    stdin = read_stdin()
+    rec = {"agent": ME, "argv": argv, "cwd": os.getcwd(), "stdin": stdin, "files": file_args(argv, stdin),
+           "start": time.time(), "pid": os.getpid()}
+    with open(os.path.join(ST, "reviewer.calls.jsonl"), "a") as f:
+        f.write(json.dumps(rec) + "\n")
+    timeline(c, "start")
+    mode = c.get("mode", "approve")
+    time.sleep(float(c.get("sleep", 0)))
+    sha = sha_now()
+    tokens = int(c.get("tokens", 4321))
+    body = "REVIEW-BODY-MARKER-3a9: nada a apontar alem do que consta acima.\n"
+    out, rc = "", 0
+    if mode == "approve":
+        out = "APPROVE at %s\nBlocking: %s\n%s" % (sha, c.get("blocking", 0), body)
+    elif mode == "changes":
+        out = "CHANGES REQUESTED at %s\nBlocking: %s\n%s1. REVIEW-FINDING-MARKER-77c: falta tratar o caso vazio.\n" % (sha, c.get("blocking", 2), body)
+    elif mode == "preamble":
+        out = "Lendo os arquivos do repositorio...\nAPPROVE at %s\nBlocking: 0\n%s" % (sha, body)
+    elif mode == "blankline":
+        out = "\nAPPROVE at %s\nBlocking: 0\n%s" % (sha, body)
+    elif mode == "suffix":
+        out = "APPROVE at %s unexpected-suffix\nBlocking: 0\n%s" % (sha, body)
+    elif mode == "malformed":
+        out = "LGTM, pode subir!\n"
+    elif mode == "refuse":
+        out = "I'm sorry, but I can't assist with reviewing this code.\n"
+    elif mode == "exit1":
+        rc = 1
+    elif mode == "quota":
+        sys.stderr.write("Error: usage limit reached (quota exceeded). Try again later.\n")
+        rc = 1
+    elif mode == "hang":
+        time.sleep(float(c.get("hang", 25)))
+        out = "APPROVE at %s\nBlocking: 0\n%s" % (sha, body)
+    sys.stdout.write(out)
+    sys.stdout.flush()
+    if out:
+        sys.stdout.write("tokens used: %d\n" % tokens)
+        sys.stderr.write("tokens used\n%d\n" % tokens)
+    # codex-style: resposta tambem num arquivo (-o / --output-last-message)
+    for i, a in enumerate(argv):
+        if a in ("-o", "--output-last-message", "--output-file") and i + 1 < len(argv):
+            try:
+                with open(argv[i + 1], "w") as f:
+                    f.write(out)
+            except Exception:
+                pass
+    timeline(c, "end")
+    sys.exit(rc)
+
+
+if __name__ == "__main__":
+    main()

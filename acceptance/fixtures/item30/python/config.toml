@@ -1,0 +1,7 @@
+lang = "python"
+runner = "pytest"
+[[suite]]
+name = "contrato-30"
+root = "packages/api"
+command = "python3 -m pytest -p no:cacheprovider --junitxml={junit}"
+globs = ["ausente/**"]

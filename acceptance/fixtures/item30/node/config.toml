@@ -1,0 +1,7 @@
+lang = "node"
+runner = "vitest"
+[[suite]]
+name = "contrato-30"
+root = "packages/api"
+command = "npx --no -- vitest run --maxWorkers=1 --reporter=junit --outputFile={junit}"
+globs = ["ausente/**"]

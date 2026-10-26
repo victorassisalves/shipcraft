@@ -1,0 +1,871 @@
+#!/usr/bin/env python3
+"""Stub do `gh` da bateria de aceitacao da v1 (docs/spec.md).
+
+Offline e deterministico: nunca fala com a rede. O estado do "GitHub" fica em
+<pasta deste script>/state/ (uma pasta por caso). Todo comando e registrado em
+state/calls.log; os que mudam algo tambem em state/writes.log.
+
+Superficie suportada (o que nao esta aqui sai com codigo 1 e a mensagem
+"acceptance-stub: unsupported gh: ..."; see acceptance/README.md):
+  gh auth status
+  gh repo view [--json F] [-q JQ]
+  gh pr create --title T (--body B | --body-file F|-) [--base B] [--head H]
+  gh pr list   [--head H] [--base B] [--state open|closed|merged|all] [--search S] [--json F] [-q JQ]
+  gh pr view   [N|BRANCH|URL] [--json F] [-q JQ]
+  gh pr edit   [N] [--title T] [--body B | --body-file F|-]
+  gh pr comment [N] (--body B | --body-file F|-) [--edit-last]
+  gh pr review [N] --comment (--body B | --body-file F|-)       (conta como comentario)
+  gh pr merge  [N] (--merge|--squash|--rebase) [--delete-branch] [--subject S] [--body B]
+  gh pr checkout N [-b NOME]      gh pr diff [N]
+  gh api CAMINHO [-X M] [-f k=v] [-F k=v] [--input F|-] [-q JQ] [--paginate]
+    repos/O/R                                   GET
+    repos/O/R/pulls[?head=O:B&state=S]          GET, POST
+    repos/O/R/pulls/N                           GET, PATCH
+    repos/O/R/pulls/N/merge                     PUT
+    repos/O/R/pulls/N/commits                   GET
+    repos/O/R/issues/N/comments                 GET, POST
+    repos/O/R/pulls/N/reviews                   POST (conta como comentario)
+    repos/O/R/statuses/SHA                      POST
+    repos/O/R/commits/SHA/statuses              GET (lista, mais novo primeiro)
+    repos/O/R/commits/SHA/status                GET (combinado)
+    repos/O/R/commits/SHA/check-runs            GET (sempre vazio)
+    repos/O/R/commits/SHA/pulls                 GET
+    repos/O/R/commits/REF | git/ref/heads/B | branches/B   GET
+    repos/O/R/branches/B/protection[/...]       GET, PUT, POST, PATCH, DELETE
+    repos/O/R/rulesets                          GET, POST
+    user                                        GET
+{owner} {repo} {branch} nos caminhos viram acme proj main.
+"""
+import json, os, re, subprocess, sys, tempfile, time
+
+HERE = os.path.dirname(os.path.abspath(sys.argv[0]))
+ST = os.path.join(HERE, "state")
+OWNER, REPO = "acme", "proj"
+QUIET = os.environ.get("SHIPCRAFT_STUB_QUIET") == "1"
+ARGV = sys.argv[1:]
+_stdin = None
+
+
+def stdin_text():
+    global _stdin
+    if _stdin is None:
+        try:
+            _stdin = "" if sys.stdin is None or sys.stdin.isatty() else sys.stdin.read()
+        except Exception:
+            _stdin = ""
+    return _stdin
+
+
+def now():
+    return time.time()
+
+
+def iso(t):
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
+
+
+class Lock(object):
+    def __enter__(self):
+        import fcntl
+        os.makedirs(ST, exist_ok=True)
+        self.f = open(os.path.join(ST, "lock"), "a")
+        fcntl.flock(self.f, fcntl.LOCK_EX)
+
+    def __exit__(self, *a):
+        self.f.close()
+
+
+def rd(name, default):
+    try:
+        with open(os.path.join(ST, name)) as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
+def wr(name, data):
+    p = os.path.join(ST, name)
+    with open(p + ".tmp", "w") as f:
+        json.dump(data, f)
+    os.replace(p + ".tmp", p)
+
+
+def append(name, obj):
+    with open(os.path.join(ST, name), "a") as f:
+        f.write(json.dumps(obj) + "\n")
+
+
+def lines(name):
+    try:
+        with open(os.path.join(ST, name)) as f:
+            return [json.loads(l) for l in f if l.strip()]
+    except Exception:
+        return []
+
+
+def readfile(name, default=""):
+    try:
+        with open(os.path.join(ST, name)) as f:
+            return f.read().strip()
+    except Exception:
+        return default
+
+
+ORIGIN = readfile("origin")
+
+
+def git(*args, **kw):
+    env = dict(os.environ)
+    env.update({"GIT_AUTHOR_NAME": "aceite stub", "GIT_AUTHOR_EMAIL": "stub@example.invalid",
+                "GIT_COMMITTER_NAME": "aceite stub", "GIT_COMMITTER_EMAIL": "stub@example.invalid"})
+    r = subprocess.run(["git"] + list(args), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                       universal_newlines=True, env=env, cwd=kw.get("cwd"))
+    return r.returncode, r.stdout.strip(), r.stderr.strip()
+
+
+def ogit(*args):
+    return git("--git-dir", ORIGIN, *args)
+
+
+def fail(msg, code=1):
+    sys.stderr.write(msg + "\n")
+    sys.exit(code)
+
+
+def unsupported(what):
+    fail("acceptance-stub: unsupported gh: " + what + "  (see acceptance/README.md, 'GitHub CLI')")
+
+
+# ------------------------------------------------------------------ registro
+def log_call(kind, text):
+    if QUIET:
+        return
+    rec = {"t": now(), "cwd": os.getcwd(), "argv": ARGV}
+    append("calls.log", rec)
+    if kind:
+        w = dict(rec)
+        w["kind"] = kind
+        w["text"] = text
+        append("writes.log", w)
+
+
+# ------------------------------------------------------------------ PRs
+def prs():
+    return rd("prs.json", {})
+
+
+def save_prs(d):
+    wr("prs.json", d)
+
+
+def head_oid(p):
+    if p.get("headOid"):
+        return p["headOid"]
+    rc, out, _ = ogit("rev-parse", "-q", "--verify", "refs/heads/" + p["headRefName"])
+    return out if rc == 0 else ""
+
+
+def sync_pull_refs():
+    if not ORIGIN:
+        return
+    for n, p in prs().items():
+        if p["state"] != "OPEN":
+            continue
+        o = head_oid(p)
+        if o:
+            ogit("update-ref", "refs/pull/%s/head" % n, o)
+
+
+def url(n):
+    return "https://github.com/%s/%s/pull/%s" % (OWNER, REPO, n)
+
+
+def pr_json(p):
+    o = head_oid(p)
+    comments = [c for c in lines("comments.jsonl") if str(c["pr"]) == str(p["number"])]
+    fork = bool(p.get("fork"))
+    owner = p.get("forkOwner", "mallory") if fork else OWNER
+    return {
+        "number": p["number"], "title": p["title"], "body": p["body"], "state": p["state"],
+        "url": url(p["number"]), "id": "PR_%s" % p["number"], "isDraft": False,
+        "headRefName": p["headRefName"], "headRefOid": o, "baseRefName": p["baseRefName"],
+        "isCrossRepository": fork,
+        "headRepository": {"name": REPO, "nameWithOwner": owner + "/" + REPO},
+        "headRepositoryOwner": {"login": owner},
+        "author": {"login": p.get("author", "victor")},
+        "mergeCommit": ({"oid": p["mergeCommit"]} if p.get("mergeCommit") else None),
+        "mergedAt": p.get("mergedAt"), "createdAt": iso(p.get("created", 0)),
+        "updatedAt": iso(p.get("created", 0)), "mergeable": "MERGEABLE",
+        "mergeStateStatus": "CLEAN", "labels": [], "files": [], "commits": [],
+        "comments": [{"author": {"login": "victor"}, "body": c["body"], "createdAt": iso(c["t"]),
+                      "id": c["id"], "url": url(p["number"]) + "#issuecomment-" + str(c["id"])}
+                     for c in comments],
+        "statusCheckRollup": [{"__typename": "StatusContext", "context": s["context"], "state": s["state"].upper(),
+                               "description": s["description"]} for s in latest_statuses(o).values()],
+    }
+
+
+def pr_rest(p):
+    o = head_oid(p)
+    fork = bool(p.get("fork"))
+    owner = p.get("forkOwner", "mallory") if fork else OWNER
+    return {
+        "number": p["number"], "title": p["title"], "body": p["body"],
+        "state": "open" if p["state"] == "OPEN" else "closed", "merged": p["state"] == "MERGED",
+        "html_url": url(p["number"]), "url": "https://api.github.com/repos/%s/%s/pulls/%s" % (OWNER, REPO, p["number"]),
+        "draft": False, "user": {"login": p.get("author", "victor")},
+        "merge_commit_sha": p.get("mergeCommit"),
+        "head": {"ref": p["headRefName"], "sha": o, "label": owner + ":" + p["headRefName"],
+                 "repo": {"full_name": owner + "/" + REPO, "fork": fork, "name": REPO, "owner": {"login": owner}}},
+        "base": {"ref": p["baseRefName"], "label": OWNER + ":" + p["baseRefName"],
+                 "sha": ogit("rev-parse", "-q", "--verify", "refs/heads/" + p["baseRefName"])[1],
+                 "repo": {"full_name": OWNER + "/" + REPO, "fork": False, "name": REPO, "owner": {"login": OWNER}}},
+        "mergeable": True, "created_at": iso(p.get("created", 0)), "updated_at": iso(p.get("created", 0)),
+        "merged_at": p.get("mergedAt"), "labels": [],
+    }
+
+
+def find_pr(sel):
+    d = prs()
+    if sel is None or sel == "":
+        rc, br, _ = git("rev-parse", "--abbrev-ref", "HEAD")
+        sel = br
+    sel = str(sel)
+    m = re.search(r"/pull/(\d+)", sel)
+    if m:
+        sel = m.group(1)
+    m = re.match(r"^#?(\d+)$", sel)
+    if m and m.group(1) in d:
+        return d[m.group(1)]
+    best = None
+    for n in sorted(d, key=int):
+        p = d[n]
+        if p["headRefName"] == sel and (best is None or (p["state"] == "OPEN" and best["state"] != "OPEN")):
+            best = p
+    return best
+
+
+# ------------------------------------------------------------------ status
+def statuses_for(sha):
+    s = [x for x in lines("statuses.jsonl") if x["sha"] == sha]
+    s.reverse()
+    return s
+
+
+def latest_statuses(sha):
+    out = {}
+    for s in reversed(statuses_for(sha)):
+        out[s["context"]] = s
+    return out
+
+
+def status_json(s):
+    return {"id": s.get("id", 0), "state": s["state"], "context": s["context"], "description": s["description"],
+            "target_url": s.get("target_url"), "created_at": iso(s["t"]), "updated_at": iso(s["t"]),
+            "creator": {"login": "victor"}}
+
+
+# ------------------------------------------------------------------ saida
+def jq_out(data, jq):
+    txt = json.dumps(data)
+    if jq:
+        r = subprocess.run(["jq", "-r", jq], input=txt, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           universal_newlines=True)
+        if r.returncode != 0:
+            fail("acceptance-stub: jq failed: " + r.stderr.strip())
+        sys.stdout.write(r.stdout)
+    else:
+        sys.stdout.write(txt + "\n")
+
+
+def pick(obj, fields):
+    if not fields:
+        return obj
+    return {f: obj.get(f) for f in fields.split(",")}
+
+
+# ------------------------------------------------------------------ flags
+VAL = {"--title": "title", "-t": "title", "--body": "body", "-b": "body", "--body-file": "body_file", "-F": "body_file",
+       "--base": "base", "-B": "base", "--head": "head", "-H": "head", "--json": "json", "--jq": "jq", "-q": "jq",
+       "--state": "state", "--repo": "repo", "-R": "repo", "--search": "search", "-S": "search", "--limit": "limit",
+       "-L": "limit", "--subject": "subject", "--author": "author", "-A": "author", "--label": "label",
+       "-l": "label", "--assignee": "assignee", "--reviewer": "reviewer", "--match-head-commit": "match",
+       "--template": "template", "-p": "project", "--branch": "branch", "-b2": "x"}
+BOOL = {"--merge": "merge", "-m": "merge", "--squash": "squash", "--rebase": "rebase", "-r": "rebase",
+        "--delete-branch": "delete", "-d": "delete", "--auto": "auto", "--admin": "admin", "--draft": "draft",
+        "--fill": "fill", "--web": "web", "-w": "web", "--edit-last": "edit_last", "--comments": "comments",
+        "--no-maintainer-edit": "x", "--dry-run": "x", "--patch": "x", "--name-only": "x", "--color": "x"}
+
+
+def parse(args, extra_val=None, extra_bool=None):
+    val = dict(VAL)
+    val.update(extra_val or {})
+    boo = dict(BOOL)
+    boo.update(extra_bool or {})
+    o, pos = {}, []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a.startswith("--") and "=" in a:
+            k, v = a.split("=", 1)
+            if k in val:
+                o[val[k]] = v
+                i += 1
+                continue
+        if a in val:
+            if i + 1 >= len(args):
+                fail("flag needs an argument: " + a)
+            o[val[a]] = args[i + 1]
+            i += 2
+            continue
+        if a in boo:
+            o[boo[a]] = True
+            i += 1
+            continue
+        if a.startswith("-") and a != "-":
+            unsupported("flag " + a)
+        pos.append(a)
+        i += 1
+    return o, pos
+
+
+def body_of(o):
+    if "body_file" in o:
+        if o["body_file"] == "-":
+            return stdin_text()
+        try:
+            with open(o["body_file"]) as f:
+                return f.read()
+        except Exception as e:
+            fail("open %s: %s" % (o["body_file"], e))
+    return o.get("body")
+
+
+# ------------------------------------------------------------------ git real: merge
+def do_merge(p, method, subject=None, body=None):
+    tmp = tempfile.mkdtemp(prefix="stubmerge.")
+    w = os.path.join(tmp, "w")
+    try:
+        rc, _, err = git("clone", "-q", ORIGIN, w)
+        if rc:
+            fail("acceptance-stub: clone failed: " + err)
+        base, head = p["baseRefName"], p["headRefName"]
+        git("checkout", "-q", base, cwd=w)
+        git("fetch", "-q", "origin", "%s:refs/heads/_pr" % (("refs/pull/%s/head" % p["number"]) if p.get("headOid") else ("refs/heads/" + head)), cwd=w)
+        title = subject or p["title"]
+        if method == "merge":
+            rc, _, err = git("merge", "--no-ff", "-q", "-m", "Merge pull request #%s from %s/%s\n\n%s" % (p["number"], OWNER, head, title), "_pr", cwd=w)
+        elif method == "squash":
+            rc, _, err = git("merge", "--squash", "_pr", cwd=w)
+            if rc == 0:
+                rc, _, err = git("commit", "-q", "-m", "%s (#%s)" % (title, p["number"]), cwd=w)
+        else:
+            git("checkout", "-q", "-B", "_rb", "_pr", cwd=w)
+            rc, _, err = git("rebase", "-q", base, cwd=w)
+            if rc == 0:
+                git("checkout", "-q", base, cwd=w)
+                rc, _, err = git("merge", "--ff-only", "-q", "_rb", cwd=w)
+        if rc:
+            fail("acceptance-stub: merge failed: " + err)
+        rc, _, err = git("push", "-q", "origin", base, cwd=w)
+        if rc:
+            fail("acceptance-stub: merge push failed: " + err)
+        return git("rev-parse", "HEAD", cwd=w)[1]
+    finally:
+        subprocess.run(["rm", "-rf", tmp])
+
+
+def mark_merged(p, oid, delete=False):
+    d = prs()
+    q = d[str(p["number"])]
+    q["state"], q["mergeCommit"], q["mergedAt"] = "MERGED", oid, iso(now())
+    save_prs(d)
+    if delete and not p.get("fork"):
+        ogit("update-ref", "-d", "refs/heads/" + p["headRefName"])
+
+
+# ------------------------------------------------------------------ comandos
+def cmd_pr(args):
+    if not args:
+        unsupported("pr")
+    sub, rest = args[0], args[1:]
+    if sub == "create":
+        o, pos = parse(rest)
+        title = o.get("title")
+        body = body_of(o)
+        if o.get("fill"):
+            title = title or git("log", "-1", "--format=%s")[1]
+            body = body if body is not None else ""
+        if not title or body is None:
+            fail("must provide `--title` and `--body` (or `--fill`) when not running interactively")
+        head = o.get("head") or git("rev-parse", "--abbrev-ref", "HEAD")[1]
+        head = head.split(":")[-1]
+        base = o.get("base") or "main"
+        with Lock():
+            if ogit("rev-parse", "-q", "--verify", "refs/heads/" + head)[0] != 0:
+                fail("acceptance-stub: branch %s is absent from origin (push first)" % head)
+            d = prs()
+            for p in d.values():
+                if p["headRefName"] == head and p["baseRefName"] == base and p["state"] == "OPEN":
+                    fail("a pull request for branch \"%s\" into branch \"%s\" already exists:\n%s" % (head, base, url(p["number"])))
+            n = int(readfile("next_pr", "1"))
+            with open(os.path.join(ST, "next_pr"), "w") as f:
+                f.write(str(n + 1))
+            d[str(n)] = {"number": n, "title": title, "body": body, "headRefName": head, "baseRefName": base,
+                         "state": "OPEN", "created": now()}
+            save_prs(d)
+            sync_pull_refs()
+            log_call("pr-create", "title: %s\nbody: %s" % (title, body))
+        print(url(n))
+        return
+    if sub == "list":
+        o, pos = parse(rest)
+        log_call(None, "")
+        st = o.get("state", "open")
+        out = []
+        d = prs()
+        for n in sorted(d, key=int):
+            p = d[n]
+            if st != "all" and p["state"].lower() != st.lower() and not (st == "closed" and p["state"] == "MERGED"):
+                continue
+            if o.get("head") and p["headRefName"] != o["head"].split(":")[-1]:
+                continue
+            if o.get("base") and p["baseRefName"] != o["base"]:
+                continue
+            if o.get("search"):
+                ok = False
+                for tok in o["search"].split():
+                    if tok.startswith("is:") or tok.startswith("state:") or ":" in tok:
+                        continue
+                    if p.get("mergeCommit", "").startswith(tok) or head_oid(p).startswith(tok) or tok in p["title"]:
+                        ok = True
+                if not ok and re.sub(r"\b\w+:\S+", "", o["search"]).strip():
+                    continue
+            out.append(p)
+        if o.get("json"):
+            jq_out([pick(pr_json(p), o["json"]) for p in out], o.get("jq"))
+        else:
+            for p in out:
+                print("%s\t%s\t%s\t%s" % (p["number"], p["title"], p["headRefName"], p["state"]))
+        return
+    if sub == "view":
+        o, pos = parse(rest)
+        log_call(None, "")
+        p = find_pr(pos[0] if pos else None)
+        if not p:
+            fail('no pull requests found for branch "%s"' % (pos[0] if pos else git("rev-parse", "--abbrev-ref", "HEAD")[1]))
+        if o.get("json"):
+            jq_out(pick(pr_json(p), o["json"]), o.get("jq"))
+        else:
+            print("title:\t%s\nstate:\t%s\nnumber:\t%s\nurl:\t%s\n--\n%s" % (p["title"], p["state"], p["number"], url(p["number"]), p["body"]))
+        return
+    if sub == "edit":
+        o, pos = parse(rest)
+        p = find_pr(pos[0] if pos else None)
+        if not p:
+            fail("no pull requests found")
+        with Lock():
+            d = prs()
+            q = d[str(p["number"])]
+            body = body_of(o)
+            if o.get("title"):
+                q["title"] = o["title"]
+            if body is not None:
+                q["body"] = body
+            save_prs(d)
+            log_call("pr-edit", "title: %s\nbody: %s" % (o.get("title", ""), body or ""))
+        print(url(p["number"]))
+        return
+    if sub == "comment":
+        o, pos = parse(rest)
+        p = find_pr(pos[0] if pos else None)
+        if not p:
+            fail("no pull requests found")
+        body = body_of(o)
+        if body is None:
+            fail("flag --body or --body-file required")
+        with Lock():
+            cs = lines("comments.jsonl")
+            if o.get("edit_last") and cs:
+                cs = [c for c in cs]
+                for c in reversed(cs):
+                    if str(c["pr"]) == str(p["number"]):
+                        c["body"] = body
+                        break
+                with open(os.path.join(ST, "comments.jsonl"), "w") as f:
+                    for c in cs:
+                        f.write(json.dumps(c) + "\n")
+            else:
+                append("comments.jsonl", {"pr": p["number"], "id": len(cs) + 1, "t": now(), "body": body})
+            log_call("comment", body)
+        print(url(p["number"]) + "#issuecomment-1")
+        return
+    if sub == "merge":
+        o, pos = parse(rest)
+        p = find_pr(pos[0] if pos else None)
+        if not p:
+            fail("no pull requests found")
+        method = "merge" if o.get("merge") else "squash" if o.get("squash") else "rebase" if o.get("rebase") else None
+        if o.get("auto") and not method:
+            method = "merge"
+        if not method:
+            fail("--merge, --rebase, or --squash required when not running interactively")
+        with Lock():
+            log_call("merge", "merge pr=%s method=%s subject=%s body=%s" % (p["number"], method, o.get("subject", ""), o.get("body", "")))
+            if p["state"] != "OPEN":
+                fail("Pull request #%s is not mergeable: already %s" % (p["number"], p["state"].lower()))
+            oid = do_merge(p, method, o.get("subject"), o.get("body"))
+            mark_merged(p, oid, bool(o.get("delete")))
+            append("merges.jsonl", {"pr": p["number"], "method": method, "oid": oid, "t": now()})
+        print("Merged pull request #%s (%s)" % (p["number"], p["title"]))
+        return
+    if sub == "checkout":
+        o, pos = parse(rest)
+        log_call(None, "")
+        p = find_pr(pos[0] if pos else None)
+        if not p:
+            fail("no pull requests found")
+        name = o.get("branch") or p["headRefName"]
+        ref = ("refs/pull/%s/head" % p["number"]) if p.get("headOid") else ("refs/heads/" + p["headRefName"])
+        rc, _, err = git("fetch", "-q", "origin", ref)
+        if rc:
+            fail("acceptance-stub: fetch failed: " + err)
+        rc, _, err = git("checkout", "-q", "-B", name, "FETCH_HEAD")
+        if rc:
+            fail("acceptance-stub: checkout failed: " + err)
+        return
+    if sub == "review":
+        o, pos = parse(rest, extra_bool={"--comment": "comment", "--approve": "approve", "--request-changes": "reqchg"})
+        p = find_pr(pos[0] if pos else None)
+        if not p:
+            fail("no pull requests found")
+        body = body_of(o)
+        if body is None:
+            fail("body required")
+        with Lock():
+            cs = lines("comments.jsonl")
+            append("comments.jsonl", {"pr": p["number"], "id": len(cs) + 1, "t": now(), "body": body})
+            log_call("comment", body)
+        return
+    if sub == "diff":
+        o, pos = parse(rest)
+        log_call(None, "")
+        p = find_pr(pos[0] if pos else None)
+        if not p:
+            fail("no pull requests found")
+        sys.stdout.write(ogit("diff", "refs/heads/%s...%s" % (p["baseRefName"], head_oid(p)))[1] + "\n")
+        return
+    unsupported("pr " + sub)
+
+
+def parse_api(args):
+    o = {"method": None, "fields": [], "input": None, "jq": None, "path": None, "paginate": False}
+    i = 0
+    while i < len(args):
+        a = args[i]
+        nxt = args[i + 1] if i + 1 < len(args) else None
+        if a in ("-X", "--method"):
+            o["method"] = nxt.upper(); i += 2
+        elif a in ("-f", "--raw-field"):
+            o["fields"].append((nxt, False)); i += 2
+        elif a in ("-F", "--field"):
+            o["fields"].append((nxt, True)); i += 2
+        elif a == "--input":
+            o["input"] = nxt; i += 2
+        elif a in ("-q", "--jq"):
+            o["jq"] = nxt; i += 2
+        elif a in ("-H", "--header", "--hostname", "--cache", "-t", "--template", "-p", "--preview"):
+            i += 2
+        elif a in ("--paginate", "--slurp", "-i", "--include", "--silent", "--verbose"):
+            o["paginate"] = o["paginate"] or a == "--paginate"; i += 1
+        elif a.startswith("-") and a != "-":
+            unsupported("flag " + a)
+        else:
+            if o["path"] is None:
+                o["path"] = a
+            else:
+                unsupported("argumento extra " + a)
+            i += 1
+    return o
+
+
+def fields_to_dict(fields):
+    d = {}
+    for kv, typed in fields:
+        k, _, v = kv.partition("=")
+        if typed:
+            if v.startswith("@"):
+                src = v[1:]
+                v = stdin_text() if src == "-" else open(src).read()
+            elif v in ("true", "false"):
+                v = (v == "true")
+            elif re.match(r"^-?\d+$", v):
+                v = int(v)
+        m = re.match(r"^(\w+)\[\]$", k)
+        if m:
+            d.setdefault(m.group(1), []).append(v)
+        else:
+            d[k] = v
+    return d
+
+
+def http_error(code, msg):
+    sys.stdout.write(json.dumps({"message": msg, "documentation_url": "https://docs.github.com/rest"}) + "\n")
+    fail("gh: %s (HTTP %d)" % (msg, code))
+
+
+def collect_contexts(payload):
+    found = []
+
+    def walk(x):
+        if isinstance(x, dict):
+            for v in x.values():
+                walk(v)
+        elif isinstance(x, list):
+            for v in x:
+                walk(v)
+        elif isinstance(x, str) and x.startswith("shipcraft/") and x not in found:
+            found.append(x)
+    walk(payload)
+    return found
+
+
+def cmd_api(args):
+    o = parse_api(args)
+    if not o["path"]:
+        fail("accepts 1 arg(s), received 0")
+    path = o["path"].lstrip("/")
+    path = path.replace("{owner}", OWNER).replace("{repo}", REPO).replace("{branch}", "main")
+    path, _, query = path.partition("?")
+    q = dict(kv.split("=", 1) if "=" in kv else (kv, "") for kv in query.split("&") if kv)
+    method = o["method"] or ("POST" if (o["fields"] or o["input"]) else "GET")
+    payload = fields_to_dict(o["fields"])
+    raw_input = ""
+    if o["input"]:
+        raw_input = stdin_text() if o["input"] == "-" else open(o["input"]).read()
+        try:
+            payload.update(json.loads(raw_input))
+        except Exception:
+            pass
+    if method == "GET":
+        for k, v in payload.items():
+            q[k] = v
+    text = json.dumps(payload) if payload else raw_input
+    w = lambda kind: log_call(kind, text)
+    m = re.match(r"^repos/([^/]+)/([^/]+)(?:/(.*))?$", path)
+    if path == "user":
+        log_call(None, ""); jq_out({"login": "victor"}, o["jq"]); return
+    if path == "graphql":
+        unsupported("api graphql")
+    if not m:
+        unsupported("api " + o["path"])
+    rest = m.group(3) or ""
+
+    def out(data):
+        jq_out(data, o["jq"])
+
+    if rest == "":
+        log_call(None, "")
+        out({"full_name": "%s/%s" % (OWNER, REPO), "name": REPO, "owner": {"login": OWNER}, "default_branch": "main",
+             "private": True, "visibility": "private", "fork": False, "permissions": {"admin": True, "push": True}})
+        return
+    # --- pulls
+    if rest == "pulls":
+        if method == "POST":
+            head = str(payload.get("head", "")).split(":")[-1]
+            args2 = ["create", "--title", str(payload.get("title", "")), "--body", str(payload.get("body", "")),
+                     "--head", head, "--base", str(payload.get("base", "main"))]
+            # reaproveita o cmd_pr, mas devolve JSON
+            import io
+            buf, old = io.StringIO(), sys.stdout
+            sys.stdout = buf
+            try:
+                cmd_pr(args2)
+            finally:
+                sys.stdout = old
+            n = buf.getvalue().strip().rsplit("/", 1)[-1]
+            out(pr_rest(prs()[n]))
+            return
+        log_call(None, "")
+        d = prs()
+        res = []
+        for n in sorted(d, key=int):
+            p = d[n]
+            st = q.get("state", "open")
+            if st != "all" and p["state"].lower() != st and not (st == "closed" and p["state"] == "MERGED"):
+                continue
+            if q.get("head") and p["headRefName"] != q["head"].split(":")[-1]:
+                continue
+            if q.get("base") and p["baseRefName"] != q["base"]:
+                continue
+            res.append(pr_rest(p))
+        out(res)
+        return
+    m2 = re.match(r"^pulls/(\d+)(?:/(\w+))?$", rest)
+    if m2:
+        p = prs().get(m2.group(1))
+        if not p:
+            http_error(404, "Not Found")
+        sub = m2.group(2)
+        if sub is None and method == "GET":
+            log_call(None, ""); out(pr_rest(p)); return
+        if sub is None and method == "PATCH":
+            with Lock():
+                d = prs()
+                for k in ("title", "body"):
+                    if k in payload:
+                        d[m2.group(1)][k] = payload[k]
+                if payload.get("state") == "closed":
+                    d[m2.group(1)]["state"] = "CLOSED"
+                save_prs(d)
+                w("pr-edit")
+            out(pr_rest(prs()[m2.group(1)])); return
+        if sub == "merge" and method == "PUT":
+            mm = payload.get("merge_method", "merge")
+            with Lock():
+                w("merge")
+                if p["state"] != "OPEN":
+                    http_error(405, "Pull Request is not mergeable")
+                oid = do_merge(p, mm, payload.get("commit_title"), payload.get("commit_message"))
+                mark_merged(p, oid)
+                append("merges.jsonl", {"pr": p["number"], "method": mm, "oid": oid, "t": now()})
+            out({"sha": oid, "merged": True, "message": "Pull Request successfully merged"}); return
+        if sub == "commits" and method == "GET":
+            log_call(None, "")
+            rc, so, _ = ogit("rev-list", "--reverse", "refs/heads/%s..%s" % (p["baseRefName"], head_oid(p)))
+            out([{"sha": s} for s in so.split()]); return
+        unsupported("api %s %s" % (method, o["path"]))
+    m2 = re.match(r"^pulls/(\d+)/reviews$", rest)
+    if m2 and method == "POST":
+        n = m2.group(1)
+        if n not in prs():
+            http_error(404, "Not Found")
+        with Lock():
+            cs = lines("comments.jsonl")
+            append("comments.jsonl", {"pr": int(n), "id": len(cs) + 1, "t": now(), "body": payload.get("body", "")})
+            w("comment")
+        out({"id": len(cs) + 1, "body": payload.get("body", ""), "state": "COMMENTED"}); return
+    # --- comentarios
+    m2 = re.match(r"^issues/(\d+)/comments$", rest)
+    if m2:
+        n = m2.group(1)
+        if n not in prs():
+            http_error(404, "Not Found")
+        if method == "POST":
+            body = payload.get("body")
+            if body is None:
+                http_error(422, "Validation Failed")
+            with Lock():
+                cs = lines("comments.jsonl")
+                append("comments.jsonl", {"pr": int(n), "id": len(cs) + 1, "t": now(), "body": body})
+                w("comment")
+            out({"id": len(cs) + 1, "body": body, "html_url": url(n) + "#issuecomment-%d" % (len(cs) + 1)}); return
+        log_call(None, "")
+        out([{"id": c["id"], "body": c["body"], "user": {"login": "victor"}, "created_at": iso(c["t"])}
+             for c in lines("comments.jsonl") if str(c["pr"]) == n]); return
+    # --- statuses
+    m2 = re.match(r"^statuses/([0-9a-f]{7,40})$", rest)
+    if m2 and method == "POST":
+        sha = m2.group(1)
+        st, ctx = payload.get("state"), payload.get("context", "default")
+        if st not in ("error", "failure", "pending", "success"):
+            w("status-invalid")
+            http_error(422, "Validation Failed: state is not a valid value")
+        full = ogit("rev-parse", "-q", "--verify", sha + "^{commit}")[1] or sha
+        with Lock():
+            n = len(lines("statuses.jsonl")) + 1
+            append("statuses.jsonl", {"id": n, "sha": full, "context": ctx, "state": st,
+                                      "description": payload.get("description", ""),
+                                      "target_url": payload.get("target_url"), "t": now()})
+            w("status")
+        out({"id": n, "state": st, "context": ctx, "description": payload.get("description", "")}); return
+    m2 = re.match(r"^commits/([^/]+)/(statuses|status|check-runs|pulls)$", rest)
+    if m2 and method == "GET":
+        ref, what = m2.group(1), m2.group(2)
+        sha = ogit("rev-parse", "-q", "--verify", ref + "^{commit}")[1] or ref
+        log_call(None, "")
+        if what == "statuses":
+            out([status_json(s) for s in statuses_for(sha)])
+        elif what == "status":
+            ls = latest_statuses(sha)
+            order = {"error": 3, "failure": 3, "pending": 2, "success": 1}
+            comb = "pending" if not ls else max((s["state"] for s in ls.values()), key=lambda s: order[s])
+            out({"state": comb, "sha": sha, "total_count": len(ls), "statuses": [status_json(s) for s in ls.values()]})
+        elif what == "check-runs":
+            out({"total_count": 0, "check_runs": []})
+        else:
+            res = []
+            for p in prs().values():
+                if p.get("mergeCommit") == sha or head_oid(p) == sha:
+                    res.append(pr_rest(p))
+            out(res)
+        return
+    m2 = re.match(r"^(commits/([^/]+)|git/ref/heads/(.+)|branches/([^/]+))$", rest)
+    if m2 and method == "GET":
+        log_call(None, "")
+        ref = m2.group(2) or m2.group(3) or m2.group(4)
+        sha = ogit("rev-parse", "-q", "--verify", ref + "^{commit}")[1] or ogit("rev-parse", "-q", "--verify", "refs/heads/" + ref)[1]
+        if not sha:
+            http_error(404, "Not Found")
+        mode = readfile("protection", "403")
+        out({"sha": sha, "name": ref, "object": {"sha": sha, "type": "commit"}, "commit": {"sha": sha},
+             "protected": mode == "full"})
+        return
+    # --- protecao
+    m2 = re.match(r"^(branches/[^/]+/protection(?:/.*)?|rulesets(?:/.*)?)$", rest)
+    if m2:
+        mode = readfile("protection", "403")
+        if method == "GET":
+            log_call(None, "")
+            if mode == "403":
+                http_error(403, "Upgrade to GitHub Pro or make this repository public to enable this feature.")
+            if rest.startswith("rulesets"):
+                out([]); return
+            if mode == "none":
+                http_error(404, "Branch not protected")
+            ctxs = [c for c in readfile("protection.contexts", "").split() if c]
+            out({"required_status_checks": {"strict": False, "contexts": ctxs,
+                                            "checks": [{"context": c, "app_id": None} for c in ctxs]},
+                 "enforce_admins": {"enabled": False}})
+            return
+        w("protection")
+        if mode == "403":
+            http_error(403, "Upgrade to GitHub Pro or make this repository public to enable this feature.")
+        ctxs = collect_contexts(payload)
+        with open(os.path.join(ST, "protection.contexts"), "w") as f:
+            f.write(" ".join(ctxs))
+        with open(os.path.join(ST, "protection"), "w") as f:
+            f.write("full")
+        out({"url": o["path"], "required_status_checks": {"contexts": ctxs}}); return
+    unsupported("api %s %s" % (method, o["path"]))
+
+
+def main():
+    if not ARGV:
+        unsupported("(sem argumentos)")
+    if os.environ.get("SHIPCRAFT_STUB_FAIL") == "1":
+        fail("acceptance-stub: injected failure", 1)
+    sync_pull_refs()
+    a = ARGV[0]
+    if a == "auth":
+        log_call(None, ""); print("github.com\n  Logged in as victor"); return
+    if a == "repo" and len(ARGV) > 1 and ARGV[1] == "view":
+        o, pos = parse(ARGV[2:])
+        log_call(None, "")
+        data = {"name": REPO, "nameWithOwner": "%s/%s" % (OWNER, REPO), "owner": {"login": OWNER}, "isPrivate": True,
+                "visibility": "PRIVATE", "defaultBranchRef": {"name": "main"}, "url": "https://github.com/%s/%s" % (OWNER, REPO),
+                "viewerPermission": "ADMIN", "isFork": False}
+        if o.get("json"):
+            jq_out(pick(data, o["json"]), o.get("jq"))
+        else:
+            print("%s/%s" % (OWNER, REPO))
+        return
+    if a == "pr":
+        cmd_pr(ARGV[1:]); return
+    if a == "api":
+        cmd_api(ARGV[1:]); return
+    unsupported(" ".join(ARGV))
+
+
+if __name__ == "__main__":
+    main()

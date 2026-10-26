@@ -1,0 +1,7 @@
+lang = "go"
+runner = "gotestsum"
+[[suite]]
+name = "contrato-30"
+root = "packages/api"
+command = "gotestsum --junitfile {junit} -- -count=1 ./..."
+globs = ["ausente/**"]

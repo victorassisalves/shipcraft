@@ -1,0 +1,26 @@
+## Item 25: husky and pre-commit integration
+
+- Husky 9.1.7 installed with exact npm version and npx husky init; h and launchers copied byte-for-byte, including no-final-LF variant.
+- Pre-commit 4.3.0 installed in a venv with commit-msg/post-commit hooks; INSTALL_PYTHON uses a neutral fixture path.
+- Real format checked 2026-10-26: core.hooksPath=.husky/_, nonempty h, user scripts and .git/hooks launchers match the contract.
+- Husky inserts the first command after shebang; exec/exit/missing LF/comments/absent file/identical first line preserve other content.
+- Another Shipcraft first word, broken link, unreadable mode, NUL/invalid UTF-8 and old versions refuse without writes.
+- Pre-commit inserts exact seven-key maps, block name/stages, preserves prefix bytes, indentation, partial pairs and idempotence.
+- YAML covers CR/CRLF/U+2028/U+2029/BOM, inline comments and punctuation in strings; flow stages/args of unrelated hooks stay valid.
+- Flow/missing/null/wrong-type repos, duplicate keys, anchors, merge keys, quoted repos, document end and invalid syntax refuse.
+- Launchers cover present/missing/partial/wrong config/foreign script/broken links; one installation warning lists missing launchers. Status requires a valid command pair and executable launchers and never writes.
+- Two managers or a manual Shipcraft pre-commit check refuses duplication. Init refusal uses three English lines, without terminal codes or init run-log requirements.
+- Later .shipcraft/locks write failure with .shipcraft a file restores bytes/modes/hooks/existing TOML/.git/shipcraft.
+- Minimum version is compared to the binary, not a literal; higher minima and remaining TOML are preserved.
+- Under open lock, all three integration files are protected by commit-msg and CI. Manual integration before RED isolates protection from new init behavior.
+- Real husky h/launchers run check at commit-msg and close at post-commit even with a later exit 0.
+- Repos-node restrictions follow the original lefthook block contract; unrelated flow hooks are allowed. Unreadability uses mode 000 under a non-root user.
+- Initial main 890c4df slice: 87/103 failures, 16 generic-refusal controls passed; no full battery. The existing empty-local-hooks case was migrated to accepted integration.
+- Init's ready-to-commit line includes integration files; final order is commit guidance, test guidance, then literal CI line, including repeated init.
+- Review #84: manual pre-commit check with/without exec refuses without relying on the generated marker, and requests removal. All 72 alternative lefthook sources are covered across root/.config, hidden/local and five extensions; four main YAML names retain older controls.
+- Old husky.hooks with/without dependency and core.hooksPath=.husky refuse even without a .husky directory, before writing and naming Husky 9.
+- Nonempty hook stages wins; missing/empty stages inherits present default_stages (including empty/no stages), otherwise all. Matrix 7x7 plus lists and commit/push/merge-commit/manual aliases.
+- Invalid stages/default_stages refuse even for shipcraft status entries or when explicit stages would override an invalid default.
+- YAML entry uses shlex: basename shipcraft followed by check, with absolute/relative/quoted/spaced paths. Wrapper/status/exec/check-extra/arguments-before-check do not count there.
+- Explicit entry in a remote repo counts; absent entry never fetches a remote manifest (clone/fetch/ls-remote are blocked).
+- default_install_hook_types does not determine pre-commit execution; manual hook detection retains its separate first-round contract.

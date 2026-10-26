@@ -1,0 +1,17 @@
+{
+  "format": 2,
+  "state": "open",
+  "files": {
+    ".shipcraft.toml": "89bf37b4bb01abbfd6e184e93d3794c449ea4e861e55347b668a4b561642a4f3"
+  },
+  "cases": [
+    "contrato-30:src/slug.test.ts::slugify > basic",
+    "contrato-30:src/slug.test.ts::slugify > spaces",
+    "contrato-30:src/smoke.test.ts::module imports"
+  ],
+  "failing_at_red": [
+    "contrato-30:src/slug.test.ts::slugify > basic",
+    "contrato-30:src/slug.test.ts::slugify > spaces"
+  ],
+  "seal": "f882c23dd766f87d7ceaf87188282dce485d70a2aa3f81528c90ad9678743900"
+}
