@@ -35,7 +35,7 @@ flowchart LR
     E -- locked test changed --> F[refused, 3 lines]
     F --> D
     E -- locked cases still red --> D
-    E -- all locked cases pass --> G[lock closes in the same commit]
+    E -- all locked cases pass --> G[lock closes in a commit right after]
     G --> H["shipcraft pr<br/>CI (+ optional review)"]
     H --> I["shipcraft merge"]
 ```
@@ -96,7 +96,7 @@ shipcraft merge 42
 | `shipcraft --version` | Prints the version and build commit. |
 | `shipcraft red` | Runs the suite, requires assertion failures, and writes the lock in `.shipcraft/locks/<id>.json`. |
 | `shipcraft check [--commit-msg <file>]` | Called by the hook. Judges the commit being made against open locks and closes a lock when its cases pass. |
-| `shipcraft close` | Closes a lock by hand when your hook setup can't do it in the same commit. |
+| `shipcraft close` | Closes a lock in its own commit; the post-commit hook runs it, and you can run it by hand. |
 | `shipcraft ci --base <ref> [--pr]` | Re-checks every commit in `<ref>..HEAD` and runs the full suite on HEAD. Runs locally or in GitHub Actions. |
 | `shipcraft pr [--title <t>] [--body <file>]` | Pushes the branch, opens or updates the PR, runs CI and the review when it is on, and publishes the `shipcraft/ci` and `shipcraft/review` statuses. |
 | `shipcraft review [--pr <n>]` | Runs the review on the local HEAD (to catch blockers before opening the PR) or on any PR. |

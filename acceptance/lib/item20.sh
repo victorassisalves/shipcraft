@@ -1,7 +1,6 @@
 # Item 20: escolha da rota, escrita atomica e diagnosticos.
 item20_cases() {
   echo v1-20.rota.parallel-true
-  echo v1-20.rota.parallel-false
   echo v1-20.rota.ausente
   echo v1-20.rota.zero
   echo v1-20.rota.negativa
@@ -9,12 +8,6 @@ item20_cases() {
   echo v1-20.rota.commit-msg
   echo v1-20.rota.post-commit
   echo v1-20.rota.pre-restricoes
-  echo v1-20.rota.pre-antiga-ignora-novos
-  echo v1-20.tipo.parallel
-  echo v1-20.tipo.comando
-  echo v1-20.tipo.texto
-  echo v1-20.tipo.decimal
-  echo v1-20.tipo.booleano
   echo v1-20.vazio.commit-msg.ausente
   echo v1-20.vazio.commit-msg.nulo
   echo v1-20.vazio.commit-msg.commands-nulo
@@ -65,8 +58,6 @@ item20_cases() {
   echo v1-20.status.hook.post-commit
   echo v1-20.status.ambos.post-commit
   echo v1-20.status.sem-exec.post-commit
-  echo v1-20.hook.pre-commit.alheio
-  echo v1-20.hook.pre-commit.link
   echo v1-20.yaml.crlf
   echo v1-20.yaml.bom
   echo v1-20.yaml.comentario
@@ -83,7 +74,6 @@ item20_cases() {
   echo v1-20.trava
   echo v1-20.status.invalido.commit-msg
   echo v1-20.status.invalido.post-commit
-  echo v1-20.hook.pre-commit.alheio-antiga
   echo v1-20.yaml.cr
   echo v1-20.yaml.ls
   echo v1-20.yaml.ps

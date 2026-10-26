@@ -27,78 +27,6 @@ fonte15a_cases() {
   done
 }
 
-lefthook15b_cases() {
-  # 15b.4: bloco vazio, bytes e rollback.
-  echo v1-15b.arquivo-comentario
-  # 15b.2: priority explicita, decimal, positiva e representavel.
-  echo v1-15b.numero-omitido-existente
-  echo v1-15b.numero-zero-existente
-  echo v1-15b.numero-negativo-existente
-  echo v1-15b.numero-hex
-  echo v1-15b.numero-cientifico
-  # 15b.4: estilo do no YAML no arquivo inteiro.
-  echo v1-15b.layout-alias
-  echo v1-15b.layout-ancora-fora
-  echo v1-15b.commands-vazio
-  echo v1-15b.bytes-exemplo
-  echo v1-15b.bytes-borda
-  echo v1-15b.rollback-exemplo
-  echo v1-15b.rollback-borda
-  # 15b.2: priority explicita, decimal, positiva e representavel.
-  echo v1-15b.numero-omitido
-  echo v1-15b.numero-zero
-  echo v1-15b.numero-negativo
-  echo v1-15b.numero-minimo
-  echo v1-15b.numero-limite
-  echo v1-15b.numero-fora
-  echo v1-15b.numero-fracao
-  echo v1-15b.numero-texto
-  echo v1-15b.numero-bool
-  echo v1-15b.numero-limite-valido
-  # 15b.4: estilo do no YAML no arquivo inteiro.
-  echo v1-15b.layout-flow
-  echo v1-15b.layout-vazio
-  echo v1-15b.layout-aspas
-  echo v1-15b.layout-aspas-fora
-  echo v1-15b.layout-flow-fora
-  echo v1-15b.layout-ancora
-  echo v1-15b.layout-merge
-  echo v1-15b.layout-fim
-  # 15b.2: shipcraft igual tem somente run e priority.
-  echo v1-15b.extra-sc2-root
-  echo v1-15b.extra-sc2-skip
-  echo v1-15b.extra-sc2-env
-  echo v1-15b.extra-sc2-only
-  # 15b.1: arquivo como unica fonte de configuracao.
-  echo v1-15b.fonte-lefthook-local.yml
-  echo v1-15b.fonte-.lefthook-local.yml
-  echo v1-15b.fonte-lefthook-local.yaml
-  echo v1-15b.fonte-.lefthook-local.yaml
-  echo v1-15b.fonte-lefthook.toml
-  echo v1-15b.fonte-.lefthook.json
-  echo v1-15b.fonte-config-lefthook.yml
-  echo v1-15b.fonte-config-lefthook.toml
-  echo v1-15b.fonte-remotes
-  echo v1-15b.fonte-rc
-  echo v1-15b.fonte-env-definida
-  echo v1-15b.fonte-env-vazia
-  echo v1-15b.config-link-exemplo v1-15b.config-link-borda
-  echo v1-15b.nome-comum v1-15b.nome-oculto v1-15b.nome-yaml
-  echo v1-15b.nome-oculto-yaml v1-15b.duplo-comum v1-15b.duplo-borda
-  echo v1-15b.hook-instalado v1-15b.hook-alheio v1-15b.hook-menciona-lefthook
-  echo v1-15b.hook-path-padrao v1-15b.hook-path-fora v1-15b.hook-link-quebrado
-  echo v1-15b.yaml-quebrado v1-15b.yaml-quase v1-15b.extends-comum
-  echo v1-15b.extends-borda v1-15b.jobs-comum v1-15b.jobs-borda
-  echo v1-15b.bloco-parallel v1-15b.bloco-parallel-fluxo v1-15b.bloco-scripts
-  echo v1-15b.filtro-glob-comum v1-15b.filtro-glob-borda v1-15b.filtro-files-comum
-  echo v1-15b.filtro-files-borda v1-15b.filtro-skip-comum v1-15b.filtro-skip-borda
-  echo v1-15b.filtro-only-comum v1-15b.filtro-only-borda v1-15b.filtro-exclude-comum
-  echo v1-15b.filtro-exclude-borda v1-15b.prioridade-comum v1-15b.prioridade-borda
-  echo v1-15b.preserva-comum v1-15b.preserva-borda v1-15b.existente-comum
-  echo v1-15b.existente-borda v1-15b.ocupado-comum v1-15b.ocupado-borda
-  echo v1-15b.ocupado-filtro v1-15b.sem-bloco-comum v1-15b.sem-bloco-borda
-}
-
 core_cases() { # os casos independentes de linguagem; os de fila (item 7) primeiro, sao os mais longos
   english_cases
   item_cases core
@@ -123,13 +51,10 @@ core_cases() { # os casos independentes de linguagem; os de fila (item 7) primei
   echo v1-5.3-init-github-marca-obrigatorios v1-5.3-init-github-plano-gratis v1-5.4-status-nivel-de-protecao
   echo v1-5.5-ci-na-main-avisa-merges
   echo v1-9.1-monorepo-casos-por-suite v1-9.2-sc2-min v1-9.2-formato-da-trava
-  lefthook15b_cases
-  echo v1-15c.init-comum v1-15c.init-borda v1-15c.status-comum v1-15c.status-borda
   echo v1-15c.trava-hook-comum v1-15c.trava-hook-borda v1-15c.trava-ci-comum v1-15c.trava-ci-borda
-  echo v1-15c.init-sem-exec-comum v1-15c.status-sem-exec-borda
+  echo v1-15c.status-sem-exec-borda
   echo v1-15c.trava-local-hook-comum v1-15c.trava-local-hook-borda
   echo v1-15c.trava-local-ci-comum v1-15c.trava-local-ci-borda
-  echo v1-15c.projeto-comum v1-15c.projeto-borda
   fonte15a_cases
   echo v1-10.1-execucoes-jsonl
   echo v1-11.1-linha-de-tamanho v1-11.1-tamanho-desde-o-merge-base v1-11.1-pr-so-de-teste
@@ -1224,12 +1149,6 @@ run_case_v1() {
     must_accept "${CASE}: contrato fonte unica" cmd "$PY" "$ACEITE/tools/fonte15a.py" "${CASE#v1-15a.fonte-}"
     pass ;;
 
-  v1-15b.*)
-    # Item 15b, pontos 1 a 4: integracao segura, recusa atomica, layout e bytes preservados.
-    EXPECT="contrato lefthook 15b"
-    v1_start codex
-    must_accept "${CASE}: contrato lefthook" cmd "$PY" "$ACEITE/tools/lefthook15b.py" "${CASE#v1-15b.}"
-    pass ;;
 
   # ======================================================== por linguagem: itens 6, 8, 9.1
   v1-6.1-fora-do-commit)
@@ -1492,7 +1411,7 @@ PY
     git add -A && git commit -q -m init
     must_accept "shipcraft init in a workspace with typescript" cmd shipcraft init
     chk "the api suite has verifica = npx --no -- tsc --noEmit and no comando with tsc" H verifica-check .shipcraft.toml 'npx --no -- tsc --noEmit'
-    chk "every npx the init wrote keeps the -- of item 12" H npx-check .shipcraft.toml .github/workflows/shipcraft.yml .git/hooks/pre-commit
+    chk "every npx the init wrote keeps the -- of item 12" H npx-check .shipcraft.toml .github/workflows/shipcraft.yml .git/hooks/commit-msg
     pass ;;
   v1-13.1-ci-roda-verifica)
     # Item 13, regra 1 (spec dfe780d): o shipcraft ci roda `verifica` e depois o test_command; um erro de tipo (tsc) ou de vet (go) com os testes passando recusa.
@@ -1626,7 +1545,7 @@ PY
     must_accept "shipcraft init in a workspace with vitest, jest and tsc" cmd shipcraft init
     chk "one [[suite]] per package" eq "$(H toml-suites .shipcraft.toml | sort)" "$(printf 'api\tpackages/api\nlib\tpackages/lib\nweb\tpackages/web')"
     chk "init wrote npx commands (the check is not empty)" grep -q -w npx .shipcraft.toml
-    chk "every npx the init wrote has -- before the tool args" H npx-check .shipcraft.toml .github/workflows/shipcraft.yml .git/hooks/pre-commit
+    chk "every npx the init wrote has -- before the tool args" H npx-check .shipcraft.toml .github/workflows/shipcraft.yml .git/hooks/commit-msg
     pass ;;
 
   v1-9.1-init-pnpm)
@@ -2735,8 +2654,8 @@ PY_LOCK
     # Item 15a, regra 1: o init decide tudo antes de escrever e antes de perguntar; a recusa vem antes da tela do revisor e nao cria .shipcraft.toml, workflow nem .shipcraft/.
     EXPECT="refused without asking or writing"
     v1_start codex claude
-    printf '#!/bin/sh\necho "hook do projeto"\n' > .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
-    cp .git/hooks/pre-commit "$CW/hook.orig"
+    printf '#!/bin/sh\necho "hook do projeto"\n' > .git/hooks/commit-msg && chmod +x .git/hooks/commit-msg
+    cp .git/hooks/commit-msg "$CW/hook.orig"
     run_cmd_stdin /dev/null shipcraft init
     chk "shipcraft init refused" rc_nonzero
     msg_check || fail "refused, but $MSGERR"
@@ -2744,7 +2663,7 @@ PY_LOCK
     chk "init did not ask the reviewer before refusing" out_hasnt '(who reviews|provider|Which reviewer|created \.shipcraft\.toml)'
     chk "init did not create .shipcraft.toml, .github or .shipcraft" init_untouched
     chk "the tree is clean" tree_clean
-    chk "the existing pre-commit hook was not modified" cmp -s .git/hooks/pre-commit "$CW/hook.orig"
+    chk "the existing commit-msg hook was not modified" cmp -s .git/hooks/commit-msg "$CW/hook.orig"
     pass ;;
   v1-15a.1-decide-antes-e-desfaz-escrita-no-meio)
     # Item 15a, regra 1 (borda): decidir antes de escrever (sem apagar arquivo preexistente nem bater em erro de escrita de .github antes de checar o hook) e desfazer o que ja escreveu se uma escrita falha no meio.
@@ -2753,7 +2672,7 @@ PY_LOCK
     printf '# rascunho-preexistente\n' > .shipcraft.toml
     printf 'pre-commit:\n  parallel: true\n  commands:\n    lint:\n      run: echo ok\n' > lefthook.yml
     cp lefthook.yml "$CW/lh.orig"
-    printf '#!/bin/sh\necho alien\n' > .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+    printf '#!/bin/sh\necho alien\n' > .git/hooks/commit-msg && chmod +x .git/hooks/commit-msg
     mkdir .github && chmod 500 .github
     run_cmd_stdin /dev/null shipcraft init
     chmod 700 .github
@@ -2764,11 +2683,11 @@ PY_LOCK
     chk "pre-existing .shipcraft.toml was not overwritten or deleted" eq "$(cat .shipcraft.toml 2>/dev/null)" "# rascunho-preexistente"
     chk "lefthook.yml was not modified" cmp -s lefthook.yml "$CW/lh.orig"
     chk ".shipcraft/ was not created" test ! -e .shipcraft
-    rm -rf .github .shipcraft.toml lefthook.yml .git/hooks/pre-commit
+    rm -rf .github .shipcraft.toml lefthook.yml .git/hooks/commit-msg
     chmod 500 .git/hooks
     run_cmd_stdin /dev/null shipcraft init
     chmod 700 .git/hooks
-    chk "init failed when writing .git/hooks/pre-commit failed in the middle" rc_nonzero
+    chk "init failed when writing .git/hooks/commit-msg failed in the middle" rc_nonzero
     chk "partial writes (.shipcraft.toml, .github, .shipcraft) were undone" init_untouched
     chk "the tree is clean after rollback on .git/hooks failure" tree_clean
     mkdir .github && chmod 500 .github
@@ -2799,7 +2718,7 @@ PY_LOCK
         chk "init did not change the existing config target" cmp -s local-shipcraft.toml "$CW/config.orig"
       fi
       chk "$alvo: no .github created" test ! -e .github
-      chk "$alvo: no partial lock directory or hook remains" sh -c '[ ! -e .shipcraft ] && [ ! -L .shipcraft ] && [ ! -e .git/hooks/pre-commit ] && [ ! -L .git/hooks/pre-commit ]'
+      chk "$alvo: no partial lock directory or hook remains" sh -c '[ ! -e .shipcraft ] && [ ! -L .shipcraft ] && [ ! -e .git/hooks/commit-msg ] && [ ! -L .git/hooks/commit-msg ]'
       rm .shipcraft.toml
     done
     chmod 700 .git/hooks
@@ -2808,41 +2727,41 @@ PY_LOCK
     # Item 15a, regra 2: outro hook no pre-commit (husky, framework pre-commit) e recusado em tres linhas citando shipcraft check, sem escrever nada.
     EXPECT="husky and pre-commit hooks refused cleanly"
     v1_start codex claude
-    cat > .git/hooks/pre-commit <<'SH'
+    cat > .git/hooks/commit-msg <<'SH'
 #!/usr/bin/env sh
 . "$(dirname -- "$0")/_/husky.sh"
 npx lint-staged
 SH
-    chmod +x .git/hooks/pre-commit
-    cp .git/hooks/pre-commit "$CW/husky.orig"
+    chmod +x .git/hooks/commit-msg
+    cp .git/hooks/commit-msg "$CW/husky.orig"
     init_must_refuse_hook "husky pre-commit hook"
-    chk "husky hook untouched" cmp -s .git/hooks/pre-commit "$CW/husky.orig"
-    cat > .git/hooks/pre-commit <<'SH'
+    chk "husky hook untouched" cmp -s .git/hooks/commit-msg "$CW/husky.orig"
+    cat > .git/hooks/commit-msg <<'SH'
 #!/usr/bin/env bash
 # File generated by pre-commit: https://pre-commit.com
 HERE="$(cd "$(dirname "$0")" && pwd)"
 exec pre-commit hook-impl --config=.pre-commit-config.yaml --hook-type=pre-commit --hook-dir "$HERE" -- "$@"
 SH
-    chmod +x .git/hooks/pre-commit
-    cp .git/hooks/pre-commit "$CW/precommit.orig"
+    chmod +x .git/hooks/commit-msg
+    cp .git/hooks/commit-msg "$CW/precommit.orig"
     init_must_refuse_hook "pre-commit framework hook"
-    chk "pre-commit framework hook untouched" cmp -s .git/hooks/pre-commit "$CW/precommit.orig"
+    chk "pre-commit framework hook untouched" cmp -s .git/hooks/commit-msg "$CW/precommit.orig"
     pass ;;
   v1-15a.2-hook-script-ou-link-quebrado)
     # Item 15a, regra 2 (borda): um link simbolico quebrado ou um script qualquer no pre-commit tambem e recusado em tres linhas citando shipcraft check, sem escrever nada.
     EXPECT="broken symlink and custom script refused cleanly"
     v1_start codex claude
-    ln -s /caminho/inexistente/pre-commit .git/hooks/pre-commit
-    init_must_refuse_hook "broken symlink in .git/hooks/pre-commit"
-    chk "broken symlink preserved" test -L .git/hooks/pre-commit
-    rm -f .git/hooks/pre-commit
-    printf '#!/bin/sh\nmake lint\n' > .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
-    cp .git/hooks/pre-commit "$CW/script.orig"
-    init_must_refuse_hook "custom script in .git/hooks/pre-commit"
-    chk "custom script untouched" cmp -s .git/hooks/pre-commit "$CW/script.orig"
-    chmod -x .git/hooks/pre-commit
-    init_must_refuse_hook "non-executable hook in .git/hooks/pre-commit"
-    chk "non-executable hook untouched" cmp -s .git/hooks/pre-commit "$CW/script.orig"
+    ln -s /caminho/inexistente/pre-commit .git/hooks/commit-msg
+    init_must_refuse_hook "broken symlink in .git/hooks/commit-msg"
+    chk "broken symlink preserved" test -L .git/hooks/commit-msg
+    rm -f .git/hooks/commit-msg
+    printf '#!/bin/sh\nmake lint\n' > .git/hooks/commit-msg && chmod +x .git/hooks/commit-msg
+    cp .git/hooks/commit-msg "$CW/script.orig"
+    init_must_refuse_hook "custom script in .git/hooks/commit-msg"
+    chk "custom script untouched" cmp -s .git/hooks/commit-msg "$CW/script.orig"
+    chmod -x .git/hooks/commit-msg
+    init_must_refuse_hook "non-executable hook in .git/hooks/commit-msg"
+    chk "non-executable hook untouched" cmp -s .git/hooks/commit-msg "$CW/script.orig"
     pass ;;
   v1-15a.2-core-hookspath-fora)
     # Item 15a, regra 2: core.hooksPath apontando para fora de .git/hooks e recusado em tres linhas citando shipcraft check, sem escrever nada.
@@ -2852,7 +2771,7 @@ SH
     git config core.hooksPath .githooks
     init_must_refuse_hook "core.hooksPath = .githooks"
     chk "no pre-commit created in .githooks" test ! -e .githooks/pre-commit
-    chk "no pre-commit created in .git/hooks" test ! -e .git/hooks/pre-commit
+    chk "no pre-commit created in .git/hooks" test ! -e .git/hooks/commit-msg
     pass ;;
   v1-15a.2-core-hookspath-com-espacos)
     # Item 15a, regras 2 e 3: so o valor exato .git/hooks e aceito; espacos no fim ou no inicio nao podem ser normalizados.
@@ -2865,7 +2784,7 @@ SH
       init_must_refuse_hook "core.hooksPath = [$hooks]"
       chk "hooksPath [$hooks]: git config unchanged" cmp -s .git/config "$CW/git-config.orig"
       chk "hooksPath [$hooks]: no alternate hooks directory created" test ! -e "$hooks"
-      chk "hooksPath [$hooks]: no hook created in .git/hooks" sh -c '[ ! -e .git/hooks/pre-commit ] && [ ! -L .git/hooks/pre-commit ]'
+      chk "hooksPath [$hooks]: no hook created in .git/hooks" sh -c '[ ! -e .git/hooks/commit-msg ] && [ ! -L .git/hooks/commit-msg ]'
       chk "hooksPath [$hooks]: the tree remains clean" tree_clean
     done
     pass ;;
@@ -2908,8 +2827,8 @@ SH
     chk ".shipcraft.toml created" test -f .shipcraft.toml
     chk "no .github created" test ! -e .github
     chk "lock directory created" test -d .shipcraft/locks
-    chk "executable pre-commit installed" test -x .git/hooks/pre-commit
-    chk "installed hook invokes shipcraft check" grep -E -q 'shipcraft.*check' .git/hooks/pre-commit
+    chk "executable commit-msg installed" test -x .git/hooks/commit-msg
+    chk "installed hook invokes shipcraft check" grep -E -q 'shipcraft.*check' .git/hooks/commit-msg
     pass ;;
   v1-15a.2-core-hookspath-absoluto-e-git-hooks)
     # Item 15a, regra 2 (borda): core.hooksPath absoluto fora de .git/hooks (ou com hook shipcraft fora de .git/hooks) e recusado; apontando para .git/hooks e aceito.
@@ -2925,7 +2844,7 @@ SH
     run_cmd_stdin /dev/null shipcraft init
     chk "core.hooksPath = .git/hooks is accepted" rc_zero
     chk ".shipcraft.toml created" test -f .shipcraft.toml
-    chk ".git/hooks/pre-commit installed" test -x .git/hooks/pre-commit
+    chk ".git/hooks/commit-msg installed" test -x .git/hooks/commit-msg
     pass ;;
   v1-15a.2-husky-ou-pre-commit-na-raiz)
     # Itens 15a.2 e 25: husky sem layout 9 recusa; repos em bloco com hooks vazio integra sem launcher instalado.
@@ -2933,13 +2852,13 @@ SH
     v1_start codex claude
     mkdir -p .husky && printf 'npx lint-staged\n' > .husky/pre-commit
     init_must_refuse_hook ".husky/ at root without installed hook"
-    chk "no hook installed in .git/hooks" test ! -e .git/hooks/pre-commit
+    chk "no hook installed in .git/hooks" test ! -e .git/hooks/commit-msg
     rm -rf .husky
     printf 'repos:\n  - repo: local\n    hooks: []\n' > .pre-commit-config.yaml
     cp .pre-commit-config.yaml "$CW/pcc.orig"
     must_accept ".pre-commit-config.yaml em bloco integra sem launcher (item 25)" cmd shipcraft init
     chk "prefixo preservado e par local exato do item 25" "$PY" -c 'import pathlib,sys,yaml; p=pathlib.Path(".pre-commit-config.yaml"); assert p.read_bytes().startswith(pathlib.Path(sys.argv[1]).read_bytes()); repos=yaml.safe_load(p.read_bytes())["repos"]; assert repos[0] == {"repo":"local","hooks":[]}; expected=[dict(id=i,name=n,entry=c,language="system",always_run=True,pass_filenames=False,stages=[e]) for i,n,c,e in [("shipcraft-check","shipcraft check","shipcraft check --commit-msg","commit-msg"),("shipcraft-fecha","shipcraft close","shipcraft close","post-commit")]]; assert len(repos)==2 and repos[1]["repo"]=="local" and sorted(repos[1]["hooks"],key=lambda h:h["id"])==sorted(expected,key=lambda h:h["id"])' "$CW/pcc.orig"
-    chk "no hook installed in .git/hooks" test ! -e .git/hooks/pre-commit
+    chk "no hook installed in .git/hooks" test ! -e .git/hooks/commit-msg
     pass ;;
   v1-15a.2-husky-vazio-ou-junto-com-lefthook)
     # Item 15a, regra 2 (borda): .husky/ na raiz mesmo vazio, ou .husky/ e .pre-commit-config.yaml na raiz junto com lefthook.yml, sao recusados sem tocar em nada.
@@ -2973,16 +2892,16 @@ SH
       rm -f "$1" "$2"
     done
     cp "$CW/lh1" lefthook.yml
-    printf '#!/bin/sh\necho "outro hook"\n' > .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
-    cp .git/hooks/pre-commit "$CW/hook.orig"
-    init_must_refuse_hook "lefthook.yml with alien .git/hooks/pre-commit"
+    printf '#!/bin/sh\necho "outro hook"\n' > .git/hooks/commit-msg && chmod +x .git/hooks/commit-msg
+    cp .git/hooks/commit-msg "$CW/hook.orig"
+    init_must_refuse_hook "lefthook.yml with alien .git/hooks/commit-msg"
     chk "lefthook.yml untouched" cmp -s lefthook.yml "$CW/lh1"
-    chk ".git/hooks/pre-commit untouched" cmp -s .git/hooks/pre-commit "$CW/hook.orig"
-    rm -f lefthook.yml .git/hooks/pre-commit
-    printf '#!/bin/sh\n# File generated by lefthook\nlefthook run pre-commit "$@"\n' > .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
-    cp .git/hooks/pre-commit "$CW/lhhook.orig"
-    init_must_refuse_hook "lefthook hook in .git/hooks/pre-commit without lefthook config at root"
-    chk "lefthook hook in .git/hooks/pre-commit untouched" cmp -s .git/hooks/pre-commit "$CW/lhhook.orig"
+    chk ".git/hooks/commit-msg untouched" cmp -s .git/hooks/commit-msg "$CW/hook.orig"
+    rm -f lefthook.yml .git/hooks/commit-msg
+    printf '#!/bin/sh\n# File generated by lefthook\nlefthook run commit-msg "$@"\n' > .git/hooks/commit-msg && chmod +x .git/hooks/commit-msg
+    cp .git/hooks/commit-msg "$CW/lhhook.orig"
+    init_must_refuse_hook "lefthook hook in .git/hooks/commit-msg without lefthook config at root"
+    chk "lefthook hook in .git/hooks/commit-msg untouched" cmp -s .git/hooks/commit-msg "$CW/lhhook.orig"
     pass ;;
   v1-15a.2-lefthook-condicoes-do-15b-ponto-1)
     # Item 15a, regra 2 (borda, item 15b ponto 1): arquivo do lefthook com YAML invalido, extends, jobs ou filtro/chave extra no bloco pre-commit e recusado sem tocar no arquivo.
@@ -2994,17 +2913,12 @@ SH
       cp "$fn" "$CW/lh.bad"
       init_must_refuse_hook "$lbl ($fn)"
       chk "$fn untouched after $lbl" cmp -s "$fn" "$CW/lh.bad"
-      chk "no pre-commit installed after $lbl" test ! -e .git/hooks/pre-commit
+      chk "no commit-msg installed after $lbl" test ! -e .git/hooks/commit-msg
       rm -f "$fn"
     }
     check_bad_lh lefthook.yml "invalid YAML" "$(printf 'pre-commit:\n  commands: [unclosed')"
     check_bad_lh .lefthook.yml "extends" "$(printf 'extends:\n  - base.yml\npre-commit:\n  commands:\n    lint:\n      run: echo ok')"
-    check_bad_lh lefthook.yaml "jobs in pre-commit" "$(printf 'pre-commit:\n  jobs:\n    - name: lint\n      run: echo ok')"
     check_bad_lh .lefthook.yaml "top-level jobs" "$(printf 'jobs:\n  - name: lint\n    run: echo ok\npre-commit:\n  commands:\n    lint:\n      run: echo ok')"
-    for flt in 'glob: "*.py"' 'files: git diff --name-only' 'skip: true' 'only: [main]' 'exclude: "vendor/*"' 'scripts: {}'; do
-      k="${flt%%:*}"
-      check_bad_lh lefthook.yml "pre-commit block with $k" "$(printf 'pre-commit:\n  %s\n  commands:\n    lint:\n      run: echo ok\n      priority: 7' "$flt")"
-    done
     must_accept "parallel agora integra pelo commit-msg (item 20)" cmd "$PY" "$ACEITE/tools/item20.py" rota.parallel-true
     pass ;;
 
@@ -3028,7 +2942,7 @@ init_literal_refused() { # retorna sem encerrar o caso, para sondar todas as gra
   last3_has 'shipcraft check' &&
     out_hasnt '(who reviews|provider|Which reviewer|created \.shipcraft\.toml)' &&
     init_untouched &&
-    [ ! -e .git/hooks/pre-commit ] && [ ! -L .git/hooks/pre-commit ] &&
+    [ ! -e .git/hooks/commit-msg ] && [ ! -L .git/hooks/commit-msg ] &&
     cmp -s .git/config "$1"
 }
 init_must_refuse_hook() { # recusa hook-alheio: rc != 0, 3 linhas com shipcraft check, sem criar nada e sem perguntar revisor

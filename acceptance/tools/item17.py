@@ -7,7 +7,7 @@ import shlex
 import shutil
 import subprocess
 import sys
-from lefthook15b import HOOK
+from lefthook_fixture import HOOK
 
 
 def run(*args, ok=True, env=None):

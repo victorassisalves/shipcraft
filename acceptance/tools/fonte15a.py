@@ -10,7 +10,7 @@ import sys
 
 import yaml
 
-from lefthook15b import snapshot
+from lefthook_fixture import snapshot
 
 
 def config_arquivo(case, env):
@@ -33,21 +33,21 @@ def config_arquivo(case, env):
             assert p.returncode == 0, 'init recusou ' + str(root)
             assert (root / '.shipcraft.toml').is_file(), 'nao criou config propria'
             assert not (root / '.github').exists(), 'criou .github (item 27)'
-            hook = root / '.git/hooks/pre-commit'
+            hook = root / '.git/hooks/commit-msg'
             if case.endswith('-com-yaml'):
                 assert not hook.exists(), 'substituiu integracao por hook proprio'
                 data = yaml.safe_load((root / 'lefthook.yml').read_text())
-                commands = data['pre-commit']['commands']
-                assert commands['lint'] == {'run': 'echo lint', 'priority': 1}
-                assert commands['shipcraft'] == {'run': 'shipcraft check', 'priority': 2}
+                assert data['pre-commit']['commands'] == {'lint': {'run': 'echo lint', 'priority': 1}}
+                assert data['commit-msg']['commands']['shipcraft'] == {'run': 'shipcraft check --commit-msg'}
+                assert data['post-commit']['commands']['shipcraft'] == {'run': 'shipcraft close'}
                 results.append((root / 'lefthook.yml').read_bytes())
             else:
                 assert hook.is_file() and os.access(hook, os.X_OK), 'nao instalou hook proprio'
                 commands = [shlex.split(line) for line in hook.read_text().splitlines()
                             if line.strip() and not line.lstrip().startswith('#')]
-                assert any(len(cmd) == 3 and cmd[0] == 'exec' and
-                           Path(cmd[1]).name == 'shipcraft' and cmd[2] == 'check'
-                           for cmd in commands), 'hook proprio nao roda shipcraft check'
+                assert any(len(cmd) == 5 and cmd[0] == 'exec' and
+                           Path(cmd[1]).name == 'shipcraft' and cmd[2:] == ['check', '--commit-msg', '$1']
+                           for cmd in commands), 'hook proprio nao roda shipcraft check --commit-msg'
                 results.append(hook.read_bytes())
         assert results[0] == results[1], '.config arquivo mudou o resultado do init'
         assert Path('.config').read_bytes() == content, 'alterou .config arquivo'
@@ -104,7 +104,7 @@ def main(case):
         cwd = Path('packages/api')
         cwd.mkdir(parents=True)
     for name in ('lefthook.yml', '.lefthook.yml', 'lefthook.yaml', '.lefthook.yaml',
-                 '.git/hooks/pre-commit', '.shipcraft.toml', '.shipcraft', '.github'):
+                 '.git/hooks/commit-msg', '.shipcraft.toml', '.shipcraft', '.github'):
         assert not os.path.lexists(name), 'fixture preexistente: ' + name
     try:
         before = snapshot()
@@ -114,18 +114,18 @@ def main(case):
         print(out)
         if accepts:
             assert p.returncode == 0, 'recusou projeto sem fonte lefthook: ' + case
-            hook = Path('.git/hooks/pre-commit')
+            hook = Path('.git/hooks/commit-msg')
             assert hook.is_file() and os.access(hook, os.X_OK), 'nao instalou hook proprio'
             commands = [shlex.split(line) for line in hook.read_text().splitlines()
                         if line.strip() and not line.lstrip().startswith('#')]
-            assert any(len(cmd) == 3 and cmd[0] == 'exec' and
-                       Path(cmd[1]).name == 'shipcraft' and cmd[2] == 'check'
-                       for cmd in commands), 'hook proprio nao roda shipcraft check'
+            assert any(len(cmd) == 5 and cmd[0] == 'exec' and
+                       Path(cmd[1]).name == 'shipcraft' and cmd[2:] == ['check', '--commit-msg', '$1']
+                       for cmd in commands), 'hook proprio nao roda shipcraft check --commit-msg'
             assert Path('.shipcraft.toml').is_file(), 'nao criou config propria'
             return
         assert p.returncode != 0, (
             'init aceitou fonte insegura; hook proprio instalado=' +
-            str(Path('.git/hooks/pre-commit').exists()))
+            str(Path('.git/hooks/commit-msg').exists()))
         assert snapshot() == before, 'recusa alterou snapshot (inclusive .git e modos)'
         lines = [line for line in out.splitlines() if line.strip()]
         assert len(lines) == 3, 'recusa deve ter exatamente tres linhas'
