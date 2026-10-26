@@ -3,11 +3,14 @@
 //! `.shipcraft.toml` says. A commit made with
 //! `--no-verify`, or under an edited hook, is caught here. Run on the default
 //! branch, it also warns of the merges that skipped the gate (item 5.5).
+//! With `--pr`, a docs-only PR skips the build, the `check` and the suites
+//! (item 40).
 
 use crate::config::{Camada, Config};
 use crate::contract::{
     bindings, check_files, check_lefthook, judge_locks, judge_suite, no_report, Change, Scope, Verdict,
 };
+use crate::docs;
 use crate::gh;
 use crate::git::{short, Repo, Snapshot};
 use crate::lock::lock_files;
@@ -16,7 +19,7 @@ use crate::refusal::{failed, refuse, Result};
 use crate::suite;
 use serde_json::json;
 
-pub fn run(repo: &Repo, base: &str) -> Result<()> {
+pub fn run(repo: &Repo, base: &str, pr: bool, docs_only: &mut bool) -> Result<()> {
     let base =
         repo.resolve(base)?.ok_or_else(|| failed(format!("--base {base} is not a commit in this repository")))?;
     let head_sha = repo.head()?.ok_or_else(|| failed("the repository has no commits"))?;
@@ -29,6 +32,7 @@ pub fn run(repo: &Repo, base: &str) -> Result<()> {
         return crate::config::no_config();
     };
     let commits = repo.commits_since(&base)?;
+    *docs_only = pr && docs::docs_only(repo, &config, &base, &head_sha);
 
     // How each commit changed the locks; with an empty range, HEAD's locks as they are.
     let head_locks = lock_files(repo, &head)?;
@@ -48,6 +52,10 @@ pub fn run(repo: &Repo, base: &str) -> Result<()> {
         head_changes = changes;
     }
     println!("shipcraft: {} commit(s) checked in {}..HEAD", commits.len(), short(&base));
+    if *docs_only {
+        println!("docs only: the suites do not run");
+        return passed(repo, &base, &config);
+    }
 
     // The suite judges HEAD: on the tree when it is HEAD, else on a copy of
     // HEAD. The build runs only on the tree (item 16a).

@@ -49,8 +49,8 @@ pub fn rows(repo: &Repo) -> Vec<Value> {
         .collect()
 }
 
-/// The row of a hook or CI run, from how the command ended.
-pub fn layer(repo: &Repo, camada: &str, started: Instant, result: &Result<()>) {
+/// The row of a hook or CI run, from how the command ended; `docs_only` only on CI rows.
+pub fn layer(repo: &Repo, camada: &str, started: Instant, result: &Result<()>, docs_only: Option<bool>) {
     let (resultado, codigo) = match result {
         Ok(()) => ("passed", String::new()),
         Err(Stop::Refused(r)) => ("refused", r.code.to_string()),
@@ -67,6 +67,9 @@ pub fn layer(repo: &Repo, camada: &str, started: Instant, result: &Result<()>) {
     // The `shipcraft pr` that ran this CI repeats why it refused (item 19.2).
     if let Err(Stop::Refused(r)) = result {
         row["reason"] = json!(r.what());
+    }
+    if let Some(docs_only) = docs_only {
+        row["docs_only"] = json!(docs_only);
     }
     record(repo, row);
 }

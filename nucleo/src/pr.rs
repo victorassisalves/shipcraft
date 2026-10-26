@@ -2,6 +2,7 @@
 //! review without (or for another) PR.
 
 use crate::config::{Camada, Config};
+use crate::docs;
 use crate::fila;
 use crate::forma;
 use crate::gh;
@@ -126,7 +127,7 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>) -> Result<(
     }
 }
 
-/// Item 3, rule 2: `shipcraft ci` on this machine, through the queue and with
+/// Item 3, rule 2: `shipcraft ci --pr` on this machine, through the queue and with
 /// `[execution] ci_timeout`, published as `shipcraft/ci` on HEAD.
 fn local_ci(repo: &Repo, config: &Config, branch: &str, head: &str, base: &str) -> Result<Gate> {
     // `--base` is the tip of the base branch as origin has it now: the range
@@ -141,7 +142,8 @@ fn local_ci(repo: &Repo, config: &Config, branch: &str, head: &str, base: &str) 
     );
     let started = Instant::now();
     let exe = std::env::current_exe().map_err(|e| failed(format!("find the current binary: {e}")))?;
-    let end = processo::run(Command::new(exe).args(["ci", "--base", &base_tip]).current_dir(repo.root()), limit)?;
+    let end =
+        processo::run(Command::new(exe).args(["ci", "--base", &base_tip, "--pr"]).current_dir(repo.root()), limit)?;
     drop(slot);
     let (state, description, gate) = match end {
         End::Exited(0) => ("success", "on this machine: CI passed".to_string(), Gate::Passed),
@@ -159,7 +161,8 @@ fn local_ci(repo: &Repo, config: &Config, branch: &str, head: &str, base: &str) 
             medicao::record(
                 repo,
                 json!({"layer": "ci", "secs": medicao::seconds(started), "result": "error",
-                       "code": "timed-out", "branch": branch, "commit": head}),
+                       "code": "timed-out", "branch": branch, "commit": head,
+                       "docs_only": docs::docs_only(repo, config, &base_tip, head)}),
             );
             let why = format!("timed out ({limit} s, [execution] ci_timeout)");
             ("error", format!("on this machine: {why}"), Gate::Stopped("ci-timed-out", format!("CI stopped: {why}")))

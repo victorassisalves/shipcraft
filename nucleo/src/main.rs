@@ -8,6 +8,7 @@ mod check;
 mod ci;
 mod config;
 mod contract;
+mod docs;
 mod fecha;
 mod fila;
 mod forma;
@@ -79,15 +80,16 @@ fn run(args: &[&str]) -> Result<()> {
             init::run(&init::open()?, lang, github)
         }
         ["red"] => red::run(&Repo::open()?),
-        ["check"] => measured("hook", |repo| check::run(repo, false)),
+        ["check"] => measured("hook", |repo, _| check::run(repo, false)),
         // The git hook passes the message file, which is ignored.
-        ["check", "--commit-msg", ..] => measured("hook", |repo| check::run(repo, true)),
+        ["check", "--commit-msg", ..] => measured("hook", |repo, _| check::run(repo, true)),
         ["close"] => {
             fecha::run();
             Ok(())
         }
-        // `--pr` is still accepted (older callers pass it); it no longer changes anything.
-        ["ci", "--base", base] | ["ci", "--base", base, "--pr"] => measured("ci", |repo| ci::run(repo, base)),
+        // Item 40: only `--pr` allows the docs-only path.
+        ["ci", "--base", base] => measured("ci", |repo, docs_only| ci::run(repo, base, false, docs_only)),
+        ["ci", "--base", base, "--pr"] => measured("ci", |repo, docs_only| ci::run(repo, base, true, docs_only)),
         ["pr", rest @ ..] => {
             let (mut title, mut body) = (None, None);
             let mut rest = rest.iter();
@@ -127,12 +129,14 @@ fn invalid(args: &[&str]) -> Stop {
     refusal::failed(format!("invalid arguments: {}; {USAGE}", args.join(" ")))
 }
 
-/// Runs a hook or CI command and records it in the measurement (item 10).
-fn measured(camada: &str, command: impl FnOnce(&Repo) -> Result<()>) -> Result<()> {
+/// Runs a hook or CI command and records it in the measurement (item 10);
+/// a CI row says whether the PR was docs only (item 40).
+fn measured(camada: &str, command: impl FnOnce(&Repo, &mut bool) -> Result<()>) -> Result<()> {
     let started = Instant::now();
     let repo = Repo::open()?;
-    let result = command(&repo);
-    medicao::layer(&repo, camada, started, &result);
+    let mut docs_only = false;
+    let result = command(&repo, &mut docs_only);
+    medicao::layer(&repo, camada, started, &result, (camada == "ci").then_some(docs_only));
     result
 }
 
