@@ -84,8 +84,9 @@ Each command is `shipcraft <command>`. Exit codes, unless the row says otherwise
 | `review --pr <n>` | Reviews any PR in an isolated copy and publishes `shipcraft/review` and a comment. Refuses `pr-from-fork`. |
 | `merge <pr> [--no-review "<reason>"]` | The merge gate (section 5). Refuses `pr-not-open`, `merge-without-ci`, `merge-without-review`, `no-review-without-reason`. |
 | `status` | Prints the layers, review agent, hook state, open locks, and one line with the real branch protection level. |
+| `report [--json]` | Prints the flow's numbers per lock and per day from the run log (section 8, item 38). Reads only; never refuses. |
 
-`init`, `red` and `close` write no run-log row.
+`init` writes no run-log row; `red` and `close` write one each (item 38).
 
 ### `init`
 
@@ -289,6 +290,22 @@ Each hook, CI, review and merge run appends one JSON line to `.git/shipcraft/run
 Besides the refusal codes, `code` can hold run outcomes that are not refusals: `changes-requested` and `reviewer-no-verdict` (review), `timed-out` (local CI), `no-review` and `escape` (merge), and `error` for a failure.
 
 `shipcraft pr` posts the branch's summary from this file.
+
+### Measuring the flow (item 38)
+
+Time to main is Shipcraft's main number. It must come from what Shipcraft recorded, not from agents or prose, and not from git history: squash, rebase, fast-forward, deleted or reused branches and two locks on one branch each break a reconstruction from history.
+
+1. **One event per step, recorded when it happens.** Besides today's rows, `red` (a lock written, or a refusal) and `close` (the commit that closes a lock exists: post-commit, or `shipcraft close`; never a pre-commit a later hook may abort) write a row. Every row carries `lock` (the lock id, or empty). `pr`, `merge`, and the `ci` and `review` rows run for a PR carry `locks`: the locks whose files changed between the PR's base and head, read from the PR's own diff (the files `shipcraft merge` already reads). The lock id is the item's identity: no branch name, author time or ancestry is read. A `hook` row with no open lock counts only in the hook totals. Recording is best effort: a failed append changes no exit code, and the report shows the gap.
+2. **`shipcraft report` reads only the run log** (no git history, no network, no agent) and prints one row per lock:
+   - the times of `red`, `close` and `merge`, and the durations RED to close, close to merge, and RED to merge. A step's time is that of its first `passed` row; refusals and errors are counted but never set a time. A `merge` counts only when its base is the default branch. A lock whose `merge` passed is merged even with earlier steps missing: those durations are empty and the row says the steps were not observed here. A lock not yet merged is marked open; elapsed times are never filled in;
+   - the reviews by result and whether the first one approved. A review that ended in `error` (timeout, quota) is counted apart and is not the first review; a reused verdict is recorded with `reused: true` and is not a new round;
+   - the waiting: from the last `ci` that passed for the lock to its `merge`;
+   - the hook and `ci` count, p50 and p90, and refusals by code.
+
+   Then one summary per UTC day of the `merge` row: merged locks, the medians of RED to merge and of waiting, and the share approved on the first review.
+3. **`shipcraft report --json`** prints one JSON object per line with a `kind`: first `meta` (the time of the first and last row, `null` with none), then `lock`, `day`, and `gap` (a line of the log that does not read, with its line number; the rest goes on). Empty values are `null`.
+
+The log covers what ran on this machine, and the report's first line says so, with the time of the first and last row. Reviews or CI that ran elsewhere (GitHub, another clone) are not guessed. Escapes stay out of this item.
 
 ## 9. Known limits
 
