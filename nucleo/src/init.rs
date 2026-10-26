@@ -24,8 +24,6 @@ use std::path::{Path, PathBuf};
 
 const HOOK_MARK: &str = "# shipcraft hook";
 pub const LEFTHOOK_FILES: [&str; 4] = ["lefthook.yml", ".lefthook.yml", "lefthook.yaml", ".lefthook.yaml"];
-const IN_LEFTHOOK: &str = "in the run of an `shipcraft` command in the lefthook file pre-commit block";
-const CONFIG_FAILS: &str = "in the project pre-commit hook, after fixing git config";
 pub const AGENTS: [&str; 3] = ["codex", "claude", "gemini"];
 
 const HEADER: &str = "\
@@ -45,7 +43,8 @@ pub fn open() -> Result<Repo> {
         }
         let out = git_in(&cwd, &["rev-parse", "--show-toplevel"])?;
         let why = text(&out.stderr).lines().next().unwrap_or_default().to_string();
-        alien(format!("git cannot open this repository ({why})"), CONFIG_FAILS)
+        let what = format!("git cannot open this repository ({why})");
+        init_msg::alien(what.clone(), &what)
     })
 }
 
@@ -53,7 +52,7 @@ pub fn run(repo: &Repo, lang_flag: Option<&str>, github: bool) -> Result<()> {
     crate::config::reject_legacy_file(repo, &Snapshot::Tree)?;
     let (lang, suites) = plan(repo, lang_flag)?;
     let hook = decide_hook(repo)?;
-    let raise = if let Hook::Msg(_) | Hook::Tool(_) = &hook { init_msg::raise_min(repo)? } else { None };
+    let raise = init_msg::raise_min(repo)?;
     // Item 16b: proved on the tree before anything is written.
     let build = if repo.path(CONFIG_FILE).symlink_metadata().is_ok() { None } else { tsbuild::infer(repo)? };
     match suites.as_slice() {
@@ -68,8 +67,7 @@ pub fn run(repo: &Repo, lang_flag: Option<&str>, github: bool) -> Result<()> {
     let written = write_once(repo, &mut created, CONFIG_FILE, &config_text(lang, &suites, &reviewer, build.as_deref()))
         .and_then(|()| write_once(repo, &mut created, &format!("{LOCK_DIR}/.gitkeep"), ""))
         .and_then(|()| match &hook {
-            Hook::Own(path) => install_hook(path, &mut created),
-            Hook::Lefthook(file, old, new, _) => integrate(repo, file, old, new.as_deref()),
+            Hook::Own(hooks) => install_hooks(hooks, &mut created),
             Hook::Msg(plan) => init_msg::write(repo, plan, raise.as_ref()),
             Hook::Tool(tool) => init_tool::write(repo, tool, raise.as_ref()),
         });
@@ -83,11 +81,6 @@ pub fn run(repo: &Repo, lang_flag: Option<&str>, github: bool) -> Result<()> {
     let agents = agents_block(repo);
     if let Some(command) = &build {
         println!("shipcraft: [build] in {CONFIG_FILE} runs `{command}` before suites");
-    }
-    if let Hook::Lefthook(.., false) = &hook {
-        println!(
-            "shipcraft: lefthook pre-commit hook is not installed: run `lefthook install` so commits go through `shipcraft check`"
-        );
     }
     if let Hook::Msg(Plan { missing, .. }) = &hook {
         if !missing.is_empty() {
@@ -104,7 +97,7 @@ pub fn run(repo: &Repo, lang_flag: Option<&str>, github: bool) -> Result<()> {
         "shipcraft: review is off. To have {reviewer} review each PR in a separate session, set review = \"local\" in {CONFIG_FILE} [execution] section; the diff goes to its provider."
     );
     let lefthook = match &hook {
-        Hook::Lefthook(file, ..) | Hook::Msg(Plan { file, .. }) => format!(", {file}"),
+        Hook::Msg(Plan { file, .. }) => format!(", {file}"),
         Hook::Tool(tool) => tool.writes.iter().map(|(file, ..)| format!(", {file}")).collect(),
         Hook::Own(_) => String::new(),
     };
@@ -369,36 +362,34 @@ fn write_once(repo: &Repo, created: &mut Vec<PathBuf>, relative: &str, content: 
     Ok(())
 }
 
-/// Where `shipcraft check` goes: shipcraft's own hook, or a command in the lefthook file
-/// (the file, its text, the new text, None when it already has the command,
-/// and whether git runs the lefthook's hook: installed and executable, 15c.5),
-/// or the two commands of the `commit-msg` route (item 20), or the husky's
-/// or the pre-commit's (item 25).
+/// Where `shipcraft check` goes. There is one route: `shipcraft check --commit-msg`
+/// in `commit-msg` and `shipcraft close` in `post-commit`, through shipcraft's own
+/// hooks, the lefthook file (item 20), or the husky 9 and pre-commit (item 25).
 enum Hook {
-    Own(PathBuf),
-    Lefthook(String, String, Option<String>, bool),
+    Own(Vec<PathBuf>),
     Msg(Plan),
     Tool(Tool),
 }
 
-/// Item 15c.1, `shipcraft status`: the lefthook runs the hook only when its hook is
-/// installed and its file has the `shipcraft` command; any doubt reads as no hook.
+/// `shipcraft status`: whether commits go through shipcraft; any doubt reads as no hook.
 pub fn hook_status(repo: &Repo) -> String {
     match decide_hook(repo) {
         decided if init_tool::present(repo) => {
             init_tool::status(decided.and_then(|h| if let Hook::Tool(t) = h { Ok(t) } else { Err(failed(String::new())) }))
         }
-        Ok(Hook::Lefthook(file, _, None, true)) => format!("shipcraft: hook through lefthook ({file}, shipcraft command)"),
-        Ok(Hook::Lefthook(..)) => {
-            "shipcraft: missing hook: the lefthook hook is not installed or its file has no shipcraft command; run `shipcraft init` and `lefthook install`".into()
-        }
-        // 20.3: by this route, each event says what it misses, even when the init refuses.
-        decided if LEFTHOOK_FILES.iter().any(|f| fs::read_to_string(repo.path(f)).is_ok_and(|t| init_msg::route(&t) == Ok(true))) => {
+        // 20.3: each event says what it misses, even when the init refuses.
+        decided if LEFTHOOK_FILES.iter().any(|f| repo.path(f).symlink_metadata().is_ok()) => {
             init_msg::status(repo, matches!(decided, Ok(Hook::Msg(_))))
         }
-        Ok(Hook::Own(path)) if is_executable(&path) => "shipcraft: shipcraft hook installed".into(),
+        Ok(Hook::Own(hooks)) if hooks.iter().all(|h| own_hook(h) && is_executable(h)) => {
+            "shipcraft: shipcraft hooks installed (commit-msg and post-commit)".into()
+        }
         _ => "shipcraft: missing hook: the commit does not go through `shipcraft check`; run `shipcraft init`".into(),
     }
+}
+
+fn own_hook(path: &Path) -> bool {
+    fs::read_to_string(path).is_ok_and(|t| t.contains(HOOK_MARK))
 }
 
 /// Item 15a: the hook is decided before any question or write. shipcraft installs
@@ -406,9 +397,7 @@ pub fn hook_status(repo: &Repo) -> String {
 /// with the lefthook only where it surely runs the hook (item 15b); any doubt
 /// is a refusal that leaves the tree as it was (rule 17).
 fn decide_hook(repo: &Repo) -> Result<Hook> {
-    let msg = LEFTHOOK_FILES
-        .iter()
-        .any(|f| fs::read_to_string(repo.path(f)).is_ok_and(|text| init_msg::route(&text) != Ok(false)));
+    let stop = |what: String| init_msg::alien(what.clone(), &what);
     // The raw value, letter by letter (15a.3): '.git/hooks/', './.git/hooks',
     // the absolute path or a space refuse, even when they name the same directory.
     // Exit 1 is an unset key; any other failure is not absence (15a.2).
@@ -418,7 +407,7 @@ fn decide_hook(repo: &Repo) -> Result<Hook> {
         Some(0) => Some(text(out.stdout.strip_suffix(b"\n").unwrap_or(&out.stdout))),
         _ => {
             let why = text(&out.stderr).lines().next().unwrap_or_default().to_string();
-            return hook_alien(msg, format!("git config fails ({why})"), CONFIG_FAILS);
+            return stop(format!("git config fails ({why})"));
         }
     };
     // Item 25 (changes 15a.2 and 15a.3): `.husky/` or the pre-commit config.
@@ -426,66 +415,51 @@ fn decide_hook(repo: &Repo) -> Result<Hook> {
         return init_tool::decide(repo, dir.as_deref()).map(Hook::Tool);
     }
     if let Some(dir) = dir.filter(|d| d != ".git/hooks") {
-        let what = format!("core.hooksPath is {dir:?}, and shipcraft only accepts .git/hooks, exactly");
-        return hook_alien(msg, what, &format!("at the end of {dir}/pre-commit"));
+        return stop(format!("core.hooksPath is {dir:?}, and shipcraft only accepts .git/hooks, exactly"));
     }
-    let hook = repo.hook_path("pre-commit")?;
-    let shown = hook.strip_prefix(repo.root()).unwrap_or(&hook).display().to_string();
-    let installed = hook.symlink_metadata().is_ok().then(|| fs::read_to_string(&hook).unwrap_or_default());
-    let runs = is_executable(&hook);
     let lefthook: Vec<&str> = LEFTHOOK_FILES.into_iter().filter(|f| repo.path(f).symlink_metadata().is_ok()).collect();
-    match (lefthook.as_slice(), installed) {
-        ([], Some(text)) if !text.contains(HOOK_MARK) => hook_alien(
-            msg,
-            format!("a pre-commit hook not owned by shipcraft already exists ({shown})"),
-            &format!("at the end of {shown}"),
-        ),
-        // 15a.2: the first `lefthook install` would remove the shipcraft hook.
-        ([], _) => match single_source(repo, "") {
-            Ok(()) => Ok(Hook::Own(hook)),
-            Err(problem) => hook_alien(
-                msg,
-                format!("lefthook configuration may be outside the 4 root names: {problem}"),
-                IN_LEFTHOOK,
-            ),
-        },
-        ([file], installed) => lefthook_hook(repo, file, installed, &shown, runs),
-        (files, _) => hook_alien(
-            msg,
-            format!("there is more than one lefthook file at the root ({})", files.join(", ")),
-            IN_LEFTHOOK,
-        ),
+    match lefthook.as_slice() {
+        // 15a.2: the first `lefthook install` would remove the shipcraft hooks.
+        [] => {
+            if let Err(problem) = single_source(repo, "") {
+                return stop(format!("lefthook configuration may be outside the 4 root names: {problem}"));
+            }
+            let mut hooks = Vec::new();
+            for event in ["commit-msg", "post-commit"] {
+                let hook = repo.hook_path(event)?;
+                if hook.symlink_metadata().is_ok() && !own_hook(&hook) {
+                    let shown = hook.strip_prefix(repo.root()).unwrap_or(&hook).display().to_string();
+                    return stop(format!("a {event} hook not owned by shipcraft already exists ({shown})"));
+                }
+                hooks.push(hook);
+            }
+            Ok(Hook::Own(hooks))
+        }
+        [file] => lefthook_hook(repo, file),
+        files => stop(format!("there is more than one lefthook file at the root ({})", files.join(", "))),
     }
 }
 
-/// One lefthook file at the root: the route (item 20.1), then the conditions
-/// of both routes (15a.2, 15b.1, 15b.3), then the route's own plan. In the
-/// `commit-msg` route, the refusal never says to use the `pre-commit`.
-fn lefthook_hook(repo: &Repo, file: &str, installed: Option<String>, shown: &str, runs: bool) -> Result<Hook> {
+/// One lefthook file at the root: the conditions (15b.1, 15b.3), then the
+/// plan of item 20.
+fn lefthook_hook(repo: &Repo, file: &str) -> Result<Hook> {
     let path = repo.path(file);
-    let read = fs::read_to_string(&path);
-    let route = read.as_deref().map_or(Ok(false), init_msg::route);
-    let problem = if installed.is_some_and(|text| !init_msg::is_lefthook(&text, "pre-commit")) {
-        Some(format!("{file} exists, but the installed pre-commit hook ({shown}) is not from lefthook"))
-    } else if path.symlink_metadata().is_ok_and(|m| m.file_type().is_symlink()) {
+    let problem = if path.symlink_metadata().is_ok_and(|m| m.file_type().is_symlink()) {
         // 15b.3: a link is never written through.
         Some(format!("{file} is a symbolic link"))
     } else if let Err(problem) = single_source(repo, file) {
         Some(format!("{file} is not the only lefthook configuration: {problem}"))
     } else {
-        read.as_ref().err().map(|e| format!("cannot read {file} ({e})"))
+        None
     };
-    let msg = route != Ok(false);
-    match (problem, read, route) {
-        (Some(what), ..) => hook_alien(msg, what, IN_LEFTHOOK),
-        (None, _, Err(problem)) => init_msg::alien(format!("{file} {problem}"), &problem),
-        (None, Ok(text), Ok(true)) => init_msg::plan(repo, file, text).map(Hook::Msg),
-        (None, Ok(text), Ok(false)) => match lefthook_plan(&text) {
-            Ok(new) => Ok(Hook::Lefthook(file.to_string(), text, new, runs)),
-            Err(problem) => alien(format!("{file} {problem}"), IN_LEFTHOOK),
-        },
-        (None, Err(e), _) => Err(failed(format!("read {file}: {e}"))),
+    if let Some(what) = problem {
+        return init_msg::alien(what.clone(), &what);
     }
+    let text = fs::read_to_string(&path).map_err(|e| failed(format!("read {file}: {e}")))?;
+    if let Err(problem) = init_msg::readable(&text) {
+        return init_msg::alien(format!("{file} {problem}"), &problem);
+    }
+    init_msg::plan(repo, file, text).map(Hook::Msg)
 }
 
 /// A name the lefthook reads its configuration from: `lefthook` or
@@ -524,78 +498,6 @@ pub fn single_source(repo: &Repo, file: &str) -> std::result::Result<(), String>
         }
     }
     Ok(())
-}
-
-/// Item 15b: checks the lefthook file against points 1, 2 and 4 and returns its
-/// text with a `shipcraft` command that runs last (None: the command is already
-/// there), or the first condition it fails.
-fn lefthook_plan(text: &str) -> std::result::Result<Option<String>, String> {
-    use serde_norway::{Mapping, Value};
-    let written = block_layout(text)?;
-    let Ok(doc) = serde_norway::from_str::<Value>(text) else { return Err("cannot be read as YAML".into()) };
-    let mut top = match doc {
-        Value::Mapping(top) => top,
-        Value::Null => Mapping::new(),
-        _ => return Err("is not a YAML map".into()),
-    };
-    if let Some(key) = ["extends", "jobs", "remotes", "rc"].into_iter().find(|k| top.contains_key(k)) {
-        return Err(format!("uses `{key}`"));
-    }
-    let mut block = match top.get("pre-commit") {
-        None | Some(Value::Null) => Mapping::new(),
-        Some(Value::Mapping(block)) => block.clone(),
-        Some(_) => return Err("has a pre-commit block that is not a map".into()),
-    };
-    // 20.1: `parallel: false` counts as absent.
-    let absent = |k: &Value| k.as_str() == Some("parallel") && block.get(k) == Some(&Value::Bool(false));
-    if let Some(key) = block.keys().find(|k| k.as_str() != Some("commands") && !absent(k)) {
-        return Err(format!("has `{}` in the pre-commit block besides commands", key.as_str().unwrap_or("?")));
-    }
-    let mut commands = match block.get("commands") {
-        None | Some(Value::Null) => Mapping::new(),
-        Some(Value::Mapping(commands)) => commands.clone(),
-        Some(_) => return Err("has commands in pre-commit that is not a map".into()),
-    };
-    // 15b.2: the lefthook runs last a command without priority, or with 0; so
-    // every other command needs a positive decimal one, written in it.
-    let priority = |name: &str| {
-        let (raw, plain) = written.iter().find(|(n, ..)| n == name).map(|(_, raw, plain)| (raw.as_str(), *plain))?;
-        let decimal = plain && !raw.starts_with('0') && !raw.is_empty() && raw.bytes().all(|b| b.is_ascii_digit());
-        decimal.then(|| raw.parse::<i32>().ok()).flatten()
-    };
-    let mut last = 0;
-    for (name, command) in commands.iter().filter(|(name, _)| name.as_str() != Some("shipcraft")) {
-        let name = name.as_str().unwrap_or("?");
-        match priority(name) {
-            Some(p) if command.is_mapping() => last = last.max(p),
-            _ => return Err(format!("has command `{name}` without an explicit positive integer priority (without it, lefthook runs it last)")),
-        }
-    }
-    if let Some(shipcraft) = commands.get("shipcraft") {
-        let same = shipcraft.as_mapping().is_some_and(|m| m.len() == 2)
-            && shipcraft.get("run").and_then(Value::as_str) == Some("shipcraft check")
-            && priority("shipcraft").is_some_and(|p| p > last);
-        return if same {
-            Ok(None)
-        } else {
-            Err("already has an `shipcraft` command that is not just `run: shipcraft check` and the highest priority"
-                .into())
-        };
-    }
-    let next = last.checked_add(1).ok_or("has priority 2147483647, and shipcraft cannot run after it")?;
-    let mut shipcraft = Mapping::new();
-    shipcraft.insert("run".into(), "shipcraft check".into());
-    shipcraft.insert("priority".into(), next.into());
-    commands.insert("shipcraft".into(), Value::Mapping(shipcraft));
-    block.insert("commands".into(), Value::Mapping(commands));
-    top.insert("pre-commit".into(), Value::Mapping(block));
-    // 15b.4: the text stays as it was, with the command added; if it does not
-    // read back as the expected YAML, the init cannot prove where it goes.
-    let new = insert_text(text, "pre-commit", &["run: shipcraft check".into(), format!("priority: {next}")]);
-    match serde_norway::from_str::<Value>(&new) {
-        Ok(back) if back == Value::Mapping(top) => Ok(Some(new)),
-        _ => Err("cannot prove where to put the shipcraft command without changing the rest".into()),
-    }
 }
 
 /// 15b.4, from the parser's events (not the text): the first thing that is not
@@ -773,50 +675,19 @@ fn bare_nulls(text: &str, block: &str) -> String {
     out
 }
 
-/// Writes the lefthook file decided by `lefthook_plan`, or keeps it.
-fn integrate(repo: &Repo, file: &str, old: &str, new: Option<&str>) -> Result<()> {
-    let Some(new) = new else {
-        println!("shipcraft: {file} already has the shipcraft command in pre-commit, kept");
-        return Ok(());
-    };
-    let path = repo.path(file);
-    fs::write(&path, new).map_err(|e| {
-        let _ = fs::write(&path, old);
-        failed(format!("write {file}: {e}"))
-    })?;
-    println!("shipcraft: added the shipcraft command (shipcraft check, last) to {file} pre-commit");
-    Ok(())
-}
-
-/// In the `commit-msg` route (item 20.3), the refusal says what keeps the
-/// integration from happening, not to use the `pre-commit`.
-fn hook_alien<T>(msg: bool, what: String, place: &str) -> Result<T> {
-    if msg {
-        init_msg::alien(what.clone(), &what)
-    } else {
-        alien(what, place)
-    }
-}
-
-/// The `hook-alheio` refusal: nothing written, and where `shipcraft check` goes.
-fn alien<T>(what: String, place: &str) -> Result<T> {
-    refuse(
-        "foreign-hook",
-        what,
-        "shipcraft does not replace or edit another tool's hook: when in doubt, this step stays manual",
-        format!("put `shipcraft check` {place}"),
-    )
-}
-
-fn install_hook(hook: &Path, created: &mut Vec<PathBuf>) -> Result<()> {
+fn install_hooks(hooks: &[PathBuf], created: &mut Vec<PathBuf>) -> Result<()> {
     let exe = std::env::current_exe().map_err(|e| failed(format!("find the current binary: {e}")))?;
-    let script = format!(
-        "#!/bin/sh\n{HOOK_MARK}: checks the commit against open locks\nexec {} check\n",
-        shell_quote(&exe.to_string_lossy())
-    );
-    write(hook, &script, created)?;
-    make_executable(hook)?;
-    println!("shipcraft: pre-commit hook installed");
+    let exe = shell_quote(&exe.to_string_lossy());
+    for hook in hooks {
+        let script = if hook.ends_with("commit-msg") {
+            format!("#!/bin/sh\n{HOOK_MARK}: checks the commit against open locks\nexec {exe} check --commit-msg \"$1\"\n")
+        } else {
+            format!("#!/bin/sh\n{HOOK_MARK}: closes the lock the commit-msg check marked\nexec {exe} close\n")
+        };
+        write(hook, &script, created)?;
+        make_executable(hook)?;
+    }
+    println!("shipcraft: commit-msg and post-commit hooks installed");
     Ok(())
 }
 

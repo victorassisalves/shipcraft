@@ -1,8 +1,7 @@
-//! Item 20: the init integrates through the `commit-msg`. Where the lefthook
-//! file already routes shipcraft there, or where the 15b refuses only for the order
-//! of the `pre-commit` (in parallel, or a command the lefthook runs after
-//! shipcraft), it adds `shipcraft check --commit-msg` to the `commit-msg` block and
-//! `shipcraft close` to the `post-commit` one (item 17), and raises `shipcraft_min`.
+//! Item 20: with a lefthook file, the init integrates through the `commit-msg`,
+//! the one hook route: it adds `shipcraft check --commit-msg` to the `commit-msg`
+//! block and `shipcraft close` to the `post-commit` one (item 17), and raises
+//! `shipcraft_min`.
 
 use crate::config::{minimum_version, version_parts, CONFIG_FILE};
 use crate::git::{Repo, Snapshot};
@@ -27,41 +26,9 @@ pub struct Plan {
     pub missing: Vec<&'static str>,
 }
 
-/// 20.1: whether the route is the `commit-msg` (true) or the 15b's (false).
-/// A file the parser does not read (a repeated key, too), a `priority` the
-/// lefthook does not take (not an integer, out of 32 bits) or a command that
-/// is not a map is not a question of order: the problem, to refuse.
-pub fn route(text: &str) -> std::result::Result<bool, String> {
-    let Ok(doc) = parse(text) else { return Err("cannot be read as YAML".into()) };
-    if BLOCKS.iter().any(|(block, _)| command(&doc, block).is_some()) {
-        return Ok(true);
-    }
-    let Some(pre) = doc.get("pre-commit").and_then(Value::as_mapping) else { return Ok(false) };
-    let mut order = match pre.get("parallel") {
-        None | Some(Value::Bool(false)) => false,
-        Some(Value::Bool(true)) => true,
-        Some(_) => return Err("has a `parallel` in the pre-commit block that is neither true nor false".into()),
-    };
-    let Some(commands) = pre.get("commands").and_then(Value::as_mapping) else { return Ok(order) };
-    let mut last = 0;
-    for (name, cmd) in commands.iter().filter(|(name, _)| name.as_str() != Some("shipcraft")) {
-        let name = name.as_str().unwrap_or("?");
-        let Some(cmd) = cmd.as_mapping() else { return Err(format!("has command `{name}` that is not a map")) };
-        match cmd.get("priority") {
-            None => order = true,
-            Some(Value::Number(n)) if n.as_i64().and_then(|p| i32::try_from(p).ok()).is_some() => {
-                let p = n.as_i64().unwrap_or_default();
-                order |= p <= 0;
-                last = last.max(p);
-            }
-            Some(_) => {
-                return Err(format!(
-                    "has a priority in command `{name}` that lefthook does not accept (not an integer)"
-                ))
-            }
-        }
-    }
-    Ok(order || last >= i64::from(i32::MAX))
+/// Whether the lefthook file reads as YAML (a repeated key, too, does not).
+pub fn readable(text: &str) -> std::result::Result<(), String> {
+    parse(text).map(|_| ()).map_err(|_| "cannot be read as YAML".into())
 }
 
 /// The parser reads a leading BOM and a second key as two documents: the
@@ -315,28 +282,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn route_by_order_or_by_the_commands_already_there() {
-        let pre = |body: &str| format!("pre-commit:\n{body}");
-        assert_eq!(route(&pre("  parallel: true\n  commands:\n    a:\n      run: x\n      priority: 1\n")), Ok(true));
-        assert_eq!(route(&pre("  parallel: false\n  commands:\n    a:\n      run: x\n      priority: 1\n")), Ok(false));
-        assert_eq!(route(&pre("  commands:\n    a:\n      run: x\n")), Ok(true));
-        assert_eq!(route(&pre("  commands:\n    a:\n      run: x\n      priority: 0\n")), Ok(true));
-        assert_eq!(route(&pre("  commands:\n    a:\n      run: x\n      priority: 2147483647\n")), Ok(true));
-        assert_eq!(route(&pre("  commands:\n    a:\n      run: x\n      priority: 3\n")), Ok(false));
-        assert!(route(&pre("  commands:\n    a:\n      run: x\n      priority: \"3\"\n")).is_err());
-        assert!(route(&pre("  commands:\n    a:\n      run: x\n      priority: 1.5\n")).is_err());
-        assert!(route(&pre("  commands:\n    a: x\n")).is_err());
-        assert!(route(&pre("  parallel: yes please\n")).is_err());
-        assert!(route(&pre("  commands:\n    a:\n      run: x\n      priority: 2147483648\n")).is_err());
-        assert_eq!(route("post-commit:\n  commands:\n    shipcraft:\n      run: shipcraft close\n"), Ok(true));
-        assert_eq!(route(""), Ok(false));
-        assert!(route("a: 1\na: 2\n").is_err());
-    }
-
-    #[test]
     fn a_repeated_key_does_not_read() {
         assert!(parse("a: 1\na: 2\n").is_err());
         assert!(parse("\u{feff}a: 1\nb: 2\n").is_ok());
+        assert!(readable("a: 1\na: 2\n").is_err());
     }
 
     #[test]
