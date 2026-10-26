@@ -8,7 +8,7 @@ import json, os, re, sys, time
 
 def jl(path):
     try:
-        with open(path) as f:
+        with open(path, encoding="utf-8-sig") as f:
             return [json.loads(l) for l in f if l.strip()]
     except Exception:
         return []
@@ -252,21 +252,28 @@ def cmd_jsonl_check(a):
         for k in ("layer", "secs", "result", "code", "branch", "commit"):
             if k not in r:
                 die("row %d lacks the key %r: %s" % (i + 1, k, r))
-        if r["layer"] not in ("hook", "ci", "review"):
-            if r.get("escape") is True or r["layer"] == "merge":
-                continue
-            die("row %d: layer %r not in hook|ci|review" % (i + 1, r["layer"]))
+        if r["layer"] not in ("hook", "ci", "review", "merge", "red", "close", "pr"):
+            die("row %d: unknown layer %r" % (i + 1, r["layer"]))
+        # Historical rows may omit item 38 fields; validate them when recorded.
+        for key in ("lock", "base", "default_branch"):
+            if key in r and not isinstance(r[key], str):
+                die("row %d: %s is not a string: %r" % (i + 1, key, r[key]))
+        if "locks" in r and not (isinstance(r["locks"], list) and
+                                  all(isinstance(v, str) for v in r["locks"])):
+            die("row %d: locks is not a list of strings: %r" % (i + 1, r["locks"]))
+        if "reused" in r and not isinstance(r["reused"], bool):
+            die("row %d: reused is not a boolean: %r" % (i + 1, r["reused"]))
         if r["result"] not in ("passed", "refused", "error"):
             die("row %d: result %r not in passed|refused|error" % (i + 1, r["result"]))
         if isinstance(r["secs"], bool) or not isinstance(r["secs"], (int, float)) or r["secs"] < 0:
             die("row %d: secs is not a number >= 0: %r" % (i + 1, r["secs"]))
         if not isinstance(r["commit"], str):
             die("row %d: commit is not a string: %r" % (i + 1, r["commit"]))
-        if r["layer"] != "hook" and not r["commit"]:
+        if r["layer"] in ("ci", "review") and not r["commit"]:
             die("row %d: empty commit in a %s row" % (i + 1, r["layer"]))
         if r["branch"] not in branches:
             die("row %d: branch %r, expected one of %r" % (i + 1, r["branch"], branches))
-        if r["layer"] != "hook" and r["branch"] != branches[-1]:
+        if r["layer"] in ("ci", "review") and r["branch"] != branches[-1]:
             die("row %d: branch %r, expected %r" % (i + 1, r["branch"], branches[-1]))
         if r["layer"] == "review" and "tokens" not in r:
             die("row %d: review row without the tokens key" % (i + 1))

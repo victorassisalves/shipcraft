@@ -82,7 +82,7 @@ These readings remain part of the acceptance contract. Historical item numbers i
 16. A local layer exposes “on this machine” in terminal, PR text or status description.
 17. Suite command runs in root, replaces `{junit}`, and uses root-relative globs. Init names suites after package directories with tests; legacy lang/runner keys may coexist.
 18. Unknown lock format or a minimum version above the binary refuses in three lines naming the format/version, in hook and CI.
-19. runs.jsonl rows contain layer, nonnegative secs, result (passed/refused/error), code (nonempty on refusal), branch and commit (nonempty for CI/review); review rows include numeric or null tokens. Init and RED append no measurement row.
+19. runs.jsonl rows contain layer, nonnegative secs, result (passed/refused/error), code (nonempty on refusal), branch and commit (nonempty for CI/review); review rows include numeric or null tokens. Init appends no measurement row. RED and close append one event per step (item 38); red, close and pr are valid layers. Every new row carries lock; PR-related rows carry locks, merge rows base/default_branch, and reused verdicts reused: true. Historical rows may omit these added fields.
 20. Init creates nothing in `.github/` and preserves existing workflows, including with GitHub CI.
 21. Queue state is per machine; slots come from project `[machine]` or `$XDG_CONFIG_HOME/shipcraft/config.toml`, default 1. Waiting output names queue, position and active project/branch.
 22. GitHub CI mode runs no local suite and publishes no CI status. Local review waits for success on HEAD up to ci_timeout; failure/missing status prevents review. Review off does not wait.
