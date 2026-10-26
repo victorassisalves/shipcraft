@@ -20,14 +20,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # 5 macOS shards: a free account runs at most 5 macOS jobs at once, so 10 ran in two waves.
   macos:
-    name: macos ${{ matrix.shard }}/10
+    name: macos ${{ matrix.shard }}/5
     runs-on: macos-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        shard: [1, 2, 3, 4, 5]
+        of: [5]
     steps:
       - uses: actions/checkout@v4
 
@@ -50,10 +52,10 @@ jobs:
       - name: Build the core
         run: cargo build --release -j 4 --manifest-path nucleo/Cargo.toml
 
-      - name: Run the acceptance suite (shard ${{ matrix.shard }}/10)
+      - name: Run the acceptance suite (shard ${{ matrix.shard }}/${{ matrix.of }})
         env:
           SHIPCRAFT_ACCEPTANCE_JOBS: "4"
-          SHIPCRAFT_ACCEPTANCE_SHARD: "${{ matrix.shard }}/10"
+          SHIPCRAFT_ACCEPTANCE_SHARD: "${{ matrix.shard }}/${{ matrix.of }}"
           SHIPCRAFT_ACCEPTANCE_VERBOSE: "1"
         run: bash acceptance/run.sh "$PWD/nucleo/target/release/shipcraft" all
 
@@ -68,6 +70,7 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        of: [10]
     steps:
       - uses: actions/checkout@v4
 
@@ -90,10 +93,10 @@ jobs:
       - name: Build the core
         run: cargo build --release -j 4 --manifest-path nucleo/Cargo.toml
 
-      - name: Run the acceptance suite (shard ${{ matrix.shard }}/10)
+      - name: Run the acceptance suite (shard ${{ matrix.shard }}/${{ matrix.of }})
         env:
           SHIPCRAFT_ACCEPTANCE_JOBS: "4"
-          SHIPCRAFT_ACCEPTANCE_SHARD: "${{ matrix.shard }}/10"
+          SHIPCRAFT_ACCEPTANCE_SHARD: "${{ matrix.shard }}/${{ matrix.of }}"
           SHIPCRAFT_ACCEPTANCE_VERBOSE: "1"
         run: bash acceptance/run.sh "$PWD/nucleo/target/release/shipcraft" all
 
