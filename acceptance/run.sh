@@ -425,7 +425,7 @@ run_case() {
     check ".shipcraft.toml names the $TL runner ($RUNNER_RE)" grep -E -q "$RUNNER_RE" .shipcraft.toml
     pass ;;
   init-files)
-    EXPECT="config, locks and hook only"
+    EXPECT="config, locks, hook and the AGENTS.md block only"
     find .git -type f ! -path '.git/objects/*' ! -path '.git/logs/*' | sort > "$CW/git.before"
     must_accept "shipcraft init" cmd shipcraft init
     find .git -type f ! -path '.git/objects/*' ! -path '.git/logs/*' | sort > "$CW/git.after"
@@ -433,7 +433,8 @@ run_case() {
     check "init does not create .github" test ! -e .github
     check ".shipcraft/locks/ created" test -d .shipcraft/locks
     check "pre-commit hook installed and executable" test -x .git/hooks/pre-commit
-    extra=$(git status --porcelain --untracked-files=all | grep -v -E '^\?\? (\.shipcraft\.toml|\.shipcraft/locks/.*)$')
+    check "AGENTS.md carries the shipcraft block" grep -q -F '<!-- shipcraft -->' AGENTS.md
+    extra=$(git status --porcelain --untracked-files=all | grep -v -E '^\?\? (\.shipcraft\.toml|\.shipcraft/locks/.*|AGENTS\.md)$')
     [ -z "$extra" ] || fail "init touched other files: $(printf '%s' "$extra" | tr '\n' ' ')"
     gitextra=$(comm -13 "$CW/git.before" "$CW/git.after" | grep -v -x '.git/hooks/pre-commit')
     [ -z "$gitextra" ] || fail "init created other files in .git: $(printf '%s' "$gitextra" | tr '\n' ' ')"

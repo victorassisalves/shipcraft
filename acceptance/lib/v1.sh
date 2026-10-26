@@ -105,7 +105,8 @@ core_cases() { # os casos independentes de linguagem; os de fila (item 7) primei
   echo v1-7.1-fila-um-slot v1-7.1-fila-dois-slots v1-7.2-fila-posicao v1-7.2-fila-tempo-libera v1-7.2-ci-tempo-esgotado-libera v1-7.3-hook-fora-da-fila
   echo v1-1.1-padrao-local v1-1.1-sem-revisor v1-1.2-revisao-github-recusada v1-1.2-valor-invalido
   echo v1-1.3-base-config-desliga v1-1.3-base-config-liga
-  echo v1-2.3-tela-do-init v1-2.3-padrao-primeiro-instalado v1-2.4-resposta-desligado
+  echo v1-2.3-tela-do-init v1-2.3-padrao-primeiro-instalado
+  echo v1-2.5-agents-novo v1-2.5-agents-acrescenta v1-2.5-agents-uma-vez v1-2.5-agents-link
   echo v1-3.1-push-e-pr v1-3.2-ci-local-publica-status v1-3.2-ci-falha-sem-revisao
   echo v1-3.3-revisao-local-status-e-comentario v1-3.4-ci-github-nada-local
   echo v1-3.4-ci-github-espera-success-e-revisa v1-3.4-ci-github-failure-nao-revisa v1-3.4-ci-github-sem-status-nao-revisa
@@ -343,6 +344,8 @@ pr_commit() { # commit_all, ou --no-verify at NV esta setado (config invalida de
 # main publicada no origin. AGENTS (agentes instalados no init) vem do caso.
 pr_main() {
   must_accept "shipcraft init" cmd shipcraft init
+  # Review starts off; these cases exercise it whenever a reviewer is installed.
+  local a; for a in codex claude gemini; do ! command -v "$a" >/dev/null || { tset execution review '"local"'; break; }; done
   if [ -n "${CFGS:-}" ]; then
     local s k v
     while IFS='|' read -r s k v; do
@@ -1677,21 +1680,21 @@ PY
 
   # ======================================================== core: item 1
   v1-1.1-padrao-local)
-    # Item 1, regra 1: o padrao do init e local nas duas camadas (com revisor instalado); [roles] vem do agent achado.
-    EXPECT="ci=local revisao=local papeis=codex"
+    # Review is optional: init writes ci = local, review = off, and names the installed agent in [roles].
+    EXPECT="ci=local review=off roles=codex"
     v1_start codex
     must_accept "shipcraft init" cmd shipcraft init
     chk "[execution] ci = local" eq "$(tget execution.ci)" local
-    chk "[execution] revisao = local (a reviewer is installed)" eq "$(tget execution.review)" local
-    chk "[roles] revisao = codex (the only installed agent)" eq "$(tget roles.review)" codex
+    chk "[execution] review = off by default" eq "$(tget execution.review)" off
+    chk "[roles] review = codex (the only installed agent)" eq "$(tget roles.review)" codex
     pass ;;
   v1-1.1-sem-revisor)
-    # Item 1, regra 1: sem revisor instalado a revisao sai desligada e o init diz como ligar.
-    EXPECT="revisao=desligado + how to turn on"
+    # Without a reviewer installed review is also off and init says how to turn it on.
+    EXPECT="review=off + how to turn on"
     v1_start
     must_accept "shipcraft init" cmd shipcraft init
     chk "[execution] ci = local" eq "$(tget execution.ci)" local
-    chk "[execution] revisao = desligado (no reviewer installed)" eq "$(tget execution.review)" off
+    chk "[execution] review = off (no reviewer installed)" eq "$(tget execution.review)" off
     chk "the init says how to turn it on (review = \"local\")" out_has 'review = "local"'
     pass ;;
   v1-1.2-revisao-github-recusada)
@@ -1751,35 +1754,64 @@ PY
 
   # ======================================================== core: item 2
   v1-2.3-tela-do-init)
-    # Item 2, regras 3 e 4: o init pergunta qual agent revisa, explica RED/GREEN/revisao e avisa do provider; a resposta vale.
-    EXPECT="screen text + choice honoured"
+    # Item 2: init asks nothing about review; it says review is off, how to turn it on, and that the diff goes to the provider.
+    EXPECT="no question, review off, how to turn on"
     v1_start codex claude
-    printf 'claude\n' > "$CW/answer"
-    run_cmd_stdin "$CW/answer" shipcraft init
+    run_cmd_stdin /dev/null shipcraft init
     chk "shipcraft init accepted" rc_zero
-    chk "the screen explains RED" out_has 'RED'
-    chk "the screen explains GREEN" out_has 'GREEN'
-    chk "the screen says the code goes to the agent's provider" out_has 'provider'
-    chk "the screen offers 'desligado' for projects that cannot send code" out_has 'off'
-    chk "[roles] revisao = the agent typed (claude)" eq "$(tget roles.review)" claude
+    chk "init did not ask the reviewer" out_hasnt '(who reviews|Which reviewer)'
+    chk "init says review is off" out_has 'review is off'
+    chk "init says how to turn it on" out_has 'review = "local"'
+    chk "init says the diff goes to the provider" out_has 'provider'
+    chk "[execution] review = off" eq "$(tget execution.review)" off
     pass ;;
   v1-2.3-padrao-primeiro-instalado)
-    # Item 2, regra 3: sem resposta, o padrao e o primeiro agent que o init encontra instalado.
-    EXPECT="papeis=gemini"
+    # Item 2: [roles] review names the first agent installed, ready for review = "local".
+    EXPECT="roles=gemini"
     v1_start gemini
     run_cmd_stdin /dev/null shipcraft init
     chk "shipcraft init accepted" rc_zero
-    chk "[roles] revisao = gemini (the only installed agent)" eq "$(tget roles.review)" gemini
-    chk "[execution] revisao = local" eq "$(tget execution.review)" local
+    chk "[roles] review = gemini (the only installed agent)" eq "$(tget roles.review)" gemini
+    chk "[execution] review = off" eq "$(tget execution.review)" off
     pass ;;
-  v1-2.4-resposta-desligado)
-    # Item 2, regra 4: onde o codigo nao pode ir ao provider, a resposta e review = "off".
-    EXPECT="revisao=desligado"
-    v1_start codex
-    printf 'off\n' > "$CW/answer"
-    run_cmd_stdin "$CW/answer" shipcraft init
-    chk "shipcraft init accepted" rc_zero
-    chk "[execution] revisao = desligado" eq "$(tget execution.review)" off
+
+  v1-2.5-agents-novo)
+    # init creates AGENTS.md with the shipcraft block when the project has none.
+    EXPECT="AGENTS.md created with the block"
+    v1_start
+    must_accept "shipcraft init" cmd shipcraft init
+    chk "AGENTS.md has the block" grep -q -F '<!-- shipcraft -->' AGENTS.md
+    chk "the block says to run shipcraft red" grep -q -F 'shipcraft red' AGENTS.md
+    chk "init says to commit AGENTS.md" out_has 'ready\. Commit .*AGENTS\.md'
+    pass ;;
+  v1-2.5-agents-acrescenta)
+    # An existing AGENTS.md keeps its text; the block is appended after it.
+    EXPECT="block appended, text kept"
+    v1_start
+    printf '# House rules\nKEEP-MARKER-8a1\n' > AGENTS.md
+    must_accept "shipcraft init" cmd shipcraft init
+    chk "the old text is still first" eq "$(head -n 2 AGENTS.md | tail -n 1)" KEEP-MARKER-8a1
+    chk "the block was appended" grep -q -F '<!-- shipcraft -->' AGENTS.md
+    pass ;;
+  v1-2.5-agents-uma-vez)
+    # A second init (new clone, config removed) does not add the block twice.
+    EXPECT="one block after two inits"
+    v1_start
+    must_accept "first init" cmd shipcraft init
+    rm -f .shipcraft.toml
+    must_accept "second init" cmd shipcraft init
+    chk "exactly one block" eq "$(grep -c -F '<!-- shipcraft -->' AGENTS.md)" 1
+    chk "init says it kept the block" out_has 'already has the shipcraft block'
+    pass ;;
+  v1-2.5-agents-link)
+    # A symlinked AGENTS.md is never written through.
+    EXPECT="symlink untouched"
+    v1_start
+    printf 'outside\n' > "$CW/outside.md"
+    ln -s "$CW/outside.md" AGENTS.md
+    must_accept "shipcraft init" cmd shipcraft init
+    chk "the link target is unchanged" eq "$(cat "$CW/outside.md")" outside
+    chk "AGENTS.md is still a link" test -L AGENTS.md
     pass ;;
 
   # ======================================================== core: item 3
@@ -2159,13 +2191,13 @@ execution|review|"off"'
     chk "no merge was asked of GitHub" eq "$(nwrites merge)" 0
     pass ;;
   v1-5.3-init-github-marca-obrigatorios)
-    # Item 5, regra 3: onde o GitHub protege branch, shipcraft init --github marca shipcraft/ci e shipcraft/review como obrigatorios.
+    # Item 5, rule 3: where GitHub protects branches, init --github marks shipcraft/ci as required (review starts off).
     EXPECT="required checks written"
     v1_start codex
     remote_setup
     echo none > "$ST/protection"
     must_accept "shipcraft init --github" cmd shipcraft init --github
-    chk "branch protection was written with shipcraft/ci and shipcraft/review" eq "$(H protect-ok "$ST")" OK
+    chk "branch protection was written with shipcraft/ci only" eq "$(H protect-ok "$ST")" OK
     pass ;;
   v1-5.3-init-github-plano-gratis)
     # Item 5, regras 3 e 4: no plano gratis (403) o init --github termina bem e nada fica marcado como obrigatorio.

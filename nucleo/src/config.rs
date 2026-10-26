@@ -192,7 +192,7 @@ pub struct Maquina {
 
 impl Default for Execucao {
     fn default() -> Self {
-        Execucao { ci: "local".into(), revisao: "local".into(), tempo_max_ci: 1800 }
+        Execucao { ci: "local".into(), revisao: "off".into(), tempo_max_ci: 1800 }
     }
 }
 

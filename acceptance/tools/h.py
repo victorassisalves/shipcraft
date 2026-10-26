@@ -377,10 +377,10 @@ def cmd_text_has(a):
 def cmd_protect_ok(a):
     for w in writes(a[0], "protection"):
         t = w["text"] + " " + " ".join(w["argv"])
-        if "shipcraft/ci" in t and "shipcraft/review" in t:
+        if "shipcraft/ci" in t and "shipcraft/review" not in t:
             print("OK")
             return
-    die("nenhuma escrita de protecao de branch cita shipcraft/ci e shipcraft/review")
+    die("no branch protection write requires shipcraft/ci alone")
 
 
 def cmd_escape_rows(a):
