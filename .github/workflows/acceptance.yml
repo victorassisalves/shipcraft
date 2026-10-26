@@ -1,7 +1,8 @@
 name: acceptance
 
-# The offline black-box battery against nucleo/, on every PR and on main, split into
-# 10 shards per OS so a run takes minutes, not half an hour.
+# The offline black-box battery against nucleo/. Linux runs it on every PR and on main,
+# in 10 shards (about 3 minutes), and gates the merge. macOS runs it once a day and on
+# demand: GitHub's free macOS runners are few and slow to start.
 # GitHub-hosted runners only: this is a public repository, so self-hosted runners
 # must never be attached to it (a fork PR would run code on that machine).
 on:
@@ -20,8 +21,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # 5 macOS shards: a free account runs at most 5 macOS jobs at once, so 10 ran in two waves.
+  # 5 macOS shards: a free account runs at most 5 macOS jobs at once.
   macos:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     name: macos ${{ matrix.shard }}/5
     runs-on: macos-latest
     timeout-minutes: 30
@@ -59,13 +61,10 @@ jobs:
           SHIPCRAFT_ACCEPTANCE_VERBOSE: "1"
         run: bash acceptance/run.sh "$PWD/nucleo/target/release/shipcraft" all
 
-  # Linux has known open defects (the timeout kill through sh, see docs/spec.md "Known
-  # limits"); it reports but does not gate until they are fixed.
   linux:
     name: linux ${{ matrix.shard }}/10
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
@@ -100,12 +99,12 @@ jobs:
           SHIPCRAFT_ACCEPTANCE_VERBOSE: "1"
         run: bash acceptance/run.sh "$PWD/nucleo/target/release/shipcraft" all
 
-  # The single check branch protection requires: green only when every macOS shard passed.
+  # The single check branch protection requires: green only when every Linux shard passed.
   gate:
-    name: acceptance (macos)
-    needs: macos
+    name: acceptance
+    needs: linux
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Every macOS shard passed
-        run: test "${{ needs.macos.result }}" = success
+      - name: Every Linux shard passed
+        run: test "${{ needs.linux.result }}" = success
