@@ -99,6 +99,12 @@ MISSING
   else
     run_cmd shipcraft check
   fi
+  if [ "$kind/$variant" = fechada/merge ]; then
+    # The hook judges a merge against both parents, as CI does: a lock closed on the
+    # merged branch is not an edit. A red suite after the merge is CI's suite-red.
+    chk 'merge com trava fechada no segundo pai aceita, como no CI' rc_zero
+    pass
+  fi
   chk 'mesmo veredito de recusa' rc_nonzero
   chk 'contrato do texto, métrica e restauração' "$PY" - "$OUT" "$kind" "$variant" "$lf" "$other" "$want" <<'CHECK33'
 import sys,json,subprocess,pathlib,shlex

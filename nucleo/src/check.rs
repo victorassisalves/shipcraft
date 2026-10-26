@@ -35,7 +35,10 @@ pub fn run(repo: &Repo, commit_msg: bool) -> Result<()> {
     if let Some(text) = &staged_config {
         config::check_min(text)?;
     }
-    let parents: Vec<Snapshot> = repo.head()?.map(Snapshot::Commit).into_iter().collect();
+    // A merge is judged against both parents, as CI judges it: `git merge` runs
+    // the commit-msg hook, and a lock closed on the other branch is not an edit.
+    let merging = if repo.head()?.is_some() { repo.resolve("MERGE_HEAD")? } else { None };
+    let parents: Vec<Snapshot> = repo.head()?.into_iter().chain(merging).map(Snapshot::Commit).collect();
     // Item 31: a commit that changes the config has it validated here, even
     // with no lock open; deleting it is uninstalling and is not validated.
     if let Some(text) = &staged_config {
@@ -47,12 +50,12 @@ pub fn run(repo: &Repo, commit_msg: bool) -> Result<()> {
             Config::parse(text)?;
         }
     }
-    let head_locks = match parents.first() {
-        Some(head) => lock_files(repo, head)?,
-        None => LockFiles::new(),
-    };
+    let mut parent_locks = parents.iter().map(|p| lock_files(repo, p)).collect::<Result<Vec<_>>>()?;
+    if parent_locks.is_empty() {
+        parent_locks.push(LockFiles::new());
+    }
     let staged_locks = lock_files(repo, &Snapshot::Index)?;
-    let changes = judge_locks(&[head_locks], &staged_locks, "in the pending commit", true)?;
+    let changes = judge_locks(&parent_locks, &staged_locks, "in the pending commit", true)?;
 
     let binding: Vec<_> = bindings(&changes).collect();
     if binding.is_empty() {

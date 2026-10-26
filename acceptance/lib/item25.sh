@@ -86,7 +86,7 @@ from pathlib import Path
 import yaml
 import tomli
 sys.path.insert(0, str(Path(os.environ['ACEITE']) / 'tools'))
-from lefthook15b import snapshot as base_snapshot
+from lefthook_fixture import snapshot as base_snapshot
 PACKAGE_VERSION = tomli.loads((Path(os.environ['ACEITE']).parent / 'nucleo/Cargo.toml').read_text())['package']['version']
 
 # Bytes capturados nas instalações reais; só INSTALL_PYTHON é parametrizado.

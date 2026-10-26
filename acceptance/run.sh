@@ -432,11 +432,12 @@ run_case() {
     check ".shipcraft.toml created" test -f .shipcraft.toml
     check "init does not create .github" test ! -e .github
     check ".shipcraft/locks/ created" test -d .shipcraft/locks
-    check "pre-commit hook installed and executable" test -x .git/hooks/pre-commit
+    check "commit-msg hook installed and executable" test -x .git/hooks/commit-msg
+    check "post-commit hook installed and executable" test -x .git/hooks/post-commit
     check "AGENTS.md carries the shipcraft block" grep -q -F '<!-- shipcraft -->' AGENTS.md
     extra=$(git status --porcelain --untracked-files=all | grep -v -E '^\?\? (\.shipcraft\.toml|\.shipcraft/locks/.*|AGENTS\.md)$')
     [ -z "$extra" ] || fail "init touched other files: $(printf '%s' "$extra" | tr '\n' ' ')"
-    gitextra=$(comm -13 "$CW/git.before" "$CW/git.after" | grep -v -x '.git/hooks/pre-commit')
+    gitextra=$(comm -13 "$CW/git.before" "$CW/git.after" | grep -v -x -e '.git/hooks/commit-msg' -e '.git/hooks/post-commit')
     [ -z "$gitextra" ] || fail "init created other files in .git: $(printf '%s' "$gitextra" | tr '\n' ' ')"
     pass ;;
   init-workflow)

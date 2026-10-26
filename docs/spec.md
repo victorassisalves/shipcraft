@@ -43,7 +43,7 @@ Intermediate commits with the suite still red are accepted. When it is safe, the
 
 ### The lock closes by itself
 
-The first commit after RED in which every case in `failing_at_red` passes, none skipped or missing, closes the lock. On the `pre-commit` route the hook writes `closed` into that same commit; on the `commit-msg` route (see `init`) a separate closing commit follows it. A closed lock no longer restricts the tests.
+The first commit after RED in which every case in `failing_at_red` passes, none skipped or missing, closes the lock. The `commit-msg` hook judges the commit and the `post-commit` hook writes `closed` in a separate closing commit right after it (see `init`). A merge is judged against both parents, as in CI. A closed lock no longer restricts the tests.
 
 ### GREEN may add tests
 
@@ -95,12 +95,12 @@ Each command is `shipcraft <command>`. Exit codes, unless the row says otherwise
 - **Config:** writes `.shipcraft.toml` with the test command, globs, `check` (`tsc --noEmit` or `go vet`), `[execution]`, `[roles]`, `shipcraft_min` and, when it applies, `[build]`. Every `npx` it writes puts `--` before the tool's arguments.
 - **Review:** `init` asks nothing. It writes `review = "off"` and the first agent installed in `[roles] review`, and says how to turn review on and that the diff then goes to the agent's provider.
 - **AGENTS.md:** `init` creates `AGENTS.md` with a short block (marked `<!-- shipcraft -->`) telling agents the RED/GREEN workflow, or appends the block once to an existing file. A symlink or a failed write is left alone with a notice; it never fails the init. The block is the text below `AGENTS_BLOCK` in `nucleo/src/init.rs`.
-- **Hook:** it integrates only when it can prove which configuration runs the hook:
-  - plain git: `.git/hooks/pre-commit` runs `shipcraft check`;
-  - lefthook: a `shipcraft check` command in `pre-commit` when every other command has an explicit positive `priority`; otherwise the `commit-msg` route;
-  - husky 9 and the pre-commit framework: always the `commit-msg` route.
+- **Hook:** there is one route: `shipcraft check --commit-msg` in `commit-msg` and `shipcraft close` in `post-commit`, so the hook sees the index after formatters ran. `init` integrates only when it can prove which configuration runs the hook:
+  - plain git: shipcraft's own `.git/hooks/commit-msg` and `.git/hooks/post-commit`;
+  - lefthook: the two commands in the lefthook file's `commit-msg` and `post-commit` blocks;
+  - husky 9 and the pre-commit framework: the two commands in their files.
 
-  The `commit-msg` route puts `shipcraft check --commit-msg` in `commit-msg` and `shipcraft close` in `post-commit`, so the hook sees the index after formatters ran. Anything `init` cannot prove (another tool's hook, `core.hooksPath` elsewhere, two hook managers, flow-style YAML, symlinks) refuses with `foreign-hook` and says where to add `shipcraft check` by hand. Edge cases are fixed by the acceptance battery (`acceptance/`).
+  Anything `init` cannot prove (another tool's hook, `core.hooksPath` elsewhere, two hook managers, flow-style YAML, symlinks) refuses with `foreign-hook` and says where to add `shipcraft check` by hand. Edge cases are fixed by the acceptance battery (`acceptance/`).
 - **GitHub:** `init` never writes a workflow. With `--github` it marks `shipcraft/ci` as a required check where GitHub offers branch protection.
 
 ## 4. Configuration

@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 import yaml
 import tomli
-from lefthook15b import HOOK, snapshot
+from lefthook_fixture import HOOK, snapshot
 
 PACKAGE_VERSION = tomli.loads((Path(__file__).resolve().parents[2] / 'nucleo/Cargo.toml').read_text())['package']['version']
 CURRENT_MIN = '.'.join(PACKAGE_VERSION.split('.')[:2])
@@ -47,7 +47,6 @@ def main(case):
     kind = parts[0]
     data = {'pre-commit': {'parallel': True, 'commands': {'lint': {'run': 'echo lint'}}}}
     refuse = False
-    old_route = False
     raw = None
     reason = None
     if kind == 'rota':
@@ -57,29 +56,11 @@ def main(case):
             data['pre-commit'].pop('parallel')
         if value in ('zero', 'negativa', 'maxima'):
             c['priority'] = {'zero': 0, 'negativa': -1, 'maxima': 2147483647}[value]
-        elif value == 'parallel-false':
-            data['pre-commit']['parallel'] = False
-            c['priority'] = 7
-            old_route = True
         elif value in EVENTS:
             c['priority'] = 7
             data[value] = {'commands': {'shipcraft': {'run': RUNS[value]}}}
         elif value == 'pre-restricoes':
             data['pre-commit'].update(skip=True, jobs=[{'run': 'echo job'}], scripts={'x': {'runner': 'bash'}})
-        elif value == 'pre-antiga-ignora-novos':
-            c['priority'] = 7
-            data['commit-msg'] = {'skip': True}
-            data['post-commit'] = {'jobs': [{'run': 'echo post'}]}
-            old_route = True
-    elif kind == 'tipo':
-        refuse = True
-        value = parts[1]
-        if value == 'parallel':
-            data['pre-commit']['parallel'] = 'sim'
-        elif value == 'comando':
-            data['pre-commit']['commands']['lint'] = 'echo lint'
-        else:
-            data['pre-commit']['commands']['lint']['priority'] = {'texto': '7', 'decimal': 1.5, 'booleano': True}[value]
     elif kind == 'vazio':
         event, value = parts[1:]
         # O outro bloco ja tem um comando de projeto: nao pode ser perdido.
@@ -105,14 +86,10 @@ def main(case):
             command[value] = 1 if value == 'priority' else True
     elif kind == 'hook':
         event, value = parts[1:]
-        if value == 'alheio-antiga':
-            data['pre-commit'].pop('parallel')
-            data['pre-commit']['commands']['lint']['priority'] = 7
-            old_route = True
         for e in ('pre-commit', *EVENTS):
             installed(e, args=value != 'sem-args', executable=not (e == event and value == 'sem-exec'))
         hp = Path('.git/hooks') / event
-        if value in ('alheio', 'alheio-antiga'):
+        if value == 'alheio':
             hp.write_text('#!/bin/sh\necho alheio\n')
             refuse, reason = True, event
         elif value == 'link':
@@ -121,7 +98,9 @@ def main(case):
     elif kind in ('min', 'min-alto', 'rollback'):
         p, _ = run('shipcraft', 'init')
         assert p.returncode == 0, 'fixture init inicial'
-        Path('.git/hooks/pre-commit').unlink(missing_ok=True)
+        # The plain-git init installed shipcraft's own hooks; lefthook installs its own.
+        for e in EVENTS:
+            Path('.git/hooks', e).unlink(missing_ok=True)
         cfg = Path('.shipcraft.toml')
         text = cfg.read_text()
         assert re.search(r'^shipcraft_min\s*=', text, re.M), 'fixture sem shipcraft_min'
@@ -213,16 +192,12 @@ def main(case):
             return
         lines = [x for x in out.splitlines() if x.strip()]
         assert len(lines) == 3, 'recusa deve ter tres linhas, antes de perguntar'
-        assert old_route or not re.search(r'(put|place|add|insert).*shipcraft check.*pre-commit', lines[-1], re.I), 'orientou shipcraft check no pre-commit paralelo'
+        assert not re.search(r'(put|place|add|insert).*shipcraft check.*pre-commit', lines[-1], re.I), 'orientou shipcraft check no pre-commit paralelo'
         if reason: assert reason in lines[-1], 'terceira linha nao identifica impedimento: ' + reason
         if kind == 'trava': assert re.search(r'close', lines[-1], re.I), 'deve mandar fechar trava antes'
         return
     assert p.returncode == 0, 'recusou integracao segura'
     after = yaml.safe_load(path.read_text())
-    if old_route:
-        assert after['pre-commit']['commands']['shipcraft'] == {'run': 'shipcraft check', 'priority': 8}
-        for e in EVENTS: assert after.get(e) == data.get(e), 'leu/mudou blocos da outra rota'
-        return
     check_pair(after)
     if kind == 'yaml':
         assert before['lefthook.yml'][1] in path.read_bytes(), 'reformatou bytes originais do YAML'
