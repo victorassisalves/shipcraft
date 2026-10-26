@@ -14,8 +14,10 @@ pub fn run(as_json: bool) -> Result<()> {
     let bytes = log_path().and_then(|p| fs::read(p).ok()).unwrap_or_default();
     let (rows, gaps) = read(&bytes);
     let report = Report::of(&rows);
-    let gaps: Vec<Value> = gaps.into_iter().map(|(line, reason)| json!({"kind": "gap", "line": line, "reason": reason})).collect();
-    let lines: Vec<Value> = [report.meta.clone()].into_iter().chain(report.locks.clone()).chain(report.days.clone()).chain(gaps).collect();
+    let gaps: Vec<Value> =
+        gaps.into_iter().map(|(line, reason)| json!({"kind": "gap", "line": line, "reason": reason})).collect();
+    let lines: Vec<Value> =
+        [report.meta.clone()].into_iter().chain(report.locks.clone()).chain(report.days.clone()).chain(gaps).collect();
     if as_json {
         for line in &lines {
             println!("{line}");
@@ -134,17 +136,22 @@ fn lock_row(id: &str, rows: &[&Row]) -> (Value, Option<Merged>) {
     let close = passed("close");
     // A merge counts only into the default branch.
     let merge = first(rows.iter().copied().filter(|r| {
-        str_of(r, "layer") == "merge" && is(r, "passed") && r.get("base").and_then(Value::as_str).is_some_and(|b| {
-            r.get("default_branch").and_then(Value::as_str) == Some(b)
-        })
+        str_of(r, "layer") == "merge"
+            && is(r, "passed")
+            && r.get("base")
+                .and_then(Value::as_str)
+                .is_some_and(|b| r.get("default_branch").and_then(Value::as_str) == Some(b))
     }));
     let span = |a: Option<f64>, b: Option<f64>| a.zip(b).map(|(a, b)| b - a);
     let waiting = merge.and_then(|m| {
         let ci = rows.iter().filter(|r| str_of(r, "layer") == "ci" && is(r, "passed")).filter_map(|r| at(r));
         ci.filter(|t| *t <= m).reduce(f64::max).map(|t| m - t)
     });
-    let reviews: Vec<&Row> =
-        rows.iter().copied().filter(|r| str_of(r, "layer") == "review" && r.get("reused") != Some(&Value::Bool(true))).collect();
+    let reviews: Vec<&Row> = rows
+        .iter()
+        .copied()
+        .filter(|r| str_of(r, "layer") == "review" && r.get("reused") != Some(&Value::Bool(true)))
+        .collect();
     let count = |result: &str| reviews.iter().filter(|r| is(r, result)).count();
     let first_approved =
         first_row(reviews.iter().copied().filter(|r| is(r, "passed") || is(r, "refused"))).map(|r| is(r, "passed"));
@@ -153,7 +160,8 @@ fn lock_row(id: &str, rows: &[&Row]) -> (Value, Option<Merged>) {
         *refusals.entry(str_of(r, "code").to_string()).or_insert(0u64) += 1;
     }
     let errors = rows.iter().filter(|r| is(r, "error")).count();
-    let unobserved: Vec<&str> = [("red", red), ("close", close)].iter().filter(|(_, t)| t.is_none()).map(|(s, _)| *s).collect();
+    let unobserved: Vec<&str> =
+        [("red", red), ("close", close)].iter().filter(|(_, t)| t.is_none()).map(|(s, _)| *s).collect();
     let of = |layer: &str| stats(&rows.iter().copied().filter(|r| str_of(r, "layer") == layer).collect::<Vec<_>>());
     let row = json!({
         "kind": "lock", "lock": id, "state": if merge.is_some() { "merged" } else { "open" },
@@ -263,7 +271,9 @@ fn day(t: f64) -> String {
 fn text(lines: &[Value]) -> String {
     let show = |v: &Value| if v.is_null() { "-".to_string() } else { v.to_string() };
     let secs = |v: &Value| if v.is_null() { "-".to_string() } else { format!("{v} s") };
-    let stat = |s: &Value| format!("{} (p50 {}, p90 {}, refusals {})", s["count"], secs(&s["p50"]), secs(&s["p90"]), s["refusals"]);
+    let stat = |s: &Value| {
+        format!("{} (p50 {}, p90 {}, refusals {})", s["count"], secs(&s["p50"]), secs(&s["p90"]), s["refusals"])
+    };
     let mut out = String::new();
     for line in lines {
         match line["kind"].as_str().unwrap_or_default() {
@@ -278,7 +288,9 @@ fn text(lines: &[Value]) -> String {
                 out += &format!("totals: hook {}; ci {}\n", stat(&line["hook"]), stat(&line["ci"]));
             }
             "lock" => {
-                let unobserved = line["unobserved"].as_array().map(|u| u.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", "));
+                let unobserved = line["unobserved"]
+                    .as_array()
+                    .map(|u| u.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", "));
                 out += &format!(
                     "lock {}: {}; red at {}, close at {}, merge at {}; red to close {}, close to merge {}, red to merge {}; waiting {}; reviews passed {}, refused {}, error {}, first approved {}; refusals {}, errors {}; hook {}; ci {}{}\n",
                     line["lock"].as_str().unwrap_or_default(),
@@ -305,7 +317,13 @@ fn text(lines: &[Value]) -> String {
                     show(&line["first_review_approved_share"])
                 );
             }
-            _ => out += &format!("gap: line {} does not read ({})\n", line["line"], line["reason"].as_str().unwrap_or_default()),
+            _ => {
+                out += &format!(
+                    "gap: line {} does not read ({})\n",
+                    line["line"],
+                    line["reason"].as_str().unwrap_or_default()
+                )
+            }
         }
     }
     out

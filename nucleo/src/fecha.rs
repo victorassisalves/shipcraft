@@ -43,7 +43,7 @@ pub fn run() {
             return println!(
                 "shipcraft: the lock did not close ({}); nothing changed: run `shipcraft close` manually.",
                 one_line(&e)
-            )
+            );
         }
     };
     record(&repo, &marca, started, "passed", &closed.commit);

@@ -63,7 +63,14 @@ pub fn rows(repo: &Repo) -> Vec<Value> {
 
 /// The row of a hook or CI run, from how the command ended; `docs_only` only on
 /// CI rows, `lock` on hook rows (the lock open before the hook ran).
-pub fn layer(repo: &Repo, camada: &str, started: Instant, result: &Result<()>, docs_only: Option<bool>, lock: Option<String>) {
+pub fn layer(
+    repo: &Repo,
+    camada: &str,
+    started: Instant,
+    result: &Result<()>,
+    docs_only: Option<bool>,
+    lock: Option<String>,
+) {
     let mut row = row(repo, camada, started, result);
     if let Some(lock) = lock {
         row["lock"] = json!(lock);
@@ -105,7 +112,10 @@ pub fn lock_id(path: &str) -> String {
 /// only in the hook totals.
 pub fn open_lock(repo: &Repo) -> String {
     let Ok(locks) = lock_files(repo, &Snapshot::Index) else { return String::new() };
-    locks.iter().find(|(_, bytes)| Lock::parse(bytes).is_none_or(|l| l.is_open())).map_or(String::new(), |(p, _)| lock_id(p))
+    locks
+        .iter()
+        .find(|(_, bytes)| Lock::parse(bytes).is_none_or(|l| l.is_open()))
+        .map_or(String::new(), |(p, _)| lock_id(p))
 }
 
 /// The locks whose files changed from the merge-base of `base` and `head` to
@@ -115,11 +125,8 @@ pub fn locks_changed(repo: &Repo, base: &str, head: &str) -> Vec<String> {
     let Ok(out) = repo.run(&["diff", "--name-only", "-z", "--no-renames", &range, "--", LOCK_DIR]) else {
         return Vec::new();
     };
-    let mut locks: Vec<String> = String::from_utf8_lossy(&out)
-        .split('\0')
-        .filter(|p| p.ends_with(".json"))
-        .map(lock_id)
-        .collect();
+    let mut locks: Vec<String> =
+        String::from_utf8_lossy(&out).split('\0').filter(|p| p.ends_with(".json")).map(lock_id).collect();
     locks.dedup();
     locks
 }
