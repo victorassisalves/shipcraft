@@ -50,7 +50,7 @@ item27_case() {
       else echo 403 > "$ST/protection"; fi
       must_accept "init --github" cmd shipcraft init --github
       if [ "$CASE" = v1-27.github-protegido ]; then
-        chk "shipcraft/ci required" eq "$(H protect-ok "$ST")" OK
+        chk "dois status obrigatórios" eq "$(H protect-ok "$ST")" OK
       else chk "plano grátis preservado" eq "$(cat "$ST/protection")" 403; fi
       chk "--github não cria .github" test ! -e .github
       b27_final local

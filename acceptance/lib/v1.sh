@@ -269,8 +269,6 @@ pr_commit() { # commit_all, ou --no-verify at NV esta setado (config invalida de
 # main publicada no origin. AGENTS (agentes instalados no init) vem do caso.
 pr_main() {
   must_accept "shipcraft init" cmd shipcraft init
-  # Review starts off; these cases exercise it whenever a reviewer is installed.
-  local a; for a in codex claude gemini; do ! command -v "$a" >/dev/null || { tset execution review '"local"'; break; }; done
   if [ -n "${CFGS:-}" ]; then
     local s k v
     while IFS='|' read -r s k v; do
@@ -1599,12 +1597,12 @@ PY
 
   # ======================================================== core: item 1
   v1-1.1-padrao-local)
-    # Review is optional: init writes ci = local, review = off, and names the installed agent in [roles].
-    EXPECT="ci=local review=off roles=codex"
+    # Review is on by default with the installed agent: init writes ci = local, review = local, roles = codex.
+    EXPECT="ci=local review=local roles=codex"
     v1_start codex
     must_accept "shipcraft init" cmd shipcraft init
     chk "[execution] ci = local" eq "$(tget execution.ci)" local
-    chk "[execution] review = off by default" eq "$(tget execution.review)" off
+    chk "[execution] review = local (a reviewer is installed)" eq "$(tget execution.review)" local
     chk "[roles] review = codex (the only installed agent)" eq "$(tget roles.review)" codex
     pass ;;
   v1-1.1-sem-revisor)
@@ -1673,25 +1671,25 @@ PY
 
   # ======================================================== core: item 2
   v1-2.3-tela-do-init)
-    # Item 2: init asks nothing about review; it says review is off, how to turn it on, and that the diff goes to the provider.
-    EXPECT="no question, review off, how to turn on"
+    # Item 2: init asks nothing about review; it names the reviewer, says the diff goes to its provider and how to turn review off.
+    EXPECT="no question, review by the first agent, how to turn off"
     v1_start codex claude
     run_cmd_stdin /dev/null shipcraft init
     chk "shipcraft init accepted" rc_zero
     chk "init did not ask the reviewer" out_hasnt '(who reviews|Which reviewer)'
-    chk "init says review is off" out_has 'review is off'
-    chk "init says how to turn it on" out_has 'review = "local"'
+    chk "init names the reviewer" out_has 'review by codex'
+    chk "init says how to turn it off" out_has 'review = "off"'
     chk "init says the diff goes to the provider" out_has 'provider'
-    chk "[execution] review = off" eq "$(tget execution.review)" off
+    chk "[execution] review = local" eq "$(tget execution.review)" local
     pass ;;
   v1-2.3-padrao-primeiro-instalado)
-    # Item 2: [roles] review names the first agent installed, ready for review = "local".
+    # Item 2: [roles] review names the first agent installed, and review is on.
     EXPECT="roles=gemini"
     v1_start gemini
     run_cmd_stdin /dev/null shipcraft init
     chk "shipcraft init accepted" rc_zero
     chk "[roles] review = gemini (the only installed agent)" eq "$(tget roles.review)" gemini
-    chk "[execution] review = off" eq "$(tget execution.review)" off
+    chk "[execution] review = local" eq "$(tget execution.review)" local
     pass ;;
 
   v1-2.5-agents-novo)
@@ -2110,13 +2108,13 @@ execution|review|"off"'
     chk "no merge was asked of GitHub" eq "$(nwrites merge)" 0
     pass ;;
   v1-5.3-init-github-marca-obrigatorios)
-    # Item 5, rule 3: where GitHub protects branches, init --github marks shipcraft/ci as required (review starts off).
+    # Item 5, rule 3: where GitHub protects branches, init --github marks shipcraft/ci and shipcraft/review as required.
     EXPECT="required checks written"
     v1_start codex
     remote_setup
     echo none > "$ST/protection"
     must_accept "shipcraft init --github" cmd shipcraft init --github
-    chk "branch protection was written with shipcraft/ci only" eq "$(H protect-ok "$ST")" OK
+    chk "branch protection was written with shipcraft/ci and shipcraft/review" eq "$(H protect-ok "$ST")" OK
     pass ;;
   v1-5.3-init-github-plano-gratis)
     # Item 5, regras 3 e 4: no plano gratis (403) o init --github termina bem e nada fica marcado como obrigatorio.
