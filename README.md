@@ -36,7 +36,7 @@ flowchart LR
     F --> D
     E -- locked cases still red --> D
     E -- all locked cases pass --> G[lock closes in the same commit]
-    G --> H["shipcraft pr<br/>CI + review"]
+    G --> H["shipcraft pr<br/>CI (+ optional review)"]
     H --> I["shipcraft merge"]
 ```
 
@@ -79,7 +79,7 @@ git add -A && git commit -m "red: invoice rounding"
 # GREEN: write the code; commit as often as you like
 git commit -am "fix rounding"      # the lock closes on the first fully green commit
 
-# open the PR: CI and review run, and their statuses are published
+# open the PR: CI runs (and review, if on) and the statuses are published
 shipcraft pr --title "Invoice rounding"
 
 # merge only when both are green
@@ -98,7 +98,7 @@ shipcraft merge 42
 | `shipcraft check [--commit-msg <file>]` | Called by the hook. Judges the commit being made against open locks and closes a lock when its cases pass. |
 | `shipcraft close` | Closes a lock by hand when your hook setup can't do it in the same commit. |
 | `shipcraft ci --base <ref> [--pr]` | Re-checks every commit in `<ref>..HEAD` and runs the full suite on HEAD. Runs locally or in GitHub Actions. |
-| `shipcraft pr [--title <t>] [--body <file>]` | Pushes the branch, opens or updates the PR, runs CI and review, and publishes the `shipcraft/ci` and `shipcraft/review` statuses. |
+| `shipcraft pr [--title <t>] [--body <file>]` | Pushes the branch, opens or updates the PR, runs CI and the review when it is on, and publishes the `shipcraft/ci` and `shipcraft/review` statuses. |
 | `shipcraft review [--pr <n>]` | Runs the review on the local HEAD (to catch blockers before opening the PR) or on any PR. |
 | `shipcraft merge <pr> [--no-review "<reason>"]` | Merges only when CI and review are green on the PR's head. `--no-review "<reason>"` is the recorded way out, and the reason shows up in the PR and in the numbers. |
 | `shipcraft status` | The open locks, and how protected the repository really is (branch protection or only `shipcraft merge`). |
@@ -131,7 +131,7 @@ globs = ["**/*.test.ts", "vitest.config.*"]
 
 [execution]
 ci = "local"        # local | github | off
-review = "local"    # local | off
+review = "off"      # off | local (optional)
 
 [roles]
 review = "codex"    # codex | claude | gemini
@@ -150,10 +150,10 @@ A layer that is switched off is labeled "off in .shipcraft.toml" on every PR, so
 |---|---|---|
 | Hook | every commit | edits to locked tests or config, skipped or missing cases; closes the lock when green |
 | CI | every PR | everything the hook checks, on every commit, from a clean checkout, plus the full suite |
-| Review | every PR, after CI is green | a different agent reads the diff against the spec and the PR body, and runs its own checks. A blocker counts only if the reviewer reproduced it and it breaks a quoted spec rule or crashes. Errors, timeouts and quota failures are never an approval. |
-| Merge gate | `shipcraft merge` | refuses unless CI and review are green on the PR head |
+| Review (optional, off by default) | every PR, after CI is green | a different agent reads the diff against the spec and the PR body, and runs its own checks. A blocker counts only if the reviewer reproduced it and it breaks a quoted spec rule or crashes. Errors, timeouts and quota failures are never an approval. |
+| Merge gate | `shipcraft merge` | refuses unless CI (and review, when on) are green on the PR head |
 
-On a public repository (or a paid GitHub plan), `shipcraft init --github` also marks both statuses as required, so the platform enforces the gate too.
+On a public repository (or a paid GitHub plan), `shipcraft init --github` also marks `shipcraft/ci` as required, so the platform enforces the gate too.
 
 ## Measured, not asserted
 

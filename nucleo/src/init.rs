@@ -1,7 +1,7 @@
 //! `shipcraft init`: writes `.shipcraft.toml` and `.shipcraft/locks/`, and installs the
 //! pre-commit hook. Nothing else is written, in the project or in `.git`: the
-//! GitHub workflow is in `docs/github-ci.md`, for who turns it on (item 27). It asks which agent reviews (item 2) and, with `--github`, marks
-//! the two statuses as required where GitHub protects branches (item 5.3).
+//! GitHub workflow is in `docs/github-ci.md`, for who turns it on (item 27). Review starts off (item 2) and, with `--github`, it marks
+//! shipcraft/ci as required where GitHub protects branches (item 5.3).
 //! It decides everything before asking or writing, and undoes its own writes
 //! when one fails (item 15a). Where the lefthook runs the hook, it adds a `shipcraft`
 //! command to the lefthook file instead of installing its own (item 15b), or
@@ -20,7 +20,6 @@ use crate::refusal::{failed, refuse, Result};
 use crate::suite::shell_quote;
 use crate::tsbuild;
 use std::fs;
-use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
 const HOOK_MARK: &str = "# shipcraft hook";
@@ -63,7 +62,7 @@ pub fn run(repo: &Repo, lang_flag: Option<&str>, github: bool) -> Result<()> {
         }
         _ => println!("shipcraft: workspace {} with {} suite(s)", lang.name(), suites.len()),
     }
-    let reviewer = choose_reviewer()?;
+    let reviewer = reviewer();
     // Item 15a: a write that fails in the middle undoes what this run created.
     let mut created = Vec::new();
     let written = write_once(repo, &mut created, CONFIG_FILE, &config_text(lang, &suites, &reviewer, build.as_deref()))
@@ -100,6 +99,9 @@ pub fn run(repo: &Repo, lang_flag: Option<&str>, github: bool) -> Result<()> {
     if github {
         protect(repo);
     }
+    println!(
+        "shipcraft: review is off. To have {reviewer} review each PR in a separate session, set review = \"local\" in {CONFIG_FILE} [execution] section; the diff goes to its provider."
+    );
     let lefthook = match &hook {
         Hook::Lefthook(file, ..) | Hook::Msg(Plan { file, .. }) => format!(", {file}"),
         Hook::Tool(tool) => tool.writes.iter().map(|(file, ..)| format!(", {file}")).collect(),
@@ -220,45 +222,10 @@ fn choose_lang(repo: &Repo, flag: Option<&str>) -> Result<Lang> {
     }
 }
 
-/// Item 2, rules 3 and 4: one screen, one answer (a line of stdin, terminal
-/// or not; empty means the default, the first agent installed). None = off.
-fn choose_reviewer() -> Result<(Option<String>, String)> {
-    let installed: Vec<&str> = AGENTS.into_iter().filter(|a| on_path(a)).collect();
-    let Some(default) = installed.first() else {
-        println!("shipcraft: no review agent installed (codex, claude or gemini): review stays off.");
-        println!("shipcraft: without an executed review, the PR only goes through CI before merging.");
-        println!(
-            "shipcraft: to enable it, install a reviewer and set review = \"local\" in {CONFIG_FILE} [execution] section"
-        );
-        return Ok((None, "codex".to_string()));
-    };
-    println!("shipcraft: who reviews PRs?");
-    println!("  RED writes the failing test, GREEN writes the code that makes it pass, and review");
-    println!("  checks the PR by running the code. These are separate agents: the reviewer opens a new session,");
-    println!("  without the context of the author. A different model usually catches more, but the");
-    println!("  same model in another session also works.");
-    println!("  Warning: the review agent sends code to its provider. If the code in this project");
-    println!("  cannot leave this machine, answer off.");
-    print!("  Installed: {}. Which reviewer? (codex, claude, gemini or off) [{default}]: ", installed.join(", "));
-    let _ = std::io::stdout().flush();
-    let mut answer = String::new();
-    let _ = std::io::stdin().lock().read_line(&mut answer);
-    println!();
-    let answer = answer.trim().to_lowercase();
-    let chosen = match answer.as_str() {
-        "" => default.to_string(),
-        "off" => {
-            println!("shipcraft: review off; code is not sent to any provider.");
-            return Ok((None, default.to_string()));
-        }
-        a if AGENTS.contains(&a) => a.to_string(),
-        other => {
-            println!("shipcraft: unknown agent {other}; using {default}.");
-            default.to_string()
-        }
-    };
-    println!("shipcraft: review by {chosen}, on this machine.");
-    Ok((Some(chosen.clone()), chosen))
+/// Review is optional and off by default: init asks nothing and names the
+/// first agent installed, so turning it on is one line.
+fn reviewer() -> String {
+    AGENTS.into_iter().find(|a| on_path(a)).unwrap_or("codex").to_string()
 }
 
 pub fn on_path(name: &str) -> bool {
@@ -279,7 +246,7 @@ fn quoted(s: &str) -> String {
 fn config_text(
     lang: Lang,
     suites: &[(String, String, Profile)],
-    reviewer: &(Option<String>, String),
+    reviewer: &str,
     build: Option<&str>,
 ) -> String {
     let globs = |p: &Profile| {
@@ -299,11 +266,8 @@ fn config_text(
             );
         }
     }
-    let revisao = if reviewer.0.is_some() { "local" } else { "off" };
-    text += &format!(
-        "\n[execution]\n# where each layer runs: local (on this machine), github or off\nci = \"local\"\nreview = \"{revisao}\"\nci_timeout = 1800\n"
-    );
-    text += &format!("\n[roles]\n# the review agent: codex, claude or gemini\nreview = {}\n", quoted(&reviewer.1));
+    text += "\n[execution]\n# where each layer runs: local (on this machine), github or off\n# review is optional: \"local\" has [roles] review check each PR in a new session\nci = \"local\"\nreview = \"off\"\nci_timeout = 1800\n";
+    text += &format!("\n[roles]\n# the review agent: codex, claude or gemini\nreview = {}\n", quoted(reviewer));
     text +=
         "\n[review]\n# seconds; optional project spec included in the brief: spec = \"docs/spec.md\"\ntimeout = 1200\n";
     if let Some(command) = build {
@@ -327,14 +291,14 @@ fn config_text(
     text
 }
 
-/// Item 5.3: marks shipcraft/ci and shipcraft/review as required where GitHub protects
+/// Item 5.3: marks shipcraft/ci as required where GitHub protects
 /// branches. On a plan without protection it says so and goes on.
 fn protect(repo: &Repo) {
     let branch = repo.default_branch();
-    let body = r#"{"required_status_checks":{"strict":false,"contexts":["shipcraft/ci","shipcraft/review"]},"enforce_admins":false,"required_pull_request_reviews":null,"restrictions":null}"#;
+    let body = r#"{"required_status_checks":{"strict":false,"contexts":["shipcraft/ci"]},"enforce_admins":false,"required_pull_request_reviews":null,"restrictions":null}"#;
     let path = format!("repos/{{owner}}/{{repo}}/branches/{branch}/protection");
     match gh::with_input(repo, &["api", "-X", "PUT", &path], body) {
-        Ok(_) => println!("shipcraft: GitHub now requires shipcraft/ci and shipcraft/review to merge into {branch}."),
+        Ok(_) => println!("shipcraft: GitHub now requires shipcraft/ci to merge into {branch}."),
         Err(e) if e.contains("403") || e.contains("Upgrade to GitHub Pro") => {
             println!("shipcraft: this repository has no branch protection on its GitHub plan: `shipcraft merge` is the gate.")
         }
