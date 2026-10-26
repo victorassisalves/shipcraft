@@ -84,9 +84,8 @@ Each command is `shipcraft <command>`. Exit codes, unless the row says otherwise
 | `review --pr <n>` | Reviews any PR in an isolated copy and publishes `shipcraft/review` and a comment. Refuses `pr-from-fork`. |
 | `merge <pr> [--no-review "<reason>"]` | The merge gate (section 5). Refuses `pr-not-open`, `merge-without-ci`, `merge-without-review`, `no-review-without-reason`. |
 | `status` | Prints the layers, review agent, hook state, open locks, and one line with the real branch protection level. |
-| `dashboard [--port <n>]` | Serves the local metrics page (section 8) until Ctrl-C. Refuses `port-invalid`, `port-busy`. |
 
-`init`, `red`, `close` and `dashboard` write no run-log row.
+`init`, `red` and `close` write no run-log row.
 
 ### `init`
 
@@ -257,8 +256,6 @@ Output from a project command that `shipcraft` passes through always ends before
 | `no-git` | Not inside a git repository. |
 | `no-report` | The suite wrote no JUnit report. |
 | `no-review-without-reason` | `--no-review` without a reason. |
-| `port-busy` | The dashboard port, or all default ports, are busy. |
-| `port-invalid` | `--port` is not a number from 1 to 65535. |
 | `pr-from-fork` | The PR comes from a fork. |
 | `pr-not-on-branch` | `pr` run without a working branch. |
 | `pr-not-open` | `merge` on a PR that is not open. |
@@ -294,7 +291,7 @@ Each hook, CI, review and merge run appends one JSON line to `.git/shipcraft/run
 
 Besides the refusal codes, `code` can hold run outcomes that are not refusals: `changes-requested` and `reviewer-no-verdict` (review), `timed-out` (local CI), `no-review` and `escape` (merge), and `error` for a failure.
 
-`shipcraft pr` posts the branch's summary from this file. `shipcraft dashboard` serves a page on `127.0.0.1` only (first free port from 7420 to 7439, or `--port`), refreshed every 10 seconds: runs per layer, refusals by code, hook time (p50, p90), review tokens and open locks. It reads only the run log and `.shipcraft/locks/`, writes nothing and makes no network call.
+`shipcraft pr` posts the branch's summary from this file.
 
 ## 9. Known limits
 
