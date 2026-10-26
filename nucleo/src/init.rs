@@ -1,7 +1,7 @@
 //! `shipcraft init`: writes `.shipcraft.toml`, `.shipcraft/locks/` and the `AGENTS.md` block,
 //! and installs the pre-commit hook. Nothing else is written, in the project or in `.git`: the
-//! GitHub workflow is in `docs/github-ci.md`, for who turns it on (item 27). Review starts off (item 2) and, with `--github`, it marks
-//! shipcraft/ci as required where GitHub protects branches (item 5.3).
+//! GitHub workflow is in `docs/github-ci.md`, for who turns it on (item 27). Review is on when an agent is installed (item 2) and, with `--github`, it marks
+//! the statuses as required where GitHub protects branches (item 5.3).
 //! It decides everything before asking or writing, and undoes its own writes
 //! when one fails (item 15a). Where the lefthook runs the hook, it adds a `shipcraft`
 //! command to the lefthook file instead of installing its own (item 15b), or
@@ -91,11 +91,16 @@ pub fn run(repo: &Repo, lang_flag: Option<&str>, github: bool) -> Result<()> {
         init_tool::notice(tool);
     }
     if github {
-        protect(repo);
+        protect(repo, reviewer.is_some());
     }
-    println!(
-        "shipcraft: review is off. To have {reviewer} review each PR in a separate session, set review = \"local\" in {CONFIG_FILE} [execution] section; the diff goes to its provider."
-    );
+    match &reviewer {
+        Some(agent) => println!(
+            "shipcraft: review by {agent}, in a separate session on this machine; the diff goes to its provider. To turn it off, set review = \"off\" in {CONFIG_FILE} [execution] section."
+        ),
+        None => println!(
+            "shipcraft: no review agent installed (codex, claude or gemini): review stays off. To enable it, install one and set review = \"local\" in {CONFIG_FILE} [execution] section."
+        ),
+    }
     let lefthook = match &hook {
         Hook::Msg(Plan { file, .. }) => format!(", {file}"),
         Hook::Tool(tool) => tool.writes.iter().map(|(file, ..)| format!(", {file}")).collect(),
@@ -216,10 +221,10 @@ fn choose_lang(repo: &Repo, flag: Option<&str>) -> Result<Lang> {
     }
 }
 
-/// Review is optional and off by default: init asks nothing and names the
-/// first agent installed, so turning it on is one line.
-fn reviewer() -> String {
-    AGENTS.into_iter().find(|a| on_path(a)).unwrap_or("codex").to_string()
+/// Review is on by default with the first agent installed, and off when none
+/// is; init asks nothing, and either way the change is one line.
+fn reviewer() -> Option<String> {
+    AGENTS.into_iter().find(|a| on_path(a)).map(str::to_string)
 }
 
 pub fn on_path(name: &str) -> bool {
@@ -240,7 +245,7 @@ fn quoted(s: &str) -> String {
 fn config_text(
     lang: Lang,
     suites: &[(String, String, Profile)],
-    reviewer: &str,
+    reviewer: &Option<String>,
     build: Option<&str>,
 ) -> String {
     let globs = |p: &Profile| {
@@ -260,8 +265,14 @@ fn config_text(
             );
         }
     }
-    text += "\n[execution]\n# where each layer runs: local (on this machine), github or off\n# review is optional: \"local\" has [roles] review check each PR in a new session\nci = \"local\"\nreview = \"off\"\nci_timeout = 1800\n";
-    text += &format!("\n[roles]\n# the review agent: codex, claude or gemini\nreview = {}\n", quoted(reviewer));
+    let review = if reviewer.is_some() { "local" } else { "off" };
+    text += &format!(
+        "\n[execution]\n# where each layer runs: local (on this machine), github or off\nci = \"local\"\nreview = \"{review}\"\nci_timeout = 1800\n"
+    );
+    text += &format!(
+        "\n[roles]\n# the review agent: codex, claude or gemini\nreview = {}\n",
+        quoted(reviewer.as_deref().unwrap_or("codex"))
+    );
     text +=
         "\n[review]\n# seconds; optional project spec included in the brief: spec = \"docs/spec.md\"\ntimeout = 1200\n";
     if let Some(command) = build {
@@ -285,14 +296,19 @@ fn config_text(
     text
 }
 
-/// Item 5.3: marks shipcraft/ci as required where GitHub protects
-/// branches. On a plan without protection it says so and goes on.
-fn protect(repo: &Repo) {
+/// Item 5.3: marks shipcraft/ci, and shipcraft/review when review is on, as
+/// required where GitHub protects branches. On a plan without protection it
+/// says so and goes on.
+fn protect(repo: &Repo, review: bool) {
     let branch = repo.default_branch();
-    let body = r#"{"required_status_checks":{"strict":false,"contexts":["shipcraft/ci"]},"enforce_admins":false,"required_pull_request_reviews":null,"restrictions":null}"#;
+    let contexts = if review { r#"["shipcraft/ci","shipcraft/review"]"# } else { r#"["shipcraft/ci"]"# };
+    let body = format!(
+        r#"{{"required_status_checks":{{"strict":false,"contexts":{contexts}}},"enforce_admins":false,"required_pull_request_reviews":null,"restrictions":null}}"#
+    );
+    let required = if review { "shipcraft/ci and shipcraft/review" } else { "shipcraft/ci" };
     let path = format!("repos/{{owner}}/{{repo}}/branches/{branch}/protection");
-    match gh::with_input(repo, &["api", "-X", "PUT", &path], body) {
-        Ok(_) => println!("shipcraft: GitHub now requires shipcraft/ci to merge into {branch}."),
+    match gh::with_input(repo, &["api", "-X", "PUT", &path], &body) {
+        Ok(_) => println!("shipcraft: GitHub now requires {required} to merge into {branch}."),
         Err(e) if e.contains("403") || e.contains("Upgrade to GitHub Pro") => {
             println!("shipcraft: this repository has no branch protection on its GitHub plan: `shipcraft merge` is the gate.")
         }
@@ -303,15 +319,12 @@ fn protect(repo: &Repo) {
 const AGENTS_FILE: &str = "AGENTS.md";
 const AGENTS_MARK: &str = "<!-- shipcraft -->";
 const AGENTS_BLOCK: &str = "<!-- shipcraft -->
-## Tests first, locked (shipcraft)
-
-This repository uses shipcraft: the test that proves a change is written before the code, and the git hook refuses code that passes by changing the test.
-
-1. **RED:** write the failing test and, if needed, a stub (the signature without the logic). Run `shipcraft red`: it locks the tests. Commit the tests, the stub and the new file in `.shipcraft/locks/` together.
-2. **GREEN:** write the code until the tests pass. Do not change the locked tests: the hook refuses. If a test looks wrong, stop and tell whoever wrote the RED.
-3. The lock closes by itself in the commit where the RED's cases pass.
-4. A change that does not change behavior (docs, a refactor with the tests passing) needs no RED: the commit goes through.
-5. Never use `git commit --no-verify`: `shipcraft ci` repeats every check and refuses the PR.
+## shipcraft: TDD with a lock (required in this repository)
+- Cycle: RED (a failing test) → `shipcraft red` → GREEN (code) → `git commit`. The git hook checks every commit.
+- A behavior change: write the failing test first (and a stub), run `shipcraft red` and commit the test together with the lock `.shipcraft/locks/*.json`; only then implement.
+- Locked tests (listed in the open lock) are the contract: never change them; change the code until they pass. If a test looks wrong, stop and say so.
+- Never use `--no-verify`, never edit or delete `.shipcraft/locks/*`, never touch the hook or `core.hooksPath`.
+- When in doubt, run `shipcraft status`.
 ";
 
 /// Tells agents the workflow where they already look: creates `AGENTS.md`, or

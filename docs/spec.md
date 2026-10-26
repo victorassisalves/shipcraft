@@ -6,7 +6,7 @@ This is the public contract of `shipcraft`: what it guarantees and what each com
 
 **The guarantee.** A test written at RED stays the judge until it passes. The agent that writes the code (the GREEN) cannot make the suite pass by changing, deleting or skipping a locked test, its support files, or the config that says how the suite runs. The git hook checks this on every commit. CI repeats every check, so a commit made with `--no-verify` or an edited hook is caught there.
 
-On top of that, every PR goes through `shipcraft` CI before merge. An executed review by an agent that did not write the code is optional and starts off. Each project chooses where each layer runs. A layer that is off says so in its status description on every PR.
+On top of that, every PR goes through two layers before merge: `shipcraft` CI and an executed review by an agent that did not write the code. Each project chooses where each layer runs. A layer that is off says so in its status description on every PR.
 
 **The threat model** is a good-faith agent that makes mistakes or takes shortcuts. It is not an adversary that rewrites `shipcraft`, forges a lock seal or publishes fake statuses through the GitHub API. Every rule follows one principle: when `shipcraft` cannot prove something about the project, it falls back to the slower or stricter path. A failed inference costs time, never a wrong verdict.
 
@@ -93,7 +93,7 @@ Each command is `shipcraft <command>`. Exit codes, unless the row says otherwise
 
 - **Language:** `pyproject.toml` or `requirements*.txt` is Python (pytest), `package.json` with vitest or jest is Node, `go.mod` is Go (gotestsum); `--lang` overrides. Workspaces (`pnpm-workspace.yaml`, `package.json` `workspaces`, `go.work`) get one `[[suite]]` per package with tests.
 - **Config:** writes `.shipcraft.toml` with the test command, globs, `check` (`tsc --noEmit` or `go vet`), `[execution]`, `[roles]`, `shipcraft_min` and, when it applies, `[build]`. Every `npx` it writes puts `--` before the tool's arguments.
-- **Review:** `init` asks nothing. It writes `review = "off"` and the first agent installed in `[roles] review`, and says how to turn review on and that the diff then goes to the agent's provider.
+- **Review:** `init` asks nothing. With an agent installed it writes `review = "local"` and the first one found in `[roles] review`, and says that the diff goes to that agent's provider and how to turn review off. With none installed, review is `off` and it says how to enable it.
 - **AGENTS.md:** `init` creates `AGENTS.md` with a short block (marked `<!-- shipcraft -->`) telling agents the RED/GREEN workflow, or appends the block once to an existing file. A symlink or a failed write is left alone with a notice; it never fails the init. The block is the text below `AGENTS_BLOCK` in `nucleo/src/init.rs`.
 - **Hook:** there is one route: `shipcraft check --commit-msg` in `commit-msg` and `shipcraft close` in `post-commit`, so the hook sees the index after formatters ran. `init` integrates only when it can prove which configuration runs the hook:
   - plain git: shipcraft's own `.git/hooks/commit-msg` and `.git/hooks/post-commit`;
@@ -101,7 +101,7 @@ Each command is `shipcraft <command>`. Exit codes, unless the row says otherwise
   - husky 9 and the pre-commit framework: the two commands in their files.
 
   Anything `init` cannot prove (another tool's hook, `core.hooksPath` elsewhere, two hook managers, flow-style YAML, symlinks) refuses with `foreign-hook` and says where to add `shipcraft check` by hand. Edge cases are fixed by the acceptance battery (`acceptance/`).
-- **GitHub:** `init` never writes a workflow. With `--github` it marks `shipcraft/ci` as a required check where GitHub offers branch protection.
+- **GitHub:** `init` never writes a workflow. With `--github` it marks `shipcraft/ci` and, when review is on, `shipcraft/review` as required checks where GitHub offers branch protection.
 
 ## 4. Configuration
 
@@ -131,7 +131,7 @@ Each command is `shipcraft <command>`. Exit codes, unless the row says otherwise
 | `[[suite]] filter` | `"shipcraft"` or `"command"` (section 6). | `"shipcraft"` |
 | `[build] command` | Runs once at the root before the first suite (section 6). | none |
 | `[execution] ci` | `local`, `github` or `off`. | `local` |
-| `[execution] review` | `local` or `off`. `github` is reserved and refused (`review-github`). | `off` |
+| `[execution] review` | `local` or `off`. `github` is reserved and refused (`review-github`). | `local` |
 | `[execution] ci_timeout` | Local CI time limit, in seconds. | `1800` |
 | `[roles] review` | The review agent: `codex`, `claude` or `gemini`. | first one installed |
 | `[review] spec` | Path of a project spec given to the reviewer. | none |
@@ -176,7 +176,7 @@ With `ci = "github"` and `review = "local"`, `shipcraft pr` waits for GitHub's `
 
 ### The merge gate
 
-`shipcraft merge <pr>` merges only with `shipcraft/ci` and `shipcraft/review` at `success` on the PR's current HEAD; an off layer is not required. `--no-review "<reason>"` waives the review, never CI, and records the reason in the PR and the run log. Where GitHub offers branch protection, `init --github` makes `shipcraft/ci` required; otherwise `shipcraft merge` is the gate, and `shipcraft status` says so. `shipcraft ci` on the default branch warns, with exit `0`, about each merge that bypassed the gate, and records it as an `escape`.
+`shipcraft merge <pr>` merges only with `shipcraft/ci` and `shipcraft/review` at `success` on the PR's current HEAD; an off layer is not required. `--no-review "<reason>"` waives the review, never CI, and records the reason in the PR and the run log. Where GitHub offers branch protection, `init --github` makes both statuses required; otherwise `shipcraft merge` is the gate, and `shipcraft status` says so. `shipcraft ci` on the default branch warns, with exit `0`, about each merge that bypassed the gate, and records it as an `escape`.
 
 ### Fork PRs
 

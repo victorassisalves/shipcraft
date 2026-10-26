@@ -238,8 +238,8 @@ item30_case() {
       ;;
     v1-30.1-brief-aspas)
       mv packages/api "packages/api d'água"
-      ROOT30="packages/api d'água"; R30="./$ROOT30/"; b30_config; tset execution review '"local"' ;;
-    v1-30.1-brief) R30='./packages//api/'; b30_config; tset execution review '"local"' ;;
+      ROOT30="packages/api d'água"; R30="./$ROOT30/"; b30_config ;;
+    v1-30.1-brief) R30='./packages//api/'; b30_config ;;
   esac
   b30_save
   if [[ "$CASE" = v1-30.1-brief* ]]; then
