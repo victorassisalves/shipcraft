@@ -12,7 +12,7 @@ use crate::lock::{lock_files, Lock};
 /// Whether every path from the merge-base of `base` and `head` to `head` is
 /// a plain docs file that nothing protects. Any doubt (no merge-base, a diff
 /// that does not read, no path) is not docs only, and neither is a head with
-/// an open lock.
+/// an open lock or a suite whose root is not a folder of HEAD.
 pub fn docs_only(repo: &Repo, config: &Config, base: &str, head: &str) -> bool {
     let Some(merge_base) = repo.try_text(&["merge-base", base, head]) else { return false };
     let Ok(raw) = repo.run(&["diff", "-z", "--raw", "--no-renames", &merge_base, head]) else { return false };
@@ -26,7 +26,34 @@ pub fn docs_only(repo: &Repo, config: &Config, base: &str, head: &str) -> bool {
         }
         any = true;
     }
-    any && !open_lock(repo, head)
+    any && !open_lock(repo, head) && roots_exist(repo, config, head)
+}
+
+/// Each suite's `raiz`, without its `.` and empty parts, is a chain of
+/// folders of HEAD's tree, each name equal byte for byte; no link, file,
+/// submodule, missing path, `..` or absolute root. Otherwise shipcraft cannot
+/// tell which `.md` a suite reads as a test. shipcraft resolves no path.
+fn roots_exist(repo: &Repo, config: &Config, head: &str) -> bool {
+    config.suites().iter().all(|suite| {
+        if suite.raiz.starts_with('/') {
+            return false;
+        }
+        let mut tree = format!("{head}^{{tree}}");
+        for part in suite.raiz.split('/').filter(|p| !p.is_empty() && *p != ".") {
+            let Ok(listing) = repo.run(&["ls-tree", "-z", &tree]) else { return false };
+            let listing = String::from_utf8_lossy(&listing);
+            let found = listing.split('\0').find_map(|entry| {
+                let (meta, name) = entry.split_once('\t')?;
+                let mut meta = meta.split(' ');
+                (name == part && meta.nth(1) == Some("tree")).then(|| meta.next().map(str::to_string))?
+            });
+            match found {
+                Some(sha) => tree = sha,
+                None => return false,
+            }
+        }
+        true
+    })
 }
 
 /// A raw diff entry (`:<old mode> <new mode> <sha> <sha> <status>`) of a
