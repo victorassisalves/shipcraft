@@ -94,6 +94,7 @@ Each command is `shipcraft <command>`. Exit codes, unless the row says otherwise
 - **Language:** `pyproject.toml` or `requirements*.txt` is Python (pytest), `package.json` with vitest or jest is Node, `go.mod` is Go (gotestsum); `--lang` overrides. Workspaces (`pnpm-workspace.yaml`, `package.json` `workspaces`, `go.work`) get one `[[suite]]` per package with tests.
 - **Config:** writes `.shipcraft.toml` with the test command, globs, `check` (`tsc --noEmit` or `go vet`), `[execution]`, `[roles]`, `shipcraft_min` and, when it applies, `[build]`. Every `npx` it writes puts `--` before the tool's arguments.
 - **Review:** `init` asks nothing. It writes `review = "off"` and the first agent installed in `[roles] review`, and says how to turn review on and that the diff then goes to the agent's provider.
+- **AGENTS.md:** `init` creates `AGENTS.md` with a short block (marked `<!-- shipcraft -->`) telling agents the RED/GREEN workflow, or appends the block once to an existing file. A symlink or a failed write is left alone with a notice; it never fails the init. The block is the text below `AGENTS_BLOCK` in `nucleo/src/init.rs`.
 - **Hook:** it integrates only when it can prove which configuration runs the hook:
   - plain git: `.git/hooks/pre-commit` runs `shipcraft check`;
   - lefthook: a `shipcraft check` command in `pre-commit` when every other command has an explicit positive `priority`; otherwise the `commit-msg` route;

@@ -106,6 +106,7 @@ core_cases() { # os casos independentes de linguagem; os de fila (item 7) primei
   echo v1-1.1-padrao-local v1-1.1-sem-revisor v1-1.2-revisao-github-recusada v1-1.2-valor-invalido
   echo v1-1.3-base-config-desliga v1-1.3-base-config-liga
   echo v1-2.3-tela-do-init v1-2.3-padrao-primeiro-instalado
+  echo v1-2.5-agents-novo v1-2.5-agents-acrescenta v1-2.5-agents-uma-vez v1-2.5-agents-link
   echo v1-3.1-push-e-pr v1-3.2-ci-local-publica-status v1-3.2-ci-falha-sem-revisao
   echo v1-3.3-revisao-local-status-e-comentario v1-3.4-ci-github-nada-local
   echo v1-3.4-ci-github-espera-success-e-revisa v1-3.4-ci-github-failure-nao-revisa v1-3.4-ci-github-sem-status-nao-revisa
@@ -344,7 +345,7 @@ pr_commit() { # commit_all, ou --no-verify at NV esta setado (config invalida de
 pr_main() {
   must_accept "shipcraft init" cmd shipcraft init
   # Review starts off; these cases exercise it whenever a reviewer is installed.
-  local a; for a in codex claude gemini; do [ ! -x "$CW/bin/$a" ] || { tset execution review '"local"'; break; }; done
+  local a; for a in codex claude gemini; do ! command -v "$a" >/dev/null || { tset execution review '"local"'; break; }; done
   if [ -n "${CFGS:-}" ]; then
     local s k v
     while IFS='|' read -r s k v; do
@@ -1774,6 +1775,45 @@ PY
     chk "[execution] review = off" eq "$(tget execution.review)" off
     pass ;;
 
+  v1-2.5-agents-novo)
+    # init creates AGENTS.md with the shipcraft block when the project has none.
+    EXPECT="AGENTS.md created with the block"
+    v1_start
+    must_accept "shipcraft init" cmd shipcraft init
+    chk "AGENTS.md has the block" grep -q -F '<!-- shipcraft -->' AGENTS.md
+    chk "the block says to run shipcraft red" grep -q -F 'shipcraft red' AGENTS.md
+    chk "init says to commit AGENTS.md" out_has 'ready\. Commit .*AGENTS\.md'
+    pass ;;
+  v1-2.5-agents-acrescenta)
+    # An existing AGENTS.md keeps its text; the block is appended after it.
+    EXPECT="block appended, text kept"
+    v1_start
+    printf '# House rules\nKEEP-MARKER-8a1\n' > AGENTS.md
+    must_accept "shipcraft init" cmd shipcraft init
+    chk "the old text is still first" eq "$(head -n 2 AGENTS.md | tail -n 1)" KEEP-MARKER-8a1
+    chk "the block was appended" grep -q -F '<!-- shipcraft -->' AGENTS.md
+    pass ;;
+  v1-2.5-agents-uma-vez)
+    # A second init (new clone, config removed) does not add the block twice.
+    EXPECT="one block after two inits"
+    v1_start
+    must_accept "first init" cmd shipcraft init
+    rm -f .shipcraft.toml
+    must_accept "second init" cmd shipcraft init
+    chk "exactly one block" eq "$(grep -c -F '<!-- shipcraft -->' AGENTS.md)" 1
+    chk "init says it kept the block" out_has 'already has the shipcraft block'
+    pass ;;
+  v1-2.5-agents-link)
+    # A symlinked AGENTS.md is never written through.
+    EXPECT="symlink untouched"
+    v1_start
+    printf 'outside\n' > "$CW/outside.md"
+    ln -s "$CW/outside.md" AGENTS.md
+    must_accept "shipcraft init" cmd shipcraft init
+    chk "the link target is unchanged" eq "$(cat "$CW/outside.md")" outside
+    chk "AGENTS.md is still a link" test -L AGENTS.md
+    pass ;;
+
   # ======================================================== core: item 3
   v1-3.1-push-e-pr)
     # Item 3, regra 1: shipcraft pr faz push do branch e abre o PR (titulo e corpo dados), ou atualiza o que ja existe.
@@ -2151,13 +2191,13 @@ execution|review|"off"'
     chk "no merge was asked of GitHub" eq "$(nwrites merge)" 0
     pass ;;
   v1-5.3-init-github-marca-obrigatorios)
-    # Item 5, regra 3: onde o GitHub protege branch, shipcraft init --github marca shipcraft/ci e shipcraft/review como obrigatorios.
+    # Item 5, rule 3: where GitHub protects branches, init --github marks shipcraft/ci as required (review starts off).
     EXPECT="required checks written"
     v1_start codex
     remote_setup
     echo none > "$ST/protection"
     must_accept "shipcraft init --github" cmd shipcraft init --github
-    chk "branch protection was written with shipcraft/ci and shipcraft/review" eq "$(H protect-ok "$ST")" OK
+    chk "branch protection was written with shipcraft/ci only" eq "$(H protect-ok "$ST")" OK
     pass ;;
   v1-5.3-init-github-plano-gratis)
     # Item 5, regras 3 e 4: no plano gratis (403) o init --github termina bem e nada fica marcado como obrigatorio.

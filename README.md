@@ -166,7 +166,7 @@ Every rule in Shipcraft has to pay for itself. It ships with the metric that jus
 Agents don't need a plugin, an MCP server or a skill. They find Shipcraft the same way they find every other project constraint:
 
 - `git commit` runs the hook, and refusals say exactly what to do next;
-- a short block in `AGENTS.md` tells agents to run `shipcraft red` after writing tests. In our trials this took agents from 0/4 to 4/4 locking their tests before the first commit.
+- `shipcraft init` writes a short block in `AGENTS.md` that tells agents to run `shipcraft red` after writing tests. In our trials this took agents from 0/4 to 4/4 locking their tests before the first commit.
 
 Give the RED and the GREEN to different sessions. They can be the same model; separate context is what matters.
 
