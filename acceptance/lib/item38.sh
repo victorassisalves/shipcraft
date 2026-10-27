@@ -5,10 +5,123 @@ item38_cases() {
     default-base reviews review-errors reuse waiting waiting-missing daily utc \
     stats corrupt corrupt-last readonly offline red-event red-refusal close-event \
     aborted-commit append-failure pr-locks pr-locks-many many-locks ignored-escape \
-    blank-lines bom crlf bom-crlf nonobject escape-only blank-only default-other; do echo "v1-38.$c"; done
+    blank-lines bom crlf bom-crlf nonobject escape-only blank-only default-other \
+    pr-publication-passed pr-publication-refused ci-config-locks ci-config-locks-many; do echo "v1-38.$c"; done
+}
+i38_attribution_failure() {
+  local c="${CASE#v1-38.}"
+  EXPECT="item 38 failure attribution: $c"
+  v1_start codex
+  CFGS='execution|review|"off"'
+  pr_main
+  git checkout -qb feature/flow38-failure
+  L stub; L spec_test
+  must_accept 'RED for attributed PR' cmd shipcraft red
+  must_accept 'commit attributed RED' commit commit_all 'test: attributed RED'
+  L implement
+  must_accept 'commit attributed GREEN' commit commit_all 'feat: attributed GREEN'
+  case "$c" in
+    pr-publication-refused|ci-config-locks-many)
+      L shout_stub; L shout_test
+      must_accept 'second attributed RED' cmd shipcraft red
+      must_accept 'commit second attributed RED' commit commit_all 'test: second attributed RED'
+      L shout_impl
+      must_accept 'commit second attributed GREEN' commit commit_all 'feat: second attributed GREEN' ;;
+  esac
+  lock_files_head > "$CW/expected-locks"
+  case "$c" in
+    ci-config-locks|ci-config-locks-many)
+      printf 'shipcraft_min = [\n' > .shipcraft.toml
+      git add .shipcraft.toml
+      must_accept 'fixture commits invalid HEAD config' commit git -c core.hooksPath="$CW/no-hooks" commit -qm 'test: invalid PR config'
+      pr_outside feature/flow38-failure
+      cp .git/shipcraft/runs.jsonl "$CW/events-before"
+      run_cmd env -u SHIPCRAFT_PR_LOCKS shipcraft ci --base "$BASE" --pr
+      chk 'invalid HEAD config makes PR CI fail' rc_nonzero
+      chk 'failed CI keeps PR lock attribution before config validation' "$PY" - "$CW/events-before" "$CW/expected-locks" "$CW/ci-event.json" <<'CIFAIL38'
+import json,sys
+from pathlib import Path
+before=Path(sys.argv[1]).read_bytes();after=Path('.git/shipcraft/runs.jsonl').read_bytes()
+assert after.startswith(before), 'CI rewrote recorded history'
+rows=[json.loads(s) for s in after[len(before):].splitlines() if s.strip()]
+assert len(rows)==1 and rows[0]['layer']=='ci', ('expected one failed CI event',rows)
+r=rows[0]
+assert r['result'] in ('refused','error'),r
+expected=sorted(Path(s).stem for s in Path(sys.argv[2]).read_text().splitlines())
+assert expected and sorted(r.get('locks',[]))==expected, ('config validation lost the PR locks',expected,r)
+Path(sys.argv[3]).write_text(json.dumps(r))
+CIFAIL38
+      must_accept 'report reads the refusal even with invalid config' cmd shipcraft report --json
+      chk 'report counts failed CI for every changed lock' "$PY" - "$OUT" "$CW/ci-event.json" <<'CIREPORT38'
+import json,sys
+rows=[json.loads(s) for s in open(sys.argv[1])]
+event=json.load(open(sys.argv[2]))
+locks={r['lock']:r for r in rows if r['kind']=='lock'}
+for lock in event['locks']:
+    r=locks[lock]
+    assert r['ci']['count']==1,(lock,r)
+    if event['result']=='error': assert r['errors']==1,(lock,r)
+    else:
+        assert event['code'] and r['refusals'].get(event['code'])==1,(lock,r)
+        assert r['ci']['refusals'].get(event['code'])==1,(lock,r)
+CIREPORT38
+      pass; return ;;
+    pr-publication-refused)
+      L wrong_impl
+      git add textutil.py
+      must_accept 'fixture commits regressed product for refused CI' commit git -c core.hooksPath="$CW/no-hooks" commit -qm 'test: refused PR CI' ;;
+  esac
+  cp .git/shipcraft/runs.jsonl "$CW/events-before"
+  # Wrap only this case's offline gh stub. Its existing failure switch supplies
+  # the failure; every other gh operation keeps the normal stub behavior.
+  mv "$CB/gh" "$CB/gh-real"
+  "$PY" - "$CB/gh" "$PY" <<'GH38'
+from pathlib import Path
+import sys
+p=Path(sys.argv[1])
+p.write_text('#!'+sys.argv[2]+'\n'+'''import json,os,re,sys
+from pathlib import Path
+args=sys.argv[1:]
+comments=bool(args and args[0]=='api' and any(re.search(r'/issues/\\d+/comments$',a) for a in args))
+post=any(a in ('-f','-F','--input') for a in args) or any(args[i] in ('-X','--method') and args[i+1]=='POST' for i in range(len(args)-1))
+publication=args[:2]==['pr','comment'] or (comments and post)
+env=os.environ.copy()
+if publication:
+    Path(__file__).with_name('publication-failed.json').write_text(json.dumps(args))
+    env['SHIPCRAFT_STUB_FAIL']='1'
+real=Path(__file__).with_name('gh-real')
+os.execve(str(real),[str(real),*args],env)
+''')
+p.chmod(0o755)
+GH38
+  shipcraft_pr
+  chk 'publication failure makes PR command fail' rc_nonzero
+  chk 'summary publication actually reached injected gh failure' test -f "$CB/publication-failed.json"
+  chk 'PR existed before publication failed' "$PY" - "$ST/prs.json" <<'PREXISTS38'
+import json,sys
+assert len(json.load(open(sys.argv[1])))==1, 'PR was not created'
+PREXISTS38
+  chk 'failed PR still records one attributed error event' "$PY" - "$CW/events-before" "$CW/expected-locks" "$c" <<'PRFAIL38'
+import json,sys
+from pathlib import Path
+before=Path(sys.argv[1]).read_bytes();after=Path('.git/shipcraft/runs.jsonl').read_bytes()
+assert after.startswith(before), 'PR rewrote recorded history'
+rows=[json.loads(s) for s in after[len(before):].splitlines() if s.strip()]
+ci=[r for r in rows if r['layer']=='ci']
+outcome='refused' if sys.argv[3]=='pr-publication-refused' else 'passed'
+assert len(ci)==1 and ci[0]['result']==outcome, ('CI did not reach the intended outcome',ci)
+pr=[r for r in rows if r['layer']=='pr']
+assert len(pr)==1, ('failed publication lost or duplicated the PR event',pr)
+expected=sorted(Path(s).stem for s in Path(sys.argv[2]).read_text().splitlines())
+assert expected and sorted(pr[0]['locks'])==expected, (expected,pr)
+assert sorted(ci[0]['locks'])==expected,(expected,ci)
+assert pr[0]['result']=='error', ('publication error was not recorded as error',pr)
+PRFAIL38
+  pass
 }
 item38_case() {
   local c="${CASE#v1-38.}"
+  case "$c" in pr-publication-passed|pr-publication-refused|ci-config-locks|ci-config-locks-many) i38_attribution_failure; return ;; esac
   EXPECT="item 38: $c"
   case "$c" in
     red-event|red-refusal|close-event|aborted-commit|append-failure|pr-locks|pr-locks-many)
