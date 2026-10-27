@@ -752,6 +752,8 @@ if [ "${1:-}" = __case ]; then
   copy_base "$WORK/base/$LP" "$T" || { OBS="harness: copy of the base target failed"; finish FAIL; }
   cd "$T" || exit 1
   if [ "$LP" = python ]; then
+    # Same-size stub/implementation edits can share Python's cached timestamp.
+    export PYTHONDONTWRITEBYTECODE=1
     export VIRTUAL_ENV="$T/.venv"; PATH="$T/.venv/bin:$PATH"; export PATH
   fi
   echo "# $TL $CASE in $T" > "$LOG"
