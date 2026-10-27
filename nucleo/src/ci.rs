@@ -116,7 +116,25 @@ fn passed(repo: &Repo, base: &str, config: &Config) -> Result<()> {
         warn_merges(repo, base, config);
     }
     println!("shipcraft: CI ok.");
+    // Item 44: `ci` publishes no status; the last line says who publishes
+    // `shipcraft/ci`, by the `ci` value of the config the range is judged by.
+    if let Some(line) = who_publishes(&config.execucao.ci) {
+        println!("{line}");
+    }
     Ok(())
+}
+
+/// Item 44: the last line of a `ci` that exits 0, per `[execution] ci`. A
+/// value shipcraft does not know gets no line (its refusal is elsewhere).
+fn who_publishes(ci: &str) -> Option<&'static str> {
+    match ci {
+        "local" => Some("shipcraft: ci publishes no status; shipcraft pr runs CI and publishes shipcraft/ci on HEAD."),
+        "github" => Some("shipcraft: ci publishes no status; the GitHub workflow publishes shipcraft/ci on HEAD."),
+        "off" => {
+            Some("shipcraft: ci publishes no status; with ci = \"off\", shipcraft pr publishes shipcraft/ci as off.")
+        }
+        _ => None,
+    }
 }
 
 /// Item 5.5: a merge into the default branch went through the gate when its
