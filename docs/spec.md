@@ -189,6 +189,8 @@ Fork PRs are refused (`pr-from-fork`): code from outside the project is outside 
 
 Local CI and local review share one queue per machine, across all projects, with at most `[machine] slots` runs at once (default 1; the machine file `$XDG_CONFIG_HOME/shipcraft/config.toml` wins over the project). A waiting run prints its position and what is running. A run that exceeds its timeout (`[review] timeout`, `[execution] ci_timeout`) is stopped, its status becomes `error` and the slot is freed. The hook does not queue.
 
+**Docs-only PRs skip the queue (item 41).** With `[execution] ci = "local"`, `shipcraft pr` applies item 40's rule before it asks for a slot. It uses the same base tip and HEAD that its CI receives. If the PR is docs only, its local CI starts at once: it takes no slot, waits for none and prints no queue position, and `ci_timeout` still applies. If the PR is not docs only, or the rule cannot be applied, the CI queues as before. The review queues as before, docs only or not. Every `pr` row of the run log has `queue_secs`: the whole seconds its local CI waited for a slot (`0` for a docs-only PR, `null` when no local CI ran).
+
 ## 6. Monorepo and runners
 
 ### `[[suite]]`
@@ -284,6 +286,7 @@ Each hook, CI, review and merge run appends one JSON line to `.git/shipcraft/run
 | `reason` | The first refusal line, or the `--no-review` reason. |
 | `product_lines`, `shape_warnings` | On rows from `shipcraft pr`: product lines, and files that got a shape warning (`null` when there is no threshold). |
 | `docs_only` | On `ci` rows: whether the PR was judged docs only (item 40). |
+| `queue_secs` | On `pr` rows: whole seconds the local CI waited for a slot (item 41). |
 | `tokens`, `agent`, `pr`, `diff_sha256` | On `review` rows: tokens used (or `null`), the agent, the PR, and the reuse key. |
 | `escape` | `true` on a merge that skipped the gate. |
 
