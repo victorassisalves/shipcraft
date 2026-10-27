@@ -74,6 +74,8 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>) -> Result<(
     // Item 38: the ci, review and pr rows of this PR carry its locks.
     let locks = medicao::locks_changed(repo, &base_sha, &head);
     medicao::set_pr_locks(&locks);
+    // Item 41: the local CI's wait for a slot; `None` without local CI.
+    let mut queue_secs = None;
     // Item 38: from here the PR and its locks are known, so the `pr` row
     // records how the command ended (passed, refused, or error), whichever
     // later step stops it.
@@ -84,7 +86,7 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>) -> Result<(
         std::env::set_var(forma::AVISOS_ENV, forma.avisos.map_or("null".to_string(), |n| n.to_string()));
 
         let ci_gate = match ci {
-            Camada::Local => local_ci(repo, &config, &branch, &head, &base)?,
+            Camada::Local => local_ci(repo, &config, &branch, &head, &base, &mut queue_secs)?,
             Camada::Github if revisao == Camada::Local => wait_github_ci(repo, &config, &head)?,
             Camada::Github => Gate::Passed,
             Camada::Desligado => {
@@ -139,19 +141,37 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>) -> Result<(
     let mut row = medicao::row(repo, "pr", started, &result);
     row["pr"] = json!(number);
     row["base"] = json!(base);
+    row["queue_secs"] = json!(queue_secs);
     medicao::record(repo, row);
     result
 }
 
 /// Item 3, rule 2: `shipcraft ci --pr` on this machine, through the queue and with
-/// `[execution] ci_timeout`, published as `shipcraft/ci` on HEAD.
-fn local_ci(repo: &Repo, config: &Config, branch: &str, head: &str, base: &str) -> Result<Gate> {
+/// `[execution] ci_timeout`, published as `shipcraft/ci` on HEAD. Item 41: a
+/// docs-only PR (item 40's rule) skips the queue; `queue_secs` gets the wait.
+fn local_ci(
+    repo: &Repo,
+    config: &Config,
+    branch: &str,
+    head: &str,
+    base: &str,
+    queue_secs: &mut Option<u64>,
+) -> Result<Gate> {
     // `--base` is the tip of the base branch as origin has it now: the range
     // is the same as from the merge-base, and the child judges the suite by
     // the base's current config (item 1, rule 3).
     let base_tip = repo.text(&["rev-parse", &format!("origin/{base}")])?;
     let limit = config.execucao.tempo_max_ci;
-    let slot = fila::enter(fila::slots(config), &format!("{} ({branch}, ci)", repo.name()))?;
+    *queue_secs = Some(0);
+    let docs_only = docs::docs_only(repo, config, &base_tip, head);
+    let slot = if docs_only {
+        None
+    } else {
+        let asked = Instant::now();
+        let slot = fila::enter(fila::slots(config), &format!("{} ({branch}, ci)", repo.name()));
+        *queue_secs = Some(asked.elapsed().as_secs());
+        Some(slot?)
+    };
     println!(
         "shipcraft: CI on this machine: shipcraft ci --base origin/{base} ({}, up to {limit} s)",
         short(&base_tip)
@@ -178,7 +198,7 @@ fn local_ci(repo: &Repo, config: &Config, branch: &str, head: &str, base: &str) 
                 repo,
                 json!({"layer": "ci", "secs": medicao::seconds(started), "result": "error",
                        "code": "timed-out", "branch": branch, "commit": head,
-                       "docs_only": docs::docs_only(repo, config, &base_tip, head)}),
+                       "docs_only": docs_only}),
             );
             let why = format!("timed out ({limit} s, [execution] ci_timeout)");
             ("error", format!("on this machine: {why}"), Gate::Stopped("ci-timed-out", format!("CI stopped: {why}")))
