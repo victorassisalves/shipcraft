@@ -19,10 +19,19 @@ pub fn run(repo: &Repo) -> Result<String> {
     suite::build(repo.root(), &config, &format!("; if it fails because the stub is missing, {}", stub_hint(&config)))?;
     let report = match suite::run(repo.root(), false, &config)? {
         Ok(report) => report,
+        // Item 45: a failing check names itself, and says to fix what it reports.
+        Err(suite::Missing { reason, check: Some(check) }) => {
+            return refuse(
+                "no-report",
+                reason,
+                suite::FailedCheck::WHY,
+                format!("{}; then run `shipcraft red` again", check.next()),
+            )
+        }
         Err(missing) => {
             return refuse(
                 "no-report",
-                missing.0,
+                missing.reason,
                 "RED fails on an assertion describing behavior; a compilation or import error proves nothing",
                 format!("{}; then run `shipcraft red` again", stub_hint(&config)),
             )

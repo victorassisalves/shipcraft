@@ -16,8 +16,38 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Which suite left no report, and what its command said, as one line for
-/// the refusal (item 16a.2).
-pub struct Missing(pub String);
+/// the refusal (item 16a.2); `check` when it was the suite's check that
+/// failed (item 45).
+pub struct Missing {
+    pub reason: String,
+    pub check: Option<FailedCheck>,
+}
+
+/// A suite's check that failed: the suite's root as messages show it, and the
+/// check on one line (item 45).
+pub struct FailedCheck {
+    pub root: String,
+    pub command: String,
+}
+
+impl FailedCheck {
+    /// Why a failing check refuses.
+    pub const WHY: &'static str = "a suite is judged only after the project passes its check";
+
+    /// What to do, before any phase-specific tail.
+    pub fn next(&self) -> String {
+        format!(
+            "run `{}` at the suite's root `{}` and fix what it reports (the code or stub, or a missing tool or dependency)",
+            self.command, self.root
+        )
+    }
+}
+
+impl Missing {
+    fn report(reason: String) -> Missing {
+        Missing { reason, check: None }
+    }
+}
 
 pub type Ran<T> = std::result::Result<T, Missing>;
 
@@ -101,7 +131,7 @@ fn run_suites(
         let name = suite.name().to_string();
         // A root that is not a folder runs nothing: no report, a refusal (rule 17).
         if !dir.join(&suite.raiz).is_dir() {
-            return Ok(Err(Missing(format!(
+            return Ok(Err(Missing::report(format!(
                 "suite {name} cannot run: root `{}` is not a directory",
                 suite.shown_root()
             ))));
@@ -112,7 +142,7 @@ fn run_suites(
             eprintln!("shipcraft: checking the project ({label})");
             let ran = shell(check, &dir.join(&suite.raiz), copy, &[])?;
             if !ran.status.success() {
-                return Ok(Err(missing(&name, check, &ran)));
+                return Ok(Err(check_failed(&name, suite.shown_root(), check, &ran)));
             }
         }
         eprintln!("shipcraft: running the suite ({label})");
@@ -142,7 +172,19 @@ fn missing(name: &str, command: &str, ran: &Shell) -> Missing {
         Some(line) => format!("wrote to stderr: {line}"),
         None => format!("{} without writing to stderr", ended(ran.status)),
     };
-    Missing(format!("suite {name} did not write the JUnit report: `{}` {said}", one_line(command)))
+    Missing::report(format!("suite {name} did not write the JUnit report: `{}` {said}", one_line(command)))
+}
+
+/// Item 45: the suite, its check, how it ended, and the first line it wrote
+/// that is not blank, stderr first, then stdout; without one, nothing after
+/// how it ended.
+fn check_failed(name: &str, root: &str, check: &str, ran: &Shell) -> Missing {
+    let command = one_line(check);
+    let mut reason = format!("suite {name}: the check `{command}` failed ({})", ended(ran.status));
+    if let Some(line) = ran.first_err.as_ref().or(ran.first_out.as_ref()) {
+        reason.push_str(&format!(": {line}"));
+    }
+    Missing { reason, check: Some(FailedCheck { root: root.to_string(), command }) }
 }
 
 /// Item 22.1: each list that has an entry in its own file in `tmp`, every
@@ -186,16 +228,17 @@ fn one_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// How a command ran: its status and the first line of its stderr that is
-/// not blank.
+/// How a command ran: its status and the first line of its stderr, and of
+/// its stdout, that is not blank.
 struct Shell {
     status: ExitStatus,
     first_err: Option<String>,
+    first_out: Option<String>,
 }
 
 /// Runs `command` with `sh` in `dir`, its output on stderr; `copy` when `dir`
-/// is a checkout copy; `vars`, the lists of item 22. Its stderr passes
-/// through and its start is kept.
+/// is a checkout copy; `vars`, the lists of item 22. Both streams pass
+/// through and the start of each is kept.
 fn shell(command: &str, dir: &Path, copy: bool, vars: &[(&str, PathBuf)]) -> Result<Shell> {
     let mut sh = Command::new("sh");
     sh.arg("-c").arg(command).current_dir(dir).stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -207,14 +250,15 @@ fn shell(command: &str, dir: &Path, copy: bool, vars: &[(&str, PathBuf)]) -> Res
         }
     }
     let mut child = sh.spawn().map_err(|e| failed(format!("run the suite: {e}")))?;
-    let scan = Arc::new(Mutex::new(FirstLine::default()));
+    let scan_out = Arc::new(Mutex::new(FirstLine::default()));
+    let scan_err = Arc::new(Mutex::new(FirstLine::default()));
     // Both streams pass to shipcraft's stderr; `open` is whether the last byte
     // written there left a line open.
     let open = Arc::new(Mutex::new(false));
     let (done, finished) = mpsc::channel();
     let out = child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>);
     let err = child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>);
-    for (pipe, scan) in [(out, None), (err, Some(Arc::clone(&scan)))] {
+    for (pipe, scan) in [(out, Arc::clone(&scan_out)), (err, Arc::clone(&scan_err))] {
         let Some(mut pipe) = pipe else { continue };
         let (open, done) = (Arc::clone(&open), done.clone());
         thread::spawn(move || {
@@ -224,9 +268,7 @@ fn shell(command: &str, dir: &Path, copy: bool, vars: &[(&str, PathBuf)]) -> Res
                 let _ = io::stderr().write_all(&buf[..n]);
                 *open = buf[n - 1] != b'\n';
                 drop(open);
-                if let Some(scan) = &scan {
-                    scan.lock().unwrap_or_else(|e| e.into_inner()).feed(&buf[..n]);
-                }
+                scan.lock().unwrap_or_else(|e| e.into_inner()).feed(&buf[..n]);
             }
             let _ = done.send(());
         });
@@ -242,8 +284,9 @@ fn shell(command: &str, dir: &Path, copy: bool, vars: &[(&str, PathBuf)]) -> Res
         let _ = io::stderr().write_all(b"\n");
         *open = false;
     }
-    let first_err = scan.lock().unwrap_or_else(|e| e.into_inner()).first();
-    Ok(Shell { status, first_err })
+    let first_err = scan_err.lock().unwrap_or_else(|e| e.into_inner()).first();
+    let first_out = scan_out.lock().unwrap_or_else(|e| e.into_inner()).first();
+    Ok(Shell { status, first_err, first_out })
 }
 
 /// The first line of a stream that is not blank, found as the bytes arrive
