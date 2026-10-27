@@ -69,10 +69,25 @@ def metrics():
     return f.read_bytes() if f.exists() else b''
 
 
+def measured_close(before, closed_locks, hooks=0):
+    after = metrics()
+    assert after.startswith(before), 'closure rewrote the metrics'
+    rows = [json.loads(line) for line in after[len(before):].splitlines() if line.strip()]
+    hook_rows = [r for r in rows if r['layer'] == 'hook']
+    close_rows = [r for r in rows if r['layer'] == 'close']
+    assert len(hook_rows) == hooks, ('unexpected hook rows during closure', rows)
+    assert len(rows) == hooks + len(closed_locks), ('closure added missing or extra metric rows', rows)
+    assert sorted(r['lock'] for r in close_rows) == sorted(Path(f).stem for f in closed_locks), ('expected one close row per closed lock', rows)
+    assert all(r['result'] == 'passed' for r in rows), ('successful closure recorded a failure', rows)
+    assert all(r['commit'] == head() for r in close_rows), ('close row did not name the closing commit', rows)
+
+
 def close():
     before = metrics()
+    old_states = dict(zip(locks, states()))
     p = run('shipcraft', 'close')
-    assert metrics() == before, 'close wrote runs.jsonl'
+    closed_locks = [f for f, now in zip(locks, states()) if old_states[f] == 'open' and now == 'closed']
+    measured_close(before, closed_locks)
     return p.stdout + p.stderr
 
 
@@ -173,10 +188,7 @@ def signed_cycle(case):
         raw = subprocess.check_output(['git', 'cat-file', 'commit', ref])
         assert b'\ngpgsig -----BEGIN SSH SIGNATURE-----' in raw, f'{ref}: commit without an SSH signature (GREEN must sign and the child must keep the configuration)'
         run('git', 'verify-commit', ref)
-    after = metrics()
-    assert after.startswith(before)
-    rows = [json.loads(line) for line in after[len(before):].splitlines() if line.strip()]
-    assert len(rows) == 1 and rows[0]['layer'] == 'hook', 'post-commit added a metric row'
+    measured_close(before, locks, hooks=1)
 
 
 def main(case):
@@ -296,10 +308,12 @@ def main(case):
         os.environ['LEFTHOOK'] = '1'
         install()
         user_parent = head()
+        before_metrics = metrics()
         commit()
         user = git('rev-parse', 'HEAD^')
         assert git('rev-parse', user+'^') == user_parent
         closes(user)
+        measured_close(before_metrics, locks, hooks=1)
         run('shipcraft', 'ci', '--base', git('rev-parse', 'HEAD~3'))
         return
     judge()
