@@ -180,6 +180,8 @@ Whenever a run reaches a suite's `check` (in `red`, and in `ci` on HEAD), the ch
 
 ## 5. Layers and the gate
 
+**Layer values are checked wherever the config is read (item 47).** `[execution] ci` must be `"local"`, `"github"` or `"off"`, and `[execution] review` `"local"` or `"off"`; a missing key takes its default. Any other value, a non-string included, refuses `execution-invalid`, and `review = "github"` refuses `review-github`, in every command that reads the config (the hook, `red`, `close`, `ci`, `pr`, `review`, `merge`, `status`), as `[execution] merge` already does (item 42). Before item 47 only `pr`, `merge` and `status` checked them, so `shipcraft ci` with `ci = "foo"` passed and printed `CI ok.` with no last line (item 44). The check reads the same config the command already judges by (the base's in CI and the gate, HEAD's or the index's in the hook), so a PR that writes a bad value is refused by the hook on that commit and by CI only if its base has it. A commit that changes `.shipcraft.toml` to a bad value is refused as any invalid config is.
+
 ### Where each layer runs
 
 | Value | Meaning |
@@ -291,7 +293,7 @@ Output from a project command that `shipcraft` passes through always ends before
 | `config-changed` | `.shipcraft.toml` changed with a lock open. |
 | `config-invalid` | `.shipcraft.toml` is not a valid config. |
 | `error-before-assertions` | At RED, the suite errored before any assertion (import, collection). |
-| `execution-invalid` | An `[execution]` value `shipcraft` does not know. |
+| `execution-invalid` | An `[execution]` value `shipcraft` does not know (item 47: wherever the config is read). |
 | `foreign-hook` | `init` cannot prove which hook runs, or another tool owns it. |
 | `lang-multiple` | `init` found more than one language. |
 | `lang-unknown` | `--lang` names an unsupported language. |
