@@ -3,58 +3,20 @@
 
 use crate::config::{Config, CONFIG_FILE};
 use crate::git::{Repo, Snapshot};
-use crate::junit::Outcome;
-use crate::lock::{lock_files, new_digest, new_lock_path, Lock};
+use crate::junit::{Outcome, Report};
+use crate::lock::{lock_files, new_digest, new_lock_path, Lock, LOCK_DIR};
 use crate::refusal::{failed, refuse, short_list, Result};
 use crate::suite;
 use std::collections::BTreeMap;
 use std::fs;
+use std::path::Path;
 
 /// The path of the lock written.
 pub fn run(repo: &Repo) -> Result<String> {
     let config = Config::load(repo)?;
     refuse_if_a_lock_is_open(repo)?;
-
-    // The RED judges its own tree: the build runs there (item 16a).
-    suite::build(repo.root(), &config, &format!("; if it fails because the stub is missing, {}", stub_hint(&config)))?;
-    let report = match suite::run(repo.root(), false, &config)? {
-        Ok(report) => report,
-        // Item 45: a failing check names itself, and says to fix what it reports.
-        Err(suite::Missing { reason, check: Some(check) }) => {
-            return refuse(
-                "no-report",
-                reason,
-                suite::FailedCheck::WHY,
-                format!("{}; then run `shipcraft red` again", check.next()),
-            )
-        }
-        Err(missing) => {
-            return refuse(
-                "no-report",
-                missing.reason,
-                "RED fails on an assertion describing behavior; a compilation or import error proves nothing",
-                format!("{}; then run `shipcraft red` again", stub_hint(&config)),
-            )
-        }
-    };
-    let errors = report.cases_with(Outcome::Error);
-    if !errors.is_empty() {
-        return refuse(
-            "error-before-assertions",
-            format!("the suite errored before assertions in: {}", short_list(&errors)),
-            "RED fails on an assertion describing behavior; a collection or import error proves nothing",
-            format!("{}; then run `shipcraft red` again", stub_hint(&config)),
-        );
-    }
-    let failing = report.cases_with(Outcome::Failed);
-    if failing.is_empty() {
-        return refuse(
-            "red-already-passes",
-            format!("the suite passed ({} case(s)): there is no RED", report.cases_run().len()),
-            "a test that already passes without the implementation specifies nothing new",
-            "write a test that fails on the missing behavior and run `shipcraft red` again",
-        );
-    }
+    let report = red_report(repo, &config, "shipcraft red")?;
+    let failing = failing_at_red(&report, "shipcraft red")?;
 
     let files = locked_files(repo, &config)?;
     refuse_a_suite_without_tests(repo, &config, &files, &failing)?;
@@ -75,6 +37,173 @@ pub fn run(repo: &Repo) -> Result<String> {
     );
     println!("shipcraft: commit the lock with the tests; the hook checks the RED commit.");
     Ok(path)
+}
+
+/// Item 46: `red --redo` rewrites the open lock HEAD holds, in place, as the
+/// lock `red` would write for this tree; it keeps every case of the old one.
+/// `path` is HEAD's lock as soon as it is known, for the run log row.
+pub fn redo(repo: &Repo, path: &mut Option<String>) -> Result<()> {
+    let config = Config::load(repo)?;
+    let (lock_path, old) = head_lock(repo, path)?;
+    let report = red_report(repo, &config, "shipcraft red --redo")?;
+    let run = report.cases_run();
+    let dropped: Vec<&String> = old.cases.iter().filter(|case| !run.contains(case)).collect();
+    if !dropped.is_empty() {
+        return refuse(
+            "redo-drops-case",
+            format!("the suite no longer has case(s) of lock {lock_path}: {}", short_list(&dropped)),
+            "a redo repairs the RED's tests and keeps its contract: every case it locked stays locked",
+            "keep every locked case in the suite and run `shipcraft red --redo` again; a repair that drops or renames a case means rewriting the branch's history",
+        );
+    }
+    let failing = failing_at_red(&report, "shipcraft red --redo")?;
+    let files = locked_files(repo, &config)?;
+    refuse_a_suite_without_tests(repo, &config, &files, &failing)?;
+    let lock = Lock::open(files, run, failing);
+
+    let full_path = repo.path(&lock_path);
+    let in_tree = fs::read(&full_path).ok().and_then(|bytes| Lock::parse(&bytes));
+    if lock == old && in_tree.as_ref() == Some(&old) {
+        println!("shipcraft: RED unchanged: lock {lock_path} already reads the same; nothing written.");
+        return Ok(());
+    }
+    replace(&full_path, &lock_path, &lock.to_json())?;
+
+    let minus = |a: &[String], b: &[String]| a.iter().filter(|case| !b.contains(case)).cloned().collect::<Vec<_>>();
+    let list = |cases: Vec<String>| if cases.is_empty() { "none".to_string() } else { cases.join(", ") };
+    println!(
+        "shipcraft: RED redone at {lock_path}: {} file(s), {} case(s), {} failing: {}",
+        lock.files.len(),
+        lock.cases.len(),
+        lock.failing_at_red.len(),
+        short_list(&lock.failing_at_red)
+    );
+    println!("shipcraft: cases added: {}", list(minus(&lock.cases, &old.cases)));
+    println!("shipcraft: cases no longer failing at RED: {}", list(minus(&old.failing_at_red, &lock.failing_at_red)));
+    println!("shipcraft: cases newly failing at RED: {}", list(minus(&lock.failing_at_red, &old.failing_at_red)));
+    println!("shipcraft: commit the lock with the repaired tests, and nothing else; the hook checks the redo commit.");
+    Ok(())
+}
+
+/// Item 46: the one open lock HEAD holds, read as today (a broken seal is
+/// `lock-edited`, an unknown format `lock-format`).
+fn head_lock(repo: &Repo, path: &mut Option<String>) -> Result<(String, Lock)> {
+    let head = match repo.head()? {
+        Some(head) => Snapshot::Commit(head),
+        None => return without_lock(),
+    };
+    let mut open = Vec::new();
+    for file in repo.list(&head, LOCK_DIR)?.into_iter().filter(|p| p.ends_with(".json")) {
+        let bytes = repo.read(&head, &file)?.unwrap_or_default();
+        if Lock::parse(&bytes).is_none_or(|lock| lock.is_open()) {
+            open.push(file);
+        }
+    }
+    // With several, the row names one `red` wrote (its file name), else the first.
+    open.sort_by_key(|file| !written_by_red(file));
+    let Some(first) = open.first() else { return without_lock() };
+    *path = Some(first.clone());
+    if open.len() > 1 {
+        return refuse(
+            "lock-open",
+            format!("HEAD holds {} open locks: {}", open.len(), short_list(&open)),
+            "a redo rewrites the one open lock of the branch's cycle; with more than one, it cannot tell which",
+            "finish or remove the extra cycle so HEAD holds one open lock, then run `shipcraft red --redo` again",
+        );
+    }
+    let bytes = lock_files(repo, &head)?.remove(first.as_str()).unwrap_or_default();
+    match Lock::parse(&bytes) {
+        Some(lock) => Ok((first.clone(), lock)),
+        None => refuse(
+            "lock-edited",
+            format!("lock {first} was edited outside shipcraft {}", head.describe()),
+            "only shipcraft changes the lock: `shipcraft red` opens it and the green commit closes it; editing it manually silently changes the contract",
+            "restore the lock as shipcraft left it; it closes automatically in the commit where locked cases pass",
+        ),
+    }
+}
+
+fn without_lock<T>() -> Result<T> {
+    refuse(
+        "redo-without-lock",
+        "HEAD holds no open lock: there is no committed RED to redo",
+        "a redo rewrites the RED commit's lock in a commit of its own; a RED not yet committed needs no redo",
+        "for an uncommitted RED, delete its lock file and run `shipcraft red` again; otherwise commit the RED first",
+    )
+}
+
+/// A lock file name `new_lock_path` writes: 12 lowercase hex characters.
+fn written_by_red(path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or_default().strip_suffix(".json").unwrap_or_default();
+    name.len() == 12 && name.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// Writes a temporary file next to the lock and renames it over the lock, so
+/// a failed write leaves the old bytes.
+fn replace(full_path: &Path, lock_path: &str, json: &str) -> Result<()> {
+    let temp = full_path.with_extension(format!("redo-{}.tmp", std::process::id()));
+    let written = fs::write(&temp, json).and_then(|()| fs::rename(&temp, full_path));
+    if let Err(e) = written {
+        let _ = fs::remove_file(&temp);
+        return refuse(
+            "redo-write-failed",
+            format!("could not replace lock {lock_path}: {e}"),
+            "the lock is replaced whole or not at all, so the old lock stays as it was",
+            format!("make {LOCK_DIR} writable and run `shipcraft red --redo` again"),
+        );
+    }
+    Ok(())
+}
+
+/// The suite's report at RED: the build, every suite's check, every suite;
+/// refuses no report and errors before assertions. `again` is the command to rerun.
+fn red_report(repo: &Repo, config: &Config, again: &str) -> Result<Report> {
+    // The RED judges its own tree: the build runs there (item 16a).
+    suite::build(repo.root(), config, &format!("; if it fails because the stub is missing, {}", stub_hint(config)))?;
+    let report = match suite::run(repo.root(), false, config)? {
+        Ok(report) => report,
+        // Item 45: a failing check names itself, and says to fix what it reports.
+        Err(suite::Missing { reason, check: Some(check) }) => {
+            return refuse(
+                "no-report",
+                reason,
+                suite::FailedCheck::WHY,
+                format!("{}; then run `{again}` again", check.next()),
+            )
+        }
+        Err(missing) => {
+            return refuse(
+                "no-report",
+                missing.reason,
+                "RED fails on an assertion describing behavior; a compilation or import error proves nothing",
+                format!("{}; then run `{again}` again", stub_hint(config)),
+            )
+        }
+    };
+    let errors = report.cases_with(Outcome::Error);
+    if !errors.is_empty() {
+        return refuse(
+            "error-before-assertions",
+            format!("the suite errored before assertions in: {}", short_list(&errors)),
+            "RED fails on an assertion describing behavior; a collection or import error proves nothing",
+            format!("{}; then run `{again}` again", stub_hint(config)),
+        );
+    }
+    Ok(report)
+}
+
+/// The cases failing at RED; none is `red-already-passes`.
+fn failing_at_red(report: &Report, again: &str) -> Result<Vec<String>> {
+    let failing = report.cases_with(Outcome::Failed);
+    if failing.is_empty() {
+        return refuse(
+            "red-already-passes",
+            format!("the suite passed ({} case(s)): there is no RED", report.cases_run().len()),
+            "a test that already passes without the implementation specifies nothing new",
+            format!("write a test that fails on the missing behavior and run `{again}` again"),
+        );
+    }
+    Ok(failing)
 }
 
 fn stub_hint(config: &Config) -> &'static str {

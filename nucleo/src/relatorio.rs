@@ -131,7 +131,12 @@ impl Report {
 }
 
 fn lock_row(id: &str, rows: &[&Row]) -> (Value, Option<Merged>) {
-    let passed = |layer: &str| first(rows.iter().copied().filter(|r| str_of(r, "layer") == layer && is(r, "passed")));
+    // Item 46: a redo is not the RED that opened the cycle; `redos` counts them.
+    let redo = |r: &Row| r.get("redo") == Some(&Value::Bool(true));
+    let passed = |layer: &str| {
+        first(rows.iter().copied().filter(|r| str_of(r, "layer") == layer && is(r, "passed") && !redo(r)))
+    };
+    let redos = rows.iter().filter(|r| str_of(r, "layer") == "red" && is(r, "passed") && redo(r)).count();
     let red = passed("red");
     let close = passed("close");
     // A merge counts only into the default branch.
@@ -169,7 +174,7 @@ fn lock_row(id: &str, rows: &[&Row]) -> (Value, Option<Merged>) {
         "red_to_close": span(red, close).map(num), "close_to_merge": span(close, merge).map(num),
         "red_to_merge": span(red, merge).map(num), "waiting": waiting.map(num), "unobserved": unobserved,
         "reviews": {"passed": count("passed"), "refused": count("refused"), "error": count("error")},
-        "first_review_approved": first_approved, "refusals": refusals, "errors": errors,
+        "first_review_approved": first_approved, "redos": redos, "refusals": refusals, "errors": errors,
         "hook": of("hook"), "ci": of("ci"),
     });
     let merged = merge.map(|m| Merged { day: day(m), red_to_merge: span(red, merge), waiting, first_approved });
@@ -292,14 +297,14 @@ fn text(lines: &[Value]) -> String {
                     .as_array()
                     .map(|u| u.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", "));
                 out += &format!(
-                    "lock {}: {}; red at {}, close at {}, merge at {}; red to close {}, close to merge {}, red to merge {}; waiting {}; reviews passed {}, refused {}, error {}, first approved {}; refusals {}, errors {}; hook {}; ci {}{}\n",
+                    "lock {}: {}; red at {}, close at {}, merge at {}; red to close {}, close to merge {}, red to merge {}; waiting {}; reviews passed {}, refused {}, error {}, first approved {}; redos {}; refusals {}, errors {}; hook {}; ci {}{}\n",
                     line["lock"].as_str().unwrap_or_default(),
                     line["state"].as_str().unwrap_or_default(),
                     show(&line["red_at"]), show(&line["close_at"]), show(&line["merge_at"]),
                     secs(&line["red_to_close"]), secs(&line["close_to_merge"]), secs(&line["red_to_merge"]),
                     secs(&line["waiting"]),
                     line["reviews"]["passed"], line["reviews"]["refused"], line["reviews"]["error"],
-                    show(&line["first_review_approved"]), line["refusals"], line["errors"],
+                    show(&line["first_review_approved"]), line["redos"], line["refusals"], line["errors"],
                     stat(&line["hook"]), stat(&line["ci"]),
                     match unobserved.as_deref() {
                         Some("") | None => String::new(),

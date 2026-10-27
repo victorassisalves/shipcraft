@@ -8,8 +8,8 @@
 
 use crate::config::{Camada, Config};
 use crate::contract::{
-    arrive_closed, bindings, check_files, check_lefthook, judge_locks, judge_locks_admitting, judge_suite, no_report,
-    Change, Scope, Verdict,
+    arrive_closed, bindings, changed_paths, check_files, check_lefthook, judge_locks, judge_locks_admitting,
+    judge_suite, no_report, Change, Scope, Verdict,
 };
 use crate::docs;
 use crate::gh;
@@ -43,7 +43,7 @@ pub fn run(repo: &Repo, base: &str, pr: bool, docs_only: &mut bool) -> Result<()
 
     // How each commit changed the locks; with an empty range, HEAD's locks as they are.
     let head_locks = lock_files(repo, &head)?;
-    let mut head_changes = judge_locks(std::slice::from_ref(&head_locks), &head_locks, &head.describe(), false)?;
+    let mut head_changes = judge_locks(std::slice::from_ref(&head_locks), &head_locks, &head.describe(), false, None)?;
     let on_default = repo.branch() == repo.default_branch();
     for commit in &commits {
         let snapshot = Snapshot::Commit(commit.clone());
@@ -54,7 +54,12 @@ pub fn run(repo: &Repo, base: &str, pr: bool, docs_only: &mut bool) -> Result<()
         // admitted only when GitHub shows the commit is a squash of a PR whose
         // head had every required status in success.
         let admit = on_default && arrive_closed(&locks, &now) && squash_proved(repo, commit, &required(&config));
-        let changes = judge_locks_admitting(&locks, &now, &snapshot.describe(), false, admit)?;
+        // Item 46: a redo commit is judged by the paths it changes against its one parent.
+        let changed = || match parents.as_slice() {
+            [Snapshot::Commit(parent)] => changed_paths(repo, parent, &snapshot),
+            _ => Ok(Vec::new()),
+        };
+        let changes = judge_locks_admitting(&locks, &now, &snapshot.describe(), false, admit, Some(&changed))?;
         for (path, change, lock) in bindings(&changes) {
             check_files(repo, &snapshot, path, lock)?;
             // 15c.4: a lefthook change in a commit (made with --no-verify) is the CI's.

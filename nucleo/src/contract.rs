@@ -2,7 +2,7 @@
 //! hook (`shipcraft check`) and the CI (`shipcraft ci`).
 
 use crate::config::CONFIG_FILE;
-use crate::git::{Repo, Snapshot};
+use crate::git::{text, Repo, Snapshot};
 use crate::init::LEFTHOOK_FILES;
 use crate::init_tool::{HUSKY, PRE_COMMIT_CONFIG};
 use crate::junit::{Outcome, Report};
@@ -54,11 +54,21 @@ pub fn bindings(changes: &[(String, Change)]) -> impl Iterator<Item = (&str, &Ch
     changes.iter().filter_map(|(path, change)| change.binding().map(|lock| (path.as_str(), change, lock)))
 }
 
+/// Item 46: the paths a commit with one parent changes, asked for only when a
+/// lock goes from open to open (a redo commit); None for a merge.
+pub type Changed<'a> = Option<&'a dyn Fn() -> Result<Vec<String>>>;
+
 /// Judges every lock file of `now` against the same file in `parents`.
 /// Refuses a deleted open lock and any lock not written by shipcraft. In the hook
 /// (`hook`), `parents` is HEAD alone.
-pub fn judge_locks(parents: &[LockFiles], now: &LockFiles, place: &str, hook: bool) -> Result<Vec<(String, Change)>> {
-    judge_locks_admitting(parents, now, place, hook, false)
+pub fn judge_locks(
+    parents: &[LockFiles],
+    now: &LockFiles,
+    place: &str,
+    hook: bool,
+    changed: Changed,
+) -> Result<Vec<(String, Change)>> {
+    judge_locks_admitting(parents, now, place, hook, false, changed)
 }
 
 /// As `judge_locks`; with `admit_closed`, a new lock that arrives already
@@ -69,12 +79,27 @@ pub fn judge_locks_admitting(
     place: &str,
     hook: bool,
     admit_closed: bool,
+    changed: Changed,
 ) -> Result<Vec<(String, Change)>> {
+    // A merge never counts as a redo: a lock it carries equals a parent's.
+    let changed = changed.filter(|_| parents.len() == 1);
     let paths: BTreeSet<&String> = parents.iter().flat_map(|locks| locks.keys()).chain(now.keys()).collect();
     paths
         .into_iter()
-        .map(|path| Ok((path.clone(), judge(path, parents, now.get(path), place, hook, admit_closed)?)))
+        .map(|path| Ok((path.clone(), judge(path, parents, now.get(path), place, hook, admit_closed, changed)?)))
         .collect()
+}
+
+/// Item 46: the paths `snapshot` changes against `parent`, both sides of a
+/// rename, mode and type changes included.
+pub fn changed_paths(repo: &Repo, parent: &str, snapshot: &Snapshot) -> Result<Vec<String>> {
+    let out = match snapshot {
+        Snapshot::Commit(commit) => {
+            repo.run(&["diff-tree", "-r", "--name-only", "--no-renames", "-z", parent, commit])?
+        }
+        _ => repo.run(&["diff-index", "--cached", "--name-only", "--no-renames", "-z", parent])?,
+    };
+    Ok(out.split(|b| *b == 0).filter(|p| !p.is_empty()).map(text).collect())
 }
 
 /// Item 42: the locks of `now` that no parent has and that arrive closed.
@@ -91,6 +116,7 @@ fn judge(
     place: &str,
     hook: bool,
     admit_closed: bool,
+    changed: Changed,
 ) -> Result<Change> {
     let before: Vec<&Vec<u8>> = parents.iter().filter_map(|locks| locks.get(path)).collect();
     let how = restore(RESTORE_LOCK, path, hook && !before.is_empty());
@@ -126,6 +152,12 @@ fn judge(
     if before.is_empty() && admit_closed {
         return Ok(Change::Kept(lock));
     }
+    // Item 46: an open lock rewritten as another open lock in a commit with
+    // one parent is a redo commit; once its paths pass, it is judged as a RED.
+    let open_parent = before.iter().filter_map(|bytes| Lock::parse(bytes)).find(Lock::is_open);
+    if let (Some(changed), Some(old), true) = (changed, &open_parent, lock.is_open()) {
+        return redo(path, old, lock, changed()?, place);
+    }
     let closes_a_parent =
         before.iter().filter_map(|bytes| Lock::parse(bytes)).any(|old| old.is_open() && old.closed() == lock);
     if closes_a_parent {
@@ -133,6 +165,45 @@ fn judge(
     } else {
         edited()
     }
+}
+
+/// Item 46: a redo commit keeps every case of the parent's lock and changes
+/// only the lock and files one of the two locks protects, never the config nor
+/// a hook integration file.
+fn redo(path: &str, old: &Lock, lock: Lock, changed: Vec<String>, place: &str) -> Result<Change> {
+    let dropped: Vec<&String> = old.cases.iter().filter(|case| !lock.cases.contains(case)).collect();
+    if !dropped.is_empty() {
+        return refuse(
+            "redo-drops-case",
+            format!("the redo of lock {path} {place} drops case(s) of the open lock: {}", short_list(&dropped)),
+            "a redo repairs the RED's tests and keeps its contract: every case it locked stays locked",
+            "keep every case of the open lock and rewrite the lock with `shipcraft red --redo`; a repair that drops or renames a case means rewriting the branch's history",
+        );
+    }
+    let hooks: Vec<String> = hook_files().collect();
+    let mixed: Vec<&String> = changed
+        .iter()
+        .filter(|file| {
+            let protected = file.as_str() == path || old.files.contains_key(*file) || lock.files.contains_key(*file);
+            !protected || file.as_str() == CONFIG_FILE || hooks.contains(file)
+        })
+        .collect();
+    if !mixed.is_empty() {
+        return refuse(
+            "redo-mixed",
+            format!("the redo of lock {path} {place} also changes: {}", short_list(&mixed)),
+            "a redo commit repairs only the RED's tests: product code, the config or a hook integration file in it would change the contract unjudged",
+            "commit only the repaired tests and the lock `shipcraft red --redo` wrote; make the other changes in a commit of their own",
+        );
+    }
+    Ok(Change::Opened(lock))
+}
+
+/// The hook integration files (items 15c.2, 15c.6 and 25.4): the lefthook
+/// file and its local variants, the husky's and the pre-commit's.
+fn hook_files() -> impl Iterator<Item = String> {
+    let names = LEFTHOOK_FILES.iter().flat_map(|f| [f.to_string(), f.replacen("lefthook", "lefthook-local", 1)]);
+    names.chain(HUSKY.map(|(f, _)| f.to_string())).chain([PRE_COMMIT_CONFIG.to_string()])
 }
 
 /// Rule 4, files: every file the lock holds is in the snapshot, unchanged.
@@ -173,9 +244,7 @@ pub fn check_files(repo: &Repo, snapshot: &Snapshot, lock_path: &str, lock: &Loc
 /// removing one is refused, as for `.shipcraft.toml`: it decides what the hook runs.
 /// So are the husky's and the pre-commit's files of the integration (25.4).
 pub fn check_lefthook(repo: &Repo, parents: &[Snapshot], snapshot: &Snapshot, lock_path: &str) -> Result<()> {
-    let names = LEFTHOOK_FILES.iter().flat_map(|f| [f.to_string(), f.replacen("lefthook", "lefthook-local", 1)]);
-    let names = names.chain(HUSKY.map(|(f, _)| f.to_string())).chain([PRE_COMMIT_CONFIG.to_string()]);
-    for file in names {
+    for file in hook_files() {
         let now = repo.read(snapshot, &file)?;
         let before = parents.iter().map(|p| repo.read(p, &file)).collect::<Result<Vec<_>>>()?;
         if before.contains(&now) {

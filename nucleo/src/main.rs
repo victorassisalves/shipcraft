@@ -40,7 +40,7 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 const USAGE: &str =
-    "usage: shipcraft --version | shipcraft init [--lang python|node|go] [--github] | shipcraft red | shipcraft check [--commit-msg <file>] | shipcraft close
+    "usage: shipcraft --version | shipcraft init [--lang python|node|go] [--github] | shipcraft red [--redo] | shipcraft check [--commit-msg <file>] | shipcraft close
      | shipcraft ci --base <ref> [--pr]
      | shipcraft pr [--title <t>] [--body <file>] | shipcraft review [--pr <n>]
      | shipcraft merge <pr> [--no-review \"<reason>\"] | shipcraft status | shipcraft report [--json]";
@@ -91,6 +91,20 @@ fn run(args: &[&str]) -> Result<()> {
             }
             medicao::record(&repo, row);
             result.map(drop)
+        }
+        ["red", "--redo"] => {
+            // Item 46: every redo is a `red` row with `redo: true` and HEAD's lock id.
+            let started = Instant::now();
+            let repo = Repo::open()?;
+            let mut path = None;
+            let result = red::redo(&repo, &mut path);
+            let mut row = medicao::row(&repo, "red", started, &result);
+            row["redo"] = true.into();
+            if let Some(path) = &path {
+                row["lock"] = medicao::lock_id(path).into();
+            }
+            medicao::record(&repo, row);
+            result
         }
         ["check"] => measured("hook", |repo, _| check::run(repo, false)),
         // The git hook passes the message file, which is ignored.
