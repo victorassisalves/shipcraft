@@ -16,7 +16,7 @@
 
 use crate::config::{self, Config, Filtra, CONFIG_FILE};
 use crate::contract::{
-    bindings, check_files, check_lefthook, judge_locks, judge_suite, no_report, Change, Scope, Verdict,
+    bindings, changed_paths, check_files, check_lefthook, judge_locks, judge_suite, no_report, Change, Scope, Verdict,
 };
 use crate::git::{text, Repo, Snapshot};
 use crate::lock::{lock_files, Lock, LockFiles};
@@ -55,7 +55,12 @@ pub fn run(repo: &Repo, commit_msg: bool) -> Result<()> {
         parent_locks.push(LockFiles::new());
     }
     let staged_locks = lock_files(repo, &Snapshot::Index)?;
-    let changes = judge_locks(&parent_locks, &staged_locks, "in the pending commit", true)?;
+    // Item 46: a redo commit is judged by the paths it changes against HEAD.
+    let changed = || match parents.first() {
+        Some(Snapshot::Commit(head)) => changed_paths(repo, head, &Snapshot::Index),
+        _ => Ok(Vec::new()),
+    };
+    let changes = judge_locks(&parent_locks, &staged_locks, "in the pending commit", true, Some(&changed))?;
 
     let binding: Vec<_> = bindings(&changes).collect();
     if binding.is_empty() {

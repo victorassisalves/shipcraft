@@ -44,10 +44,22 @@ A commit is refused if:
 - a hook integration file changed (`hook-config-changed`: lefthook config, `.pre-commit-config.yaml`, `.husky/commit-msg`, `.husky/post-commit`);
 - a locked case is missing from the report (`case-missing`) or was skipped (`case-skipped`);
 - a case the hook ran fails, even one that passed at RED (`case-broke`): a known failure is never ignored;
-- the lock was deleted (`lock-deleted`) or edited outside `shipcraft` (`lock-edited`);
+- the lock was deleted (`lock-deleted`) or edited outside `shipcraft` (`lock-edited`), except a redo commit (item 46);
 - the lock arrives `closed` while locked cases still fail (`lock-closed-red`).
 
 Intermediate commits with the suite still red are accepted. When it is safe, the `Next:` line of a lock refusal gives the exact `git restore` command.
+
+### Redoing the RED (item 46)
+
+When a locked test is itself wrong, no GREEN can pass it. In draken-platform a locked case set up its fixture with an `update` that the database's own check refused, before any product code ran; the hook refused the one-line fix (`test-changed`), and the only way out was to drop the RED commit and rewrite the pushed branch. `shipcraft red --redo` fixes the RED in a commit of its own instead.
+
+- **Which lock.** The lock HEAD holds open. With none, `--redo` refuses `redo-without-lock` (an uncommitted RED needs no redo: delete its lock file and run `red` again); with two or more, `lock-open`. HEAD's lock is read as today: if it cannot be parsed, its seal is broken or its format is unknown, the refusal is today's (`lock-edited`, `lock-format`).
+- **What it runs.** The suite, exactly as `red` runs it on the working tree (build, every suite's `check`, every suite), with the same refusals and their precedence. A project whose other suites do not pass their `check` cannot redo until they do.
+- **What it requires.** Every case of HEAD's lock `cases` is in the new report's cases, by the identities the report reader gives today; otherwise `redo-drops-case`, naming them, checked after the report is read and judged for `error-before-assertions`, and before `red-already-passes`. A repair that renames a case, or that leaves every RED case passing, is not supported: rewrite the branch's history as before. The new lock needs at least one failing case, as `red` does.
+- **What it writes.** It rewrites HEAD's lock file in place (same path, same id) as a new open lock in the current format, exactly what `red` would write for this tree: `files`, `cases` and `failing_at_red` recomputed, sealed. It validates first and replaces the file atomically (a temporary file renamed over it), so a refusal or a failed write leaves the old bytes; a failed write refuses `redo-write-failed`. It prints the lock path and three sorted lists: cases added, cases no longer failing at RED, cases newly failing at RED. If the new lock reads the same as HEAD's, it writes nothing and says so. It does not commit.
+- **The redo commit.** A commit with one parent whose lock file changes from one open lock to another open lock with the same path is a redo commit. It is accepted, by the hook and by CI, when: the new lock is valid (parsed, sealed, value syntax of its format); it keeps every case of the parent's lock; every path the commit changes (both sides of a rename, as `git diff --name-status --no-renames` lists them, mode and type changes included) is the lock itself or a file that the parent's lock or the new lock protects; and none of them is `.shipcraft.toml` or a hook integration file. Otherwise: a dropped case refuses `redo-drops-case`, any other path refuses `redo-mixed` (naming the paths), and anything else refuses `lock-edited` as today. The redo commit is then judged as a commit that opens a lock is judged today: the hook checks the new lock's hashes against the commit and runs its RED cases, which must fail; CI checks the hashes at that commit and runs suites at HEAD only, as it does for every RED commit. Every later commit is judged against the new lock. A merge commit never counts as a redo: a lock it carries must equal one parent's, as today.
+- **Visible.** Each `red --redo` writes its `red` row with `redo: true` (refusals included); the lock id stays, so `shipcraft report` keeps one cycle per lock and adds `redos` to it: the number of successful `red --redo` rows for that lock. A redo commit is a commit of the PR like any other, so the review sees its tests in the PR's diff.
+- **Known limits.** What counts as a test is what the globs say: with globs that also match product code (`**/*.go`), a redo commit can change that code too. A redo may drop a protected support file while keeping every case. A repair that needs a product stub in the same commit is not supported. Redo commits need 2.6 or later wherever they are judged; an older binary refuses them as `lock-edited`, and `init` writes `shipcraft_min = "2.6"`. An existing project raises its minimum only with no lock open.
 
 ### The lock closes by itself
 
@@ -83,7 +95,7 @@ Each command is `shipcraft <command>`. Exit codes, unless the row says otherwise
 | `--version` | Prints `shipcraft <X.Y.Z> (<12-char commit>)`, in any folder. |
 | (no arguments) | Prints usage, exit `0`. |
 | `init [--lang python\|node\|go] [--github]` | Sets up the project (below). |
-| `red` | Runs the suite, requires assertion failures, writes an open lock. Refuses `lock-open`, `red-already-passes`, `error-before-assertions`, `no-report`, `suite-without-tests`, `build-failed`. |
+| `red [--redo]` | Runs the suite, requires assertion failures, writes an open lock; `--redo` rewrites the branch's open lock (item 46). Refuses `lock-open`, `red-already-passes`, `error-before-assertions`, `no-report`, `suite-without-tests`, `build-failed`. |
 | `check [--commit-msg <file>]` | The hook: judges the commit against the open locks and closes them when the RED cases pass. With `--commit-msg` it judges the final index and writes a close mark instead of the lock (`mark-failed` if it cannot). |
 | `close` | The `post-commit` half of the `commit-msg` route: if the mark matches the commit just made, adds one commit that only flips the lock to `closed`. On failure it changes nothing and says to rerun it. Always exits `0`. |
 | `ci --base <ref> [--pr]` | CI (section 2). `--pr` allows the docs-only path (section 5). `ci` publishes no status (item 44). |
@@ -303,6 +315,10 @@ Output from a project command that `shipcraft` passes through always ends before
 | `pr-not-on-branch` | `pr` run without a working branch. |
 | `pr-not-open` | `merge` on a PR that is not open. |
 | `red-already-passes` | The suite passes at RED, so there is nothing to lock. |
+| `redo-drops-case` | A redo would drop a case of the open lock. |
+| `redo-mixed` | A redo commit changes a file neither lock protects, the config or a hook integration file. |
+| `redo-write-failed` | `red --redo` could not write the new lock; the old one is left as it was. |
+| `redo-without-lock` | `red --redo` with no open lock at HEAD. |
 | `review-changes-requested` | The reviewer requested changes. |
 | `review-error` | The reviewer gave no well-formed verdict. |
 | `review-github` | `review = "github"` is reserved and not available. |
