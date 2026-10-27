@@ -175,54 +175,68 @@ fn required(config: &Config) -> Vec<&'static str> {
     }
 }
 
-fn gh_get(repo: &Repo, path: String) -> std::result::Result<serde_json::Value, String> {
-    serde_json::from_str(&gh::run(repo, &["api", &path])?).map_err(|e| e.to_string())
+/// How a PR merged into the default branch stood at the gate (items 5.5 and 42).
+struct PrGate {
+    number: u64,
+    /// Every required status in success at the PR head.
+    statuses: bool,
+    /// Every required status but the review in success at the PR head.
+    ci: bool,
+    /// The PR carries the `shipcraft merge --no-review` comment.
+    waived: bool,
 }
 
-/// The PR (number, head) GitHub reports `commit` as the merge commit of.
-fn merged_pr(repo: &Repo, commit: &str) -> std::result::Result<Option<(u64, String)>, String> {
-    let pulls = gh_get(repo, format!("repos/{{owner}}/{{repo}}/commits/{commit}/pulls"))?;
-    Ok(pulls
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find(|p| p["merge_commit_sha"] == commit)
-        .map(|pr| (pr["number"].as_u64().unwrap_or(0), pr["head"]["sha"].as_str().unwrap_or_default().to_string())))
+impl PrGate {
+    /// The escape check's verdict: the merge went through the gate.
+    fn escaped(&self) -> bool {
+        !self.statuses && !self.waived
+    }
+
+    /// Item 42: a squash proves its closed locks when its statuses are in
+    /// success, or the review was waived while the CI was in success.
+    fn proves_closed_locks(&self) -> bool {
+        self.statuses || (self.waived && self.ci)
+    }
 }
 
-/// Whether `head` has every required status in success.
-fn statuses_ok(repo: &Repo, head: &str, required: &[&str]) -> std::result::Result<bool, String> {
-    let statuses = gh_get(repo, format!("repos/{{owner}}/{{repo}}/commits/{head}/statuses"))?;
+/// The gate standing of the PR GitHub reports `commit` as the merge commit of;
+/// None when no PR merged it.
+fn pr_gate(repo: &Repo, commit: &str, required: &[&str]) -> std::result::Result<Option<PrGate>, String> {
+    let get = |path: String| -> std::result::Result<serde_json::Value, String> {
+        serde_json::from_str(&gh::run(repo, &["api", &path])?).map_err(|e| e.to_string())
+    };
+    let pulls = get(format!("repos/{{owner}}/{{repo}}/commits/{commit}/pulls"))?;
+    let Some(pr) = pulls.as_array().into_iter().flatten().find(|p| p["merge_commit_sha"] == commit) else {
+        return Ok(None);
+    };
+    let number = pr["number"].as_u64().unwrap_or(0);
+    let head = pr["head"]["sha"].as_str().unwrap_or_default();
+    let statuses = get(format!("repos/{{owner}}/{{repo}}/commits/{head}/statuses"))?;
     let latest = |context: &str| {
         statuses.as_array().into_iter().flatten().find(|s| s["context"] == context).and_then(|s| s["state"].as_str())
     };
-    Ok(required.iter().all(|c| latest(c) == Some("success")))
+    let ok = |context: &&str| latest(context) == Some("success");
+    let all = required.iter().all(ok);
+    let ci = required.iter().filter(|c| **c != "shipcraft/review").all(ok);
+    let waived = !all && {
+        let comments = get(format!("repos/{{owner}}/{{repo}}/issues/{number}/comments"))?;
+        comments
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|c| c["body"].as_str().is_some_and(|b| b.contains(crate::merge::SEM_REVISAO_MARK)))
+    };
+    Ok(Some(PrGate { number, statuses: all, ci, waived }))
 }
 
-/// Item 42: `commit` is a PR's merge commit and that PR's head had every
-/// required status in success; false when GitHub cannot be read.
+/// Item 42: `commit` is a PR's merge commit and that PR went through the gate
+/// with its CI in success; false when GitHub cannot be read.
 fn squash_proved(repo: &Repo, commit: &str, required: &[&str]) -> bool {
-    match merged_pr(repo, commit) {
-        Ok(Some((_, head))) => statuses_ok(repo, &head, required).unwrap_or(false),
-        _ => false,
-    }
+    matches!(pr_gate(repo, commit, required), Ok(Some(gate)) if gate.proves_closed_locks())
 }
 
 /// The PR number when the merge skipped the gate; None when it went through
 /// it, or is not a PR merge.
 fn gated(repo: &Repo, merge: &str, required: &[&str]) -> std::result::Result<Option<u64>, String> {
-    let Some((number, head)) = merged_pr(repo, merge)? else {
-        return Ok(None);
-    };
-    if statuses_ok(repo, &head, required)? {
-        return Ok(None);
-    }
-    let get = |path: String| gh_get(repo, path);
-    let comments = get(format!("repos/{{owner}}/{{repo}}/issues/{number}/comments"))?;
-    let exempt = comments
-        .as_array()
-        .into_iter()
-        .flatten()
-        .any(|c| c["body"].as_str().is_some_and(|b| b.contains(crate::merge::SEM_REVISAO_MARK)));
-    Ok(if exempt { None } else { Some(number) })
+    Ok(pr_gate(repo, merge, required)?.filter(PrGate::escaped).map(|gate| gate.number))
 }
