@@ -58,11 +58,40 @@ pub fn bindings(changes: &[(String, Change)]) -> impl Iterator<Item = (&str, &Ch
 /// Refuses a deleted open lock and any lock not written by shipcraft. In the hook
 /// (`hook`), `parents` is HEAD alone.
 pub fn judge_locks(parents: &[LockFiles], now: &LockFiles, place: &str, hook: bool) -> Result<Vec<(String, Change)>> {
-    let paths: BTreeSet<&String> = parents.iter().flat_map(|locks| locks.keys()).chain(now.keys()).collect();
-    paths.into_iter().map(|path| Ok((path.clone(), judge(path, parents, now.get(path), place, hook)?))).collect()
+    judge_locks_admitting(parents, now, place, hook, false)
 }
 
-fn judge(path: &str, parents: &[LockFiles], now: Option<&Vec<u8>>, place: &str, hook: bool) -> Result<Change> {
+/// As `judge_locks`; with `admit_closed`, a new lock that arrives already
+/// closed is kept instead of refused (item 42: a squash the gate proved).
+pub fn judge_locks_admitting(
+    parents: &[LockFiles],
+    now: &LockFiles,
+    place: &str,
+    hook: bool,
+    admit_closed: bool,
+) -> Result<Vec<(String, Change)>> {
+    let paths: BTreeSet<&String> = parents.iter().flat_map(|locks| locks.keys()).chain(now.keys()).collect();
+    paths
+        .into_iter()
+        .map(|path| Ok((path.clone(), judge(path, parents, now.get(path), place, hook, admit_closed)?)))
+        .collect()
+}
+
+/// Item 42: the locks of `now` that no parent has and that arrive closed.
+pub fn arrive_closed(parents: &[LockFiles], now: &LockFiles) -> bool {
+    now.iter().any(|(path, bytes)| {
+        parents.iter().all(|locks| !locks.contains_key(path)) && Lock::parse(bytes).is_some_and(|l| !l.is_open())
+    })
+}
+
+fn judge(
+    path: &str,
+    parents: &[LockFiles],
+    now: Option<&Vec<u8>>,
+    place: &str,
+    hook: bool,
+    admit_closed: bool,
+) -> Result<Change> {
     let before: Vec<&Vec<u8>> = parents.iter().filter_map(|locks| locks.get(path)).collect();
     let how = restore(RESTORE_LOCK, path, hook && !before.is_empty());
     let Some(bytes) = now else {
@@ -91,6 +120,9 @@ fn judge(path: &str, parents: &[LockFiles], now: Option<&Vec<u8>>, place: &str, 
     }
     if before.is_empty() && lock.is_open() {
         return Ok(Change::Opened(lock));
+    }
+    if before.is_empty() && admit_closed {
+        return Ok(Change::Kept(lock));
     }
     let closes_a_parent =
         before.iter().filter_map(|bytes| Lock::parse(bytes)).any(|old| old.is_open() && old.closed() == lock);

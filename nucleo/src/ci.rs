@@ -8,7 +8,8 @@
 
 use crate::config::{Camada, Config};
 use crate::contract::{
-    bindings, check_files, check_lefthook, judge_locks, judge_suite, no_report, Change, Scope, Verdict,
+    arrive_closed, bindings, check_files, check_lefthook, judge_locks, judge_locks_admitting, judge_suite, no_report,
+    Change, Scope, Verdict,
 };
 use crate::docs;
 use crate::gh;
@@ -43,11 +44,17 @@ pub fn run(repo: &Repo, base: &str, pr: bool, docs_only: &mut bool) -> Result<()
     // How each commit changed the locks; with an empty range, HEAD's locks as they are.
     let head_locks = lock_files(repo, &head)?;
     let mut head_changes = judge_locks(std::slice::from_ref(&head_locks), &head_locks, &head.describe(), false)?;
+    let on_default = repo.branch() == repo.default_branch();
     for commit in &commits {
         let snapshot = Snapshot::Commit(commit.clone());
         let parents: Vec<Snapshot> = repo.parents(commit)?.into_iter().map(Snapshot::Commit).collect();
         let locks = parents.iter().map(|parent| lock_files(repo, parent)).collect::<Result<Vec<_>>>()?;
-        let changes = judge_locks(&locks, &lock_files(repo, &snapshot)?, &snapshot.describe(), false)?;
+        let now = lock_files(repo, &snapshot)?;
+        // Item 42: on the default branch, a lock that arrives closed is
+        // admitted only when GitHub shows the commit is a squash of a PR whose
+        // head had every required status in success.
+        let admit = on_default && arrive_closed(&locks, &now) && squash_proved(repo, commit, &required(&config));
+        let changes = judge_locks_admitting(&locks, &now, &snapshot.describe(), false, admit)?;
         for (path, change, lock) in bindings(&changes) {
             check_files(repo, &snapshot, path, lock)?;
             // 15c.4: a lefthook change in a commit (made with --no-verify) is the CI's.
@@ -117,20 +124,14 @@ fn passed(repo: &Repo, base: &str, config: &Config) -> Result<()> {
 /// `shipcraft merge --no-review`. Any other merge is warned of and measured as an
 /// escape. A warning, never a refusal.
 fn warn_merges(repo: &Repo, base: &str, config: &Config) {
-    let Some(merges) = repo.try_text(&["rev-list", "--first-parent", "--merges", &format!("{base}..HEAD")]) else {
+    // Item 42: every first-parent commit, so a squash is judged too.
+    let Some(merges) = repo.try_text(&["rev-list", "--first-parent", &format!("{base}..HEAD")]) else {
         return;
     };
     if merges.is_empty() {
         return;
     }
-    let required: Vec<&str> = match config.camadas() {
-        Ok((ci, revisao)) => [(ci, "shipcraft/ci"), (revisao, "shipcraft/review")]
-            .into_iter()
-            .filter(|(camada, _)| *camada != Camada::Desligado)
-            .map(|(_, context)| context)
-            .collect(),
-        Err(_) => vec!["shipcraft/ci", "shipcraft/review"],
-    };
+    let required = required(config);
     let known: Vec<String> = medicao::rows(repo)
         .into_iter()
         .filter(|r| r["escape"] == true)
@@ -161,14 +162,51 @@ fn warn_merges(repo: &Repo, base: &str, config: &Config) {
     }
 }
 
-/// The PR number when the merge skipped the gate; None when it went through
-/// it, or is not a PR merge.
-fn gated(repo: &Repo, merge: &str, required: &[&str]) -> std::result::Result<Option<u64>, String> {
+/// The status contexts a PR head needs: those of the layers that are on
+/// (both when the config's layers cannot be read).
+fn required(config: &Config) -> Vec<&'static str> {
+    match config.camadas() {
+        Ok((ci, revisao)) => [(ci, "shipcraft/ci"), (revisao, "shipcraft/review")]
+            .into_iter()
+            .filter(|(camada, _)| *camada != Camada::Desligado)
+            .map(|(_, context)| context)
+            .collect(),
+        Err(_) => vec!["shipcraft/ci", "shipcraft/review"],
+    }
+}
+
+/// How a PR merged into the default branch stood at the gate (items 5.5 and 42).
+struct PrGate {
+    number: u64,
+    /// Every required status in success at the PR head.
+    statuses: bool,
+    /// Every required status but the review in success at the PR head.
+    ci: bool,
+    /// The PR carries the `shipcraft merge --no-review` comment.
+    waived: bool,
+}
+
+impl PrGate {
+    /// The escape check's verdict: the merge went through the gate.
+    fn escaped(&self) -> bool {
+        !self.statuses && !self.waived
+    }
+
+    /// Item 42: a squash proves its closed locks when its statuses are in
+    /// success, or the review was waived while the CI was in success.
+    fn proves_closed_locks(&self) -> bool {
+        self.statuses || (self.waived && self.ci)
+    }
+}
+
+/// The gate standing of the PR GitHub reports `commit` as the merge commit of;
+/// None when no PR merged it.
+fn pr_gate(repo: &Repo, commit: &str, required: &[&str]) -> std::result::Result<Option<PrGate>, String> {
     let get = |path: String| -> std::result::Result<serde_json::Value, String> {
         serde_json::from_str(&gh::run(repo, &["api", &path])?).map_err(|e| e.to_string())
     };
-    let pulls = get(format!("repos/{{owner}}/{{repo}}/commits/{merge}/pulls"))?;
-    let Some(pr) = pulls.as_array().into_iter().flatten().find(|p| p["merge_commit_sha"] == merge) else {
+    let pulls = get(format!("repos/{{owner}}/{{repo}}/commits/{commit}/pulls"))?;
+    let Some(pr) = pulls.as_array().into_iter().flatten().find(|p| p["merge_commit_sha"] == commit) else {
         return Ok(None);
     };
     let number = pr["number"].as_u64().unwrap_or(0);
@@ -177,14 +215,28 @@ fn gated(repo: &Repo, merge: &str, required: &[&str]) -> std::result::Result<Opt
     let latest = |context: &str| {
         statuses.as_array().into_iter().flatten().find(|s| s["context"] == context).and_then(|s| s["state"].as_str())
     };
-    if required.iter().all(|c| latest(c) == Some("success")) {
-        return Ok(None);
-    }
-    let comments = get(format!("repos/{{owner}}/{{repo}}/issues/{number}/comments"))?;
-    let exempt = comments
-        .as_array()
-        .into_iter()
-        .flatten()
-        .any(|c| c["body"].as_str().is_some_and(|b| b.contains(crate::merge::SEM_REVISAO_MARK)));
-    Ok(if exempt { None } else { Some(number) })
+    let ok = |context: &&str| latest(context) == Some("success");
+    let all = required.iter().all(ok);
+    let ci = required.iter().filter(|c| **c != "shipcraft/review").all(ok);
+    let waived = !all && {
+        let comments = get(format!("repos/{{owner}}/{{repo}}/issues/{number}/comments"))?;
+        comments
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|c| c["body"].as_str().is_some_and(|b| b.contains(crate::merge::SEM_REVISAO_MARK)))
+    };
+    Ok(Some(PrGate { number, statuses: all, ci, waived }))
+}
+
+/// Item 42: `commit` is a PR's merge commit and that PR went through the gate
+/// with its CI in success; false when GitHub cannot be read.
+fn squash_proved(repo: &Repo, commit: &str, required: &[&str]) -> bool {
+    matches!(pr_gate(repo, commit, required), Ok(Some(gate)) if gate.proves_closed_locks())
+}
+
+/// The PR number when the merge skipped the gate; None when it went through
+/// it, or is not a PR merge.
+fn gated(repo: &Repo, merge: &str, required: &[&str]) -> std::result::Result<Option<u64>, String> {
+    Ok(pr_gate(repo, merge, required)?.filter(PrGate::escaped).map(|gate| gate.number))
 }

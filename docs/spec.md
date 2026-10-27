@@ -134,6 +134,7 @@ Each command is `shipcraft <command>`. Exit codes, unless the row says otherwise
 | `[execution] ci` | `local`, `github` or `off`. | `local` |
 | `[execution] review` | `local` or `off`. `github` is reserved and refused (`review-github`). | `local` |
 | `[execution] ci_timeout` | Local CI time limit, in seconds. | `1800` |
+| `[execution] merge` | How `shipcraft merge` merges: `merge` (a merge commit) or `squash` (item 42). | `merge` |
 | `[roles] review` | The review agent: `codex`, `claude` or `gemini`. | first one installed |
 | `[review] spec` | Path of a project spec given to the reviewer. | none |
 | `[review] timeout` | Review time limit, in seconds. | `1200` |
@@ -180,6 +181,18 @@ With `ci = "github"` and `review = "local"`, `shipcraft pr` waits for GitHub's `
 ### The merge gate
 
 `shipcraft merge <pr>` merges only with `shipcraft/ci` and `shipcraft/review` at `success` on the PR's current HEAD; an off layer is not required. `--no-review "<reason>"` waives the review, never CI, and records the reason in the PR and the run log. Where GitHub offers branch protection, `init --github` makes both statuses required; otherwise `shipcraft merge` is the gate, and `shipcraft status` says so. `shipcraft ci` on the default branch warns, with exit `0`, about each merge that bypassed the gate, and records it as an `escape`.
+
+**Squash merge (item 42).** Three points:
+
+1. **The key.** `[execution] merge` is `"merge"` (a merge commit, the default when the key is absent) or `"squash"`. Any other value, a non-string included, refuses `execution-invalid` wherever the config is read, like `[execution] ci`. `shipcraft merge` reads it from the same config as the gate reads which layers are on (the PR base's `.shipcraft.toml`), so the PR cannot change how it is merged.
+2. **The merge.** With `"squash"`, `shipcraft merge` checks the same gate, posts the same `--no-review` comment and then runs `gh pr merge <pr> --squash` without a title or body of its own: the repository's GitHub settings decide them. The `merge` row is written only after `gh` succeeds, as today, with the same fields (`commit` is still the PR head) plus `method`: `"merge"` or `"squash"`. Refusals before the merge write no `method`. Older rows without `method` stay valid for every reader.
+3. **The default branch after a squash.** A squash puts the PR on the base as one commit, so a lock that the PR opened and closed arrives there already closed, with no commit holding it open. `shipcraft ci` on the default branch accepts that commit when GitHub reports it as the `merge_commit_sha` of a PR (`commits/<sha>/pulls`, the reader the escape check already uses) that went through the gate as the escape check judges it: its head had every required status in `success`, or the review status was waived by the `--no-review` comment while `shipcraft/ci` was in `success`; the locked cases are not run at that commit. In any other case, including when GitHub cannot be read, the closed lock is refused `lock-edited` as today. On a PR branch nothing changes: a lock still has to be opened by a RED commit and closed by a later one.
+
+What squash gives up: the base's history keeps no RED commit. The PR's `shipcraft ci` checked every PR commit's locks, hashes and config, and ran the suite on the PR head only (section 2); after the squash only that evidence and the run log remain.
+
+The escape check of `shipcraft ci` on the default branch reads every first-parent commit of `<base>..HEAD` (`git rev-list --first-parent`), not only merge commits, whatever the config says. A commit GitHub reports as a PR's `merge_commit_sha` is judged by the statuses and the `--no-review` comment exactly as before, whether it was merged by `shipcraft merge` or by GitHub's button; so a PR squashed through the button without the gate is now warned of and recorded as an `escape`. A commit no PR merged (a direct push) is not judged, as before. If `gh` fails, the check prints the warning it prints today and stops; a missing `<base>` (a shallow clone) skips the check, as today.
+
+Known limits kept by item 42: `shipcraft merge` does not pin the PR head it checked (a push between the check and the merge lands unchecked); a `--no-review` comment exempts the PR's later heads too; and the merged tree is not tested when the base moved after the PR's CI. Each applies to both methods.
 
 ### Fork PRs
 
@@ -288,6 +301,7 @@ Each hook, CI, review and merge run appends one JSON line to `.git/shipcraft/run
 | `docs_only` | On `ci` rows: whether the PR was judged docs only (item 40). |
 | `queue_secs` | On `pr` rows: seconds the local CI waited for a slot, rounded down; `0` when it skipped the queue, `null` without local CI (item 41). |
 | `tokens`, `agent`, `pr`, `diff_sha256` | On `review` rows: tokens used (or `null`), the agent, the PR, and the reuse key. |
+| `method` | On `merge` rows written by `shipcraft merge`: `merge` or `squash` (item 42). |
 | `escape` | `true` on a merge that skipped the gate. |
 
 Besides the refusal codes, `code` can hold run outcomes that are not refusals: `changes-requested` and `reviewer-no-verdict` (review), `timed-out` (local CI), `no-review` and `escape` (merge), and `error` for a failure.
