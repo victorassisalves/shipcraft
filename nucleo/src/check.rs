@@ -125,6 +125,7 @@ pub fn run(repo: &Repo, commit_msg: bool) -> Result<()> {
 }
 
 const LOCKS: &str = ".shipcraft/locks/";
+const PLACEHOLDER: &str = ".shipcraft/locks/.gitkeep";
 const EMPTY_BLOBS: [&str; 2] =
     ["e69de29bb2d1d6434b8b29ae775ad8c2e48c5391", "473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813"];
 
@@ -155,18 +156,23 @@ fn warn_outside(repo: &Repo) {
 }
 
 /// Untracked, ignored (flag true), and index entries holding the empty blob
-/// (`git add -N`), read by git with the index git handed the hook.
+/// (`git add -N`), read by git with the index git handed the hook; item 48
+/// leaves out init's empty `.shipcraft/locks/.gitkeep`.
 fn outside_locks(repo: &Repo) -> Result<Vec<(String, bool)>> {
     let names = |bytes: Vec<u8>| bytes.split(|b| *b == 0).filter(|s| !s.is_empty()).map(text).collect::<Vec<_>>();
+    // Item 48: init's empty placeholder in the tree (a regular file, never a symlink).
+    let placeholder =
+        |p: &String| p == PLACEHOLDER && fs::symlink_metadata(repo.path(p)).is_ok_and(|m| m.is_file() && m.len() == 0);
     let mut outside: Vec<_> = names(repo.run(&["ls-files", "-z", "--others", "--exclude-standard", "--", LOCKS])?)
         .into_iter()
+        .filter(|p| !placeholder(p))
         .map(|p| (p, false))
         .collect();
     let ignored = repo.run(&["ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--", LOCKS])?;
-    outside.extend(names(ignored).into_iter().map(|p| (p, true)));
+    outside.extend(names(ignored).into_iter().filter(|p| !placeholder(p)).map(|p| (p, true)));
     for entry in names(repo.run(&["ls-files", "-z", "--stage", "--", LOCKS])?) {
         if let Some((meta, path)) = entry.split_once('\t') {
-            if meta.split(' ').nth(1).is_some_and(|sha| EMPTY_BLOBS.contains(&sha)) {
+            if path != PLACEHOLDER && meta.split(' ').nth(1).is_some_and(|sha| EMPTY_BLOBS.contains(&sha)) {
                 outside.push((path.to_string(), false));
             }
         }
