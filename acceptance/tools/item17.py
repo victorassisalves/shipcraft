@@ -104,8 +104,7 @@ def closes(user):
     changed = git('diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').splitlines()
     assert sorted(changed) == sorted(locks), 'the close commit carried something besides the locks'
     msg = git('log', '-1', '--format=%s')
-    assert msg.startswith('shipcraft: close lock '), msg
-    assert sorted(x.strip() for x in msg.removeprefix('shipcraft: close lock ').split(',')) == sorted(Path(f).stem for f in locks)
+    assert msg == 'chore(shipcraft): close lock ' + ', '.join(sorted((Path(f).stem for f in locks), key=lambda s: s.encode())), msg
     assert not mark().exists(), 'mark not removed'
 
 
