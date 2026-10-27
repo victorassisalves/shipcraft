@@ -2,7 +2,7 @@
 //! a commit of its own, the locks the `commit-msg` judgment marked, when the
 //! commit just made is the one it judged. It always exits 0 (the user's commit
 //! already exists). Item 38: it writes a `close` row per lock once the commit
-//! that closes it exists, or an `error` row when it could not close.
+//! that closes it exists, and none otherwise.
 
 use crate::git::{short, Repo, Snapshot, TempDir};
 use crate::lock::Lock;
@@ -39,24 +39,24 @@ pub fn run() {
     let closed = match closing_commit(&repo, &marca, &head) {
         Ok(closed) => closed,
         Err(e) => {
-            record(&repo, &marca, started, "error", "");
             return println!(
                 "shipcraft: the lock did not close ({}); nothing changed: run `shipcraft close` manually.",
                 one_line(&e)
             );
         }
     };
-    record(&repo, &marca, started, "passed", &closed.commit);
+    record(&repo, &marca, started, &closed.commit);
     after_ref(&repo, &marca, &closed);
 }
 
-/// Item 38: one `close` row per lock of the mark.
-fn record(repo: &Repo, marca: &Marca, started: Instant, result: &str, commit: &str) {
+/// Item 38: one `close` row per lock of the mark, once the commit that
+/// closes it exists; a close that did not happen writes none.
+fn record(repo: &Repo, marca: &Marca, started: Instant, commit: &str) {
     for path in &marca.travas {
         medicao::record(
             repo,
-            json!({"layer": "close", "secs": medicao::seconds(started), "result": result,
-                   "code": if result == "passed" { "" } else { "error" }, "branch": repo.branch(),
+            json!({"layer": "close", "secs": medicao::seconds(started), "result": "passed",
+                   "code": "", "branch": repo.branch(),
                    "commit": commit, "lock": medicao::lock_id(path)}),
         );
     }

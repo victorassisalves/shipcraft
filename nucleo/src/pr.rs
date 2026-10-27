@@ -117,18 +117,16 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>) -> Result<(
     };
     let summary = medicao::summary(repo, &branch) + "\n" + &medicao::size_text(&config, size) + &forma.text;
     gh::comment(repo, number, &summary)?;
-    // Item 38: the PR as a step of the locks it delivers; a PR with none has no item to measure.
-    if !locks.is_empty() {
-        let (result, code) = match &gate {
-            Gate::Passed => ("passed", ""),
-            Gate::Stopped(code, _) => ("refused", *code),
-        };
-        medicao::record(
-            repo,
-            json!({"layer": "pr", "secs": medicao::seconds(started), "result": result, "code": code,
-                   "pr": number, "branch": branch, "commit": head, "base": base}),
-        );
-    }
+    // Item 38: the PR as a step of the locks it delivers (`locks`, possibly empty).
+    let (result, code) = match &gate {
+        Gate::Passed => ("passed", ""),
+        Gate::Stopped(code, _) => ("refused", *code),
+    };
+    medicao::record(
+        repo,
+        json!({"layer": "pr", "secs": medicao::seconds(started), "result": result, "code": code,
+               "pr": number, "branch": branch, "commit": head, "base": base}),
+    );
     match gate {
         Gate::Passed => {
             println!("shipcraft: PR #{number} ready: enabled layers passed; merge with `shipcraft merge {number}`.");
