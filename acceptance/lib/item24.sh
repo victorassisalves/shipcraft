@@ -75,7 +75,7 @@ try: import tomllib
 except ImportError: import tomli as tomllib
 globs=tomllib.load(open('.shipcraft.toml','rb'))['test_globs']
 def produto(p):
- return p and not any(fnmatch.fnmatchcase(p,g) for g in globs)
+ return p and p != '.shipcraft.toml' and not p.startswith('.shipcraft/') and not any(fnmatch.fnmatchcase(p,g) for g in globs)
 paths=subprocess.check_output(['git','ls-files','-z']).decode().split('\0')
 base=[p for p in paths if produto(p)]
 # modulo.py is not added yet.
@@ -101,18 +101,18 @@ P90
   esac
   if [ "$c" = blob-ausente ]; then printf 'medida somente da população\nsegunda linha exclusiva\n' > ausente.txt; fi
   sz_main_commit 'chore: população de forma'
-  if [ "$c" = p90 ] || [ "$c" = p90-21 ]; then
+  if [ "$c" = p90 ] || [ "$c" = p90-21 ] || [ "$c" = pequena-19 ]; then
     N=$("$PY" - "$c" <<'P90'
 import subprocess,math,sys,fnmatch
 try: import tomllib
 except ImportError: import tomli as tomllib
 globs=tomllib.load(open('.shipcraft.toml','rb'))['test_globs']
 def produto(p):
- return p and not any(fnmatch.fnmatchcase(p,g) for g in globs)
+ return p and p != '.shipcraft.toml' and not p.startswith('.shipcraft/') and not any(fnmatch.fnmatchcase(p,g) for g in globs)
 paths=subprocess.check_output(['git','ls-tree','-rz','--name-only','HEAD']).decode().split('\0')
 sizes=[subprocess.check_output(['git','show','HEAD:'+p]).count(b'\n') for p in paths if produto(p)]
-assert len(sizes)==(20 if sys.argv[1]=='p90' else 21),sizes
-print(sorted(sizes)[math.ceil(.9*len(sizes))-1])
+assert len(sizes)=={'p90':20,'p90-21':21,'pequena-19':19}[sys.argv[1]],sizes
+print(10 if sys.argv[1]=='pequena-19' else sorted(sizes)[math.ceil(.9*len(sizes))-1])
 P90
 )
   fi
