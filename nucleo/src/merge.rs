@@ -79,13 +79,15 @@ pub fn merge(repo: &Repo, number: &str, sem_revisao: Option<&str>) -> Result<()>
         let _ = repo.run(&["fetch", "-q", "origin", &format!("refs/pull/{pr_number}/head")]);
     }
     let locks = medicao::locks_changed(repo, &format!("origin/{base}"), &head);
-    gh::must(repo, &["pr", "merge", number, "--merge"])?;
+    // Item 42: the base's config says how; a squash takes GitHub's own title and body.
+    let method = if config.execucao.merge == "squash" { "squash" } else { "merge" };
+    gh::must(repo, &["pr", "merge", number, &format!("--{method}")])?;
     medicao::record(
         repo,
         json!({"layer": "merge", "secs": medicao::seconds(started), "result": "passed",
                "code": if sem_revisao.is_some() { "no-review" } else { "" }, "reason": sem_revisao,
                "pr": pr_number, "branch": field("headRefName"), "commit": head,
-               "base": base, "default_branch": repo.default_branch(), "locks": locks}),
+               "base": base, "default_branch": repo.default_branch(), "locks": locks, "method": method}),
     );
     println!(
         "shipcraft: PR #{number} merged into {base}{}.",

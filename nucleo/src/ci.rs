@@ -8,7 +8,8 @@
 
 use crate::config::{Camada, Config};
 use crate::contract::{
-    bindings, check_files, check_lefthook, judge_locks, judge_suite, no_report, Change, Scope, Verdict,
+    arrive_closed, bindings, check_files, check_lefthook, judge_locks, judge_locks_admitting, judge_suite, no_report,
+    Change, Scope, Verdict,
 };
 use crate::docs;
 use crate::gh;
@@ -43,11 +44,17 @@ pub fn run(repo: &Repo, base: &str, pr: bool, docs_only: &mut bool) -> Result<()
     // How each commit changed the locks; with an empty range, HEAD's locks as they are.
     let head_locks = lock_files(repo, &head)?;
     let mut head_changes = judge_locks(std::slice::from_ref(&head_locks), &head_locks, &head.describe(), false)?;
+    let on_default = repo.branch() == repo.default_branch();
     for commit in &commits {
         let snapshot = Snapshot::Commit(commit.clone());
         let parents: Vec<Snapshot> = repo.parents(commit)?.into_iter().map(Snapshot::Commit).collect();
         let locks = parents.iter().map(|parent| lock_files(repo, parent)).collect::<Result<Vec<_>>>()?;
-        let changes = judge_locks(&locks, &lock_files(repo, &snapshot)?, &snapshot.describe(), false)?;
+        let now = lock_files(repo, &snapshot)?;
+        // Item 42: on the default branch, a lock that arrives closed is
+        // admitted only when GitHub shows the commit is a squash of a PR whose
+        // head had every required status in success.
+        let admit = on_default && arrive_closed(&locks, &now) && squash_proved(repo, commit, &required(&config));
+        let changes = judge_locks_admitting(&locks, &now, &snapshot.describe(), false, admit)?;
         for (path, change, lock) in bindings(&changes) {
             check_files(repo, &snapshot, path, lock)?;
             // 15c.4: a lefthook change in a commit (made with --no-verify) is the CI's.
@@ -117,20 +124,14 @@ fn passed(repo: &Repo, base: &str, config: &Config) -> Result<()> {
 /// `shipcraft merge --no-review`. Any other merge is warned of and measured as an
 /// escape. A warning, never a refusal.
 fn warn_merges(repo: &Repo, base: &str, config: &Config) {
-    let Some(merges) = repo.try_text(&["rev-list", "--first-parent", "--merges", &format!("{base}..HEAD")]) else {
+    // Item 42: every first-parent commit, so a squash is judged too.
+    let Some(merges) = repo.try_text(&["rev-list", "--first-parent", &format!("{base}..HEAD")]) else {
         return;
     };
     if merges.is_empty() {
         return;
     }
-    let required: Vec<&str> = match config.camadas() {
-        Ok((ci, revisao)) => [(ci, "shipcraft/ci"), (revisao, "shipcraft/review")]
-            .into_iter()
-            .filter(|(camada, _)| *camada != Camada::Desligado)
-            .map(|(_, context)| context)
-            .collect(),
-        Err(_) => vec!["shipcraft/ci", "shipcraft/review"],
-    };
+    let required = required(config);
     let known: Vec<String> = medicao::rows(repo)
         .into_iter()
         .filter(|r| r["escape"] == true)
@@ -161,25 +162,62 @@ fn warn_merges(repo: &Repo, base: &str, config: &Config) {
     }
 }
 
-/// The PR number when the merge skipped the gate; None when it went through
-/// it, or is not a PR merge.
-fn gated(repo: &Repo, merge: &str, required: &[&str]) -> std::result::Result<Option<u64>, String> {
-    let get = |path: String| -> std::result::Result<serde_json::Value, String> {
-        serde_json::from_str(&gh::run(repo, &["api", &path])?).map_err(|e| e.to_string())
-    };
-    let pulls = get(format!("repos/{{owner}}/{{repo}}/commits/{merge}/pulls"))?;
-    let Some(pr) = pulls.as_array().into_iter().flatten().find(|p| p["merge_commit_sha"] == merge) else {
-        return Ok(None);
-    };
-    let number = pr["number"].as_u64().unwrap_or(0);
-    let head = pr["head"]["sha"].as_str().unwrap_or_default();
-    let statuses = get(format!("repos/{{owner}}/{{repo}}/commits/{head}/statuses"))?;
+/// The status contexts a PR head needs: those of the layers that are on
+/// (both when the config's layers cannot be read).
+fn required(config: &Config) -> Vec<&'static str> {
+    match config.camadas() {
+        Ok((ci, revisao)) => [(ci, "shipcraft/ci"), (revisao, "shipcraft/review")]
+            .into_iter()
+            .filter(|(camada, _)| *camada != Camada::Desligado)
+            .map(|(_, context)| context)
+            .collect(),
+        Err(_) => vec!["shipcraft/ci", "shipcraft/review"],
+    }
+}
+
+fn gh_get(repo: &Repo, path: String) -> std::result::Result<serde_json::Value, String> {
+    serde_json::from_str(&gh::run(repo, &["api", &path])?).map_err(|e| e.to_string())
+}
+
+/// The PR (number, head) GitHub reports `commit` as the merge commit of.
+fn merged_pr(repo: &Repo, commit: &str) -> std::result::Result<Option<(u64, String)>, String> {
+    let pulls = gh_get(repo, format!("repos/{{owner}}/{{repo}}/commits/{commit}/pulls"))?;
+    Ok(pulls
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|p| p["merge_commit_sha"] == commit)
+        .map(|pr| (pr["number"].as_u64().unwrap_or(0), pr["head"]["sha"].as_str().unwrap_or_default().to_string())))
+}
+
+/// Whether `head` has every required status in success.
+fn statuses_ok(repo: &Repo, head: &str, required: &[&str]) -> std::result::Result<bool, String> {
+    let statuses = gh_get(repo, format!("repos/{{owner}}/{{repo}}/commits/{head}/statuses"))?;
     let latest = |context: &str| {
         statuses.as_array().into_iter().flatten().find(|s| s["context"] == context).and_then(|s| s["state"].as_str())
     };
-    if required.iter().all(|c| latest(c) == Some("success")) {
+    Ok(required.iter().all(|c| latest(c) == Some("success")))
+}
+
+/// Item 42: `commit` is a PR's merge commit and that PR's head had every
+/// required status in success; false when GitHub cannot be read.
+fn squash_proved(repo: &Repo, commit: &str, required: &[&str]) -> bool {
+    match merged_pr(repo, commit) {
+        Ok(Some((_, head))) => statuses_ok(repo, &head, required).unwrap_or(false),
+        _ => false,
+    }
+}
+
+/// The PR number when the merge skipped the gate; None when it went through
+/// it, or is not a PR merge.
+fn gated(repo: &Repo, merge: &str, required: &[&str]) -> std::result::Result<Option<u64>, String> {
+    let Some((number, head)) = merged_pr(repo, merge)? else {
+        return Ok(None);
+    };
+    if statuses_ok(repo, &head, required)? {
         return Ok(None);
     }
+    let get = |path: String| gh_get(repo, path);
     let comments = get(format!("repos/{{owner}}/{{repo}}/issues/{number}/comments"))?;
     let exempt = comments
         .as_array()
