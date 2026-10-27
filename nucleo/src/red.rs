@@ -10,7 +10,8 @@ use crate::suite;
 use std::collections::BTreeMap;
 use std::fs;
 
-pub fn run(repo: &Repo) -> Result<()> {
+/// The path of the lock written.
+pub fn run(repo: &Repo) -> Result<String> {
     let config = Config::load(repo)?;
     refuse_if_a_lock_is_open(repo)?;
 
@@ -64,7 +65,7 @@ pub fn run(repo: &Repo) -> Result<()> {
         short_list(&lock.failing_at_red)
     );
     println!("shipcraft: commit the lock with the tests; the hook checks the RED commit.");
-    Ok(())
+    Ok(path)
 }
 
 fn stub_hint(config: &Config) -> &'static str {

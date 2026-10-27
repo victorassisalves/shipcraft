@@ -20,7 +20,8 @@ i24_json() {
   "$PY" - "$HEAD" "$1" <<'PY'
 import json,sys
 rows=[json.loads(x) for x in open('.git/shipcraft/runs.jsonl')]
-rows=[r for r in rows if r.get('commit')==sys.argv[1]]
+# Item 38 also records PR/RED/close events; shape's row count concerns CI/review.
+rows=[r for r in rows if r.get('commit')==sys.argv[1] and r.get('layer') in ('ci','review')]
 expected=json.loads(sys.argv[2])
 for layer in ('ci','review'):
  rs=[r for r in rows if r.get('layer')==layer]
@@ -191,8 +192,13 @@ PY
     ci_controle=$(st_state "$HEAD" shipcraft/ci); rev_controle=$(st_state "$HEAD" shipcraft/review)
     i24_write modulo.py 11 a; sz_commit 'feat: aviso no mesmo controle'
   fi
-  local antes_registros
-  antes_registros=$(wc -l < .git/shipcraft/runs.jsonl 2>/dev/null || echo 0)
+  if [ "$c" = sem-registro ]; then
+    if [ -f .git/shipcraft/runs.jsonl ]; then
+      cp .git/shipcraft/runs.jsonl "$CW/metrics-before"
+    else
+      : > "$CW/metrics-before"
+    fi
+  fi
   if [ "$c" = status-recusa ]; then shipcraft_pr; HEAD=$(git rev-parse HEAD); else sz_pr; fi
   case "$c" in
     limite|ja-grande|pequena|pequena-19|json-null) chk 'no crossing or no N, no warning' i24_none; chk 'explicit measurement' i24_json "$([ "$c" = pequena ] || [ "$c" = pequena-19 ] || [ "$c" = json-null ] && echo null || echo 0)" ;;
@@ -229,7 +235,19 @@ positions=[s.find(x) for x in expected]
 assert all(x>=0 for x in positions) and positions==sorted(positions),(expected,s)
 PY
       ;;
-    sem-registro) i24_warn modulo.py 10 11; chk 'creates no record' eq "$(wc -l < .git/shipcraft/runs.jsonl 2>/dev/null || echo 0)" "$antes_registros" ;;
+    sem-registro)
+      i24_warn modulo.py 10 11
+      chk 'off layers add only the PR event, without rewriting history' "$PY" - "$CW/metrics-before" <<'METRICS24'
+import json,sys
+from pathlib import Path
+before=Path(sys.argv[1]).read_bytes()
+after=Path('.git/shipcraft/runs.jsonl').read_bytes()
+assert after.startswith(before), 'PR rewrote the metrics'
+rows=[json.loads(line) for line in after[len(before):].splitlines() if line.strip()]
+assert len(rows)==1 and rows[0]['layer']=='pr' and rows[0]['result']=='passed', rows
+assert rows[0]['lock']=='' and rows[0]['locks']==[], rows
+METRICS24
+      ;;
     blob-ausente)
       chk 'measurement failure visible' i24_has 'Shape: unmeasured ('
       chk 'non-empty reason and punctuation' "$PY" - "$CW/writes" <<'WHY'

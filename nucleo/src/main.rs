@@ -29,6 +29,7 @@ mod pr;
 mod processo;
 mod red;
 mod refusal;
+mod relatorio;
 mod revisao;
 mod suite;
 mod tsbuild;
@@ -42,7 +43,7 @@ const USAGE: &str =
     "usage: shipcraft --version | shipcraft init [--lang python|node|go] [--github] | shipcraft red | shipcraft check [--commit-msg <file>] | shipcraft close
      | shipcraft ci --base <ref> [--pr]
      | shipcraft pr [--title <t>] [--body <file>] | shipcraft review [--pr <n>]
-     | shipcraft merge <pr> [--no-review \"<reason>\"] | shipcraft status";
+     | shipcraft merge <pr> [--no-review \"<reason>\"] | shipcraft status | shipcraft report [--json]";
 
 fn main() -> ExitCode {
     // Item 22.2: the lists reach only the hook's suite, never a value inherited.
@@ -79,7 +80,18 @@ fn run(args: &[&str]) -> Result<()> {
             }
             init::run(&init::open()?, lang, github)
         }
-        ["red"] => red::run(&Repo::open()?),
+        ["red"] => {
+            // Item 38: a lock written, or a refusal, is a row.
+            let started = Instant::now();
+            let repo = Repo::open()?;
+            let result = red::run(&repo);
+            let mut row = medicao::row(&repo, "red", started, &result);
+            if let Ok(path) = &result {
+                row["lock"] = medicao::lock_id(path).into();
+            }
+            medicao::record(&repo, row);
+            result.map(drop)
+        }
         ["check"] => measured("hook", |repo, _| check::run(repo, false)),
         // The git hook passes the message file, which is ignored.
         ["check", "--commit-msg", ..] => measured("hook", |repo, _| check::run(repo, true)),
@@ -107,7 +119,10 @@ fn run(args: &[&str]) -> Result<()> {
         ["merge", n] => merge::merge(&Repo::open()?, n, None),
         ["merge", n, "--no-review", motivo] => merge::merge(&Repo::open()?, n, Some(motivo)),
         ["status"] => merge::status(&Repo::open()?),
-        // Item 23: records no row, as `init`, `red` and `fecha`.
+        // Item 38: reads only the run log; never refuses.
+        ["report"] => relatorio::run(false),
+        ["report", "--json"] => relatorio::run(true),
+        // Item 23: records no row, as `init`.
         // Item 21.1: any folder, no repository nor .shipcraft.toml needed.
         ["--version"] => {
             println!("{}", version_line());
@@ -134,9 +149,10 @@ fn invalid(args: &[&str]) -> Stop {
 fn measured(camada: &str, command: impl FnOnce(&Repo, &mut bool) -> Result<()>) -> Result<()> {
     let started = Instant::now();
     let repo = Repo::open()?;
+    let lock = (camada == "hook").then(|| medicao::open_lock(&repo));
     let mut docs_only = false;
     let result = command(&repo, &mut docs_only);
-    medicao::layer(&repo, camada, started, &result, (camada == "ci").then_some(docs_only));
+    medicao::layer(&repo, camada, started, &result, (camada == "ci").then_some(docs_only), lock);
     result
 }
 
