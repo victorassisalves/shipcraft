@@ -3,7 +3,8 @@ item42_cases() {
   local c
   for c in squash absent merge head-config invalid-string invalid-number invalid-bool \
     missing-ci missing-review no-review no-review-missing-ci merge-fails \
-    closed-ok closed-no-ci closed-no-review closed-direct closed-offline \
+    closed-ok closed-no-ci closed-no-review closed-no-review-waived closed-waiver-no-ci \
+    closed-direct closed-offline \
     escape-bad escape-ok escape-direct escape-offline; do echo "v1-42.$c"; done
 }
 i42_commit() {
@@ -82,7 +83,7 @@ item42_case() {
   pr_outside feature/item42
   git checkout -q main
   case "$c" in missing-ci|no-review-missing-ci|closed-no-ci|escape-bad) ;; *) seed_ok "$HEADSHA" shipcraft/ci ;; esac
-  case "$c" in missing-review|no-review|closed-no-review|escape-bad) ;; *) seed_ok "$HEADSHA" shipcraft/review ;; esac
+  case "$c" in missing-review|no-review|closed-no-review|closed-no-review-waived|closed-waiver-no-ci|escape-bad) ;; *) seed_ok "$HEADSHA" shipcraft/review ;; esac
   mkdir -p .git/shipcraft; : > .git/shipcraft/runs.jsonl
   case "$c" in
     closed-*|escape-*)
@@ -91,6 +92,14 @@ item42_case() {
           git merge --squash feature/item42 >> "$LOG" 2>&1 || fail 'fixture squash direct push'
           i42_commit 'feat: direct push'
           git push -q origin main >> "$LOG" 2>&1 || fail 'fixture direct push' ;;
+        closed-no-review-waived|closed-waiver-no-ci)
+          run_cmd TMO 120 shipcraft merge "$PRN" --no-review 'item42 waiver'
+          chk 'fixture waiver merge succeeds' rc_zero
+          chk 'fixture waiver posted' eq "$(H text-has "$ST" comment 'item42 waiver')" OK
+          if [ "$c" = closed-waiver-no-ci ]; then
+            H seed-status "$ST" "$HEADSHA" shipcraft/ci failure 'item42 CI failed' 0
+          fi
+          git pull -q --no-rebase origin main >> "$LOG" 2>&1 || fail 'fixture pull' ;;
         *)
           gh_quiet pr merge "$PRN" --squash >> "$LOG" 2>&1 || fail 'fixture GitHub squash'
           git pull -q --no-rebase origin main >> "$LOG" 2>&1 || fail 'fixture pull' ;;
@@ -98,7 +107,7 @@ item42_case() {
       case "$c" in *-offline) i42_fault all ;; esac
       run_cmd TMO 240 shipcraft ci --base "$BASE"
       case "$c" in
-        closed-ok) chk 'successful PR evidence admits arriving closed lock' rc_zero ;;
+        closed-ok|closed-no-review-waived) chk 'successful PR evidence admits arriving closed lock' rc_zero ;;
         closed-*)
           chk 'unproven closed lock refuses' rc_nonzero
           msg_check || fail "$MSGERR"
