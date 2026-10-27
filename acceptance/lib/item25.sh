@@ -569,7 +569,7 @@ def main(case):
         ok('shipcraft', 'red'); ok('git', 'add', '-A'); ok('git', 'commit', '-qm', 'test: RED')
         write('textutil.py', 'def slugify(text):\n    return text\n')
         ok('git', 'add', 'textutil.py'); ok('git', 'commit', '-qm', 'feat: GREEN')
-        assert ok('git', 'log', '-1', '--format=%s').startswith('shipcraft: close lock '), 'post-commit did not close the lock'
+        assert ok('git', 'log', '-1', '--format=%s').startswith('chore(shipcraft): close lock '), 'post-commit did not close the lock'
         locks = list(Path('.shipcraft/locks').glob('*.json'))
         assert len(locks) == 1 and json.loads(locks[0].read_text()).get('state', json.loads(locks[0].read_text()).get('estado')) == 'closed', 'lock did not close'
 
