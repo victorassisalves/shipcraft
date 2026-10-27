@@ -343,7 +343,13 @@ fn agents_block(repo: &Repo) -> String {
                 return String::new();
             }
             Ok(text) => {
-                let sep = if text.is_empty() || text.ends_with("\n\n") { "" } else if text.ends_with('\n') { "\n" } else { "\n\n" };
+                let sep = if text.is_empty() || text.ends_with("\n\n") {
+                    ""
+                } else if text.ends_with('\n') {
+                    "\n"
+                } else {
+                    "\n\n"
+                };
                 fs::write(&path, format!("{text}{sep}{AGENTS_BLOCK}")).map(|()| "added the shipcraft block to")
             }
             Err(e) => Err(e),
@@ -356,7 +362,9 @@ fn agents_block(repo: &Repo) -> String {
             format!(", {AGENTS_FILE}")
         }
         Err(e) => {
-            println!("shipcraft: could not write {AGENTS_FILE} ({e}); add the shipcraft block from docs/spec.md by hand");
+            println!(
+                "shipcraft: could not write {AGENTS_FILE} ({e}); add the shipcraft block from docs/spec.md by hand"
+            );
             String::new()
         }
     }
@@ -388,7 +396,9 @@ enum Hook {
 pub fn hook_status(repo: &Repo) -> String {
     match decide_hook(repo) {
         decided if init_tool::present(repo) => {
-            init_tool::status(decided.and_then(|h| if let Hook::Tool(t) = h { Ok(t) } else { Err(failed(String::new())) }))
+            init_tool::status(
+                decided.and_then(|h| if let Hook::Tool(t) = h { Ok(t) } else { Err(failed(String::new())) }),
+            )
         }
         // 20.3: each event says what it misses, even when the init refuses.
         decided if LEFTHOOK_FILES.iter().any(|f| repo.path(f).symlink_metadata().is_ok()) => {
@@ -693,7 +703,9 @@ fn install_hooks(hooks: &[PathBuf], created: &mut Vec<PathBuf>) -> Result<()> {
     let exe = shell_quote(&exe.to_string_lossy());
     for hook in hooks {
         let script = if hook.ends_with("commit-msg") {
-            format!("#!/bin/sh\n{HOOK_MARK}: checks the commit against open locks\nexec {exe} check --commit-msg \"$1\"\n")
+            format!(
+                "#!/bin/sh\n{HOOK_MARK}: checks the commit against open locks\nexec {exe} check --commit-msg \"$1\"\n"
+            )
         } else {
             format!("#!/bin/sh\n{HOOK_MARK}: closes the lock the commit-msg check marked\nexec {exe} close\n")
         };
