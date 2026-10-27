@@ -63,7 +63,7 @@ When a locked test is itself wrong, no GREEN can pass it. In draken-platform a l
 
 ### The lock closes by itself
 
-The first commit after RED in which every case in `failing_at_red` passes, none skipped or missing, closes the lock. The `commit-msg` hook judges the commit and the `post-commit` hook writes `closed` in a separate closing commit right after it (see `init`). A merge is judged against both parents, as in CI. A closed lock no longer restricts the tests.
+The first commit after RED in which every case in `failing_at_red` passes, none skipped or missing, closes the lock. The `commit-msg` hook judges the commit and the `post-commit` hook writes `closed` in a separate closing commit right after it (see `init`). The closing commit's subject is `chore(shipcraft): close lock <ids>`, the lock ids (file names without `.json`) joined by `, ` in the order they close, with no body; it follows Conventional Commits, so a repository that checks every commit's subject (commitlint, a `pr-title`-style check on merge commits) accepts it. Before item 49 the subject was `shipcraft: close lock <ids>`, which draken-platform's convention did not accept. Nothing reads this subject: the lock state, not the message, says the lock closed. A merge is judged against both parents, as in CI. A closed lock no longer restricts the tests.
 
 ### GREEN may add tests
 
