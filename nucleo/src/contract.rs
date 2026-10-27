@@ -8,7 +8,7 @@ use crate::init_tool::{HUSKY, PRE_COMMIT_CONFIG};
 use crate::junit::{Outcome, Report};
 use crate::lock::{Lock, LockFiles, LOCK_DIR};
 use crate::refusal::{refuse, short_list, Result};
-use crate::suite::Missing;
+use crate::suite::{FailedCheck, Missing};
 use std::collections::BTreeSet;
 
 const RESTORE_LOCK: &str =
@@ -295,11 +295,14 @@ pub fn judge_suite(report: &Report, lock_path: &str, change: &Change, lock: &Loc
     }
 }
 
-/// The suite wrote no report.
+/// The suite wrote no report, or its check failed (item 45).
 pub fn no_report<T>(missing: Missing) -> Result<T> {
+    if let Some(check) = &missing.check {
+        return refuse("no-report", missing.reason, FailedCheck::WHY, format!("{}, and try again", check.next()));
+    }
     refuse(
         "no-report",
-        missing.0,
+        missing.reason,
         "shipcraft judges the suite by its report; without it, locked cases cannot be checked",
         "run the suite manually (check and test_command in .shipcraft.toml), fix the error and try again",
     )

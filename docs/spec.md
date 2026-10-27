@@ -125,7 +125,7 @@ Each command is `shipcraft <command>`. Exit codes, unless the row says otherwise
 | `runner` | The runner name (`pytest`, `vitest`, `jest`, `gotestsum`). |
 | `test_command` | The test command. `{junit}` is replaced by the report path. |
 | `test_globs` | Test and support file globs. These files are locked. |
-| `check` | Optional project-wide check (type check, vet). Runs in CI and at RED, never in the hook. |
+| `check` | Optional project-wide check (type check, vet). Runs in CI and at RED, never in the hook. A failing check refuses `no-report` with a reason that names the check (item 45). |
 | `filter` | Who filters the hook's run (section 6). |
 
 ### Sections
@@ -157,6 +157,14 @@ Each command is `shipcraft <command>`. Exit codes, unless the row says otherwise
 - **A layer that is off is labeled:** its status is published as `success` with the description "off in .shipcraft.toml" on every PR, so the choice is visible, and the merge gate does not require it.
 - **`shipcraft_min`:** an older binary refuses, in the hook and in CI, as it does a lock in an unknown format. Two machines never judge one commit differently without warning.
 - **Validation:** unknown values, an absolute `root`, or a path or glob with `..` are refused. `.` and empty path components are normalized away.
+
+### A failing `check` (item 45)
+
+Whenever a run reaches a suite's `check` (in `red`, and in `ci` on HEAD), the check and then that suite's test command run, suite by suite in declaration order, as today. When the check's shell (`sh -c`, the same as for the test command) ends unsuccessfully, by a non-zero exit or a signal that shipcraft observes, the run stops and refuses `no-report`, as today, but with its own reason. Before item 45 the reason said the suite "did not write the JUnit report" and quoted stderr only. In draken-platform the first `red` failed this way: the check was `tsc --noEmit`, which writes its errors to stdout, so the reason said "exited with 2 without writing to stderr" and pointed at the report.
+
+- **Reason:** `suite <name>: the check `<check>` failed (<how it ended>): <line>`. `<name>` is the suite's name as in the other `no-report` reasons. `<check>` is rendered on one line as the command is today. `<how it ended>` is worded as today (for example `exited with 2`, or the signal). `<line>` is the first non-blank line the check wrote on stderr, found by today's stderr scanner; if stderr has none, the first non-blank line on stdout, found by the same scanner (same decoding, trimming and length cut). Without either, the reason ends after the parenthesis, with no colon.
+- **Why and Next:** Why says the suite is judged only after the project passes its check. Next says to run the check at the suite's root (naming the root and the command), and to fix what it reports, which can be the code or stub, or a missing tool or dependency; in `red` it ends with "then run `shipcraft red` again".
+- **Unchanged:** the refusal code stays `no-report` and the run log records it as before; the check's output still passes through to shipcraft's stderr, as a best effort, and a failure to read or forward it does not change the verdict. A test command that writes no report keeps today's reason, stderr only. `build-failed` still comes first; the hook never runs `check`; docs-only CI and every refusal that comes before the suites run as before; a check that passes changes nothing; an outer timeout (`ci_timeout`) keeps its own outcome.
 
 ## 5. Layers and the gate
 
@@ -289,7 +297,7 @@ Output from a project command that `shipcraft` passes through always ends before
 | `merge-without-review` | No successful `shipcraft/review` on the PR's HEAD. |
 | `no-config` | No `.shipcraft.toml` at the project root. |
 | `no-git` | Not inside a git repository. |
-| `no-report` | The suite wrote no JUnit report. |
+| `no-report` | The suite wrote no JUnit report, or its `check` failed before the suite ran. |
 | `no-review-without-reason` | `--no-review` without a reason. |
 | `pr-from-fork` | The PR comes from a fork. |
 | `pr-not-on-branch` | `pr` run without a working branch. |
