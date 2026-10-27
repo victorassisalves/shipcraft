@@ -86,7 +86,7 @@ Each command is `shipcraft <command>`. Exit codes, unless the row says otherwise
 | `red` | Runs the suite, requires assertion failures, writes an open lock. Refuses `lock-open`, `red-already-passes`, `error-before-assertions`, `no-report`, `suite-without-tests`, `build-failed`. |
 | `check [--commit-msg <file>]` | The hook: judges the commit against the open locks and closes them when the RED cases pass. With `--commit-msg` it judges the final index and writes a close mark instead of the lock (`mark-failed` if it cannot). |
 | `close` | The `post-commit` half of the `commit-msg` route: if the mark matches the commit just made, adds one commit that only flips the lock to `closed`. On failure it changes nothing and says to rerun it. Always exits `0`. |
-| `ci --base <ref> [--pr]` | CI (section 2). `--pr` allows the docs-only path (section 5). |
+| `ci --base <ref> [--pr]` | CI (section 2). `--pr` allows the docs-only path (section 5). `ci` publishes no status (item 44). |
 | `pr [--title <t>] [--body <file>]` | Pushes (`--force-with-lease`), opens or updates the PR, runs the layers, posts statuses and summary (section 5). Refuses `pr-not-on-branch`. Exit `0` is guaranteed only when every layer passed or is off. |
 | `review` | Reviews local HEAD and prints the verdict; publishes nothing. Exit `0` on approval; refuses `review-changes-requested`, `review-error`, `review-off`. |
 | `review --pr <n>` | Reviews any PR in an isolated copy and publishes `shipcraft/review` and a comment. Refuses `pr-from-fork`. |
@@ -176,6 +176,18 @@ With `ci = "github"` and `review = "local"`, `shipcraft pr` waits for GitHub's `
 2. Local CI runs `shipcraft ci --base <merge-base> --pr` and publishes `shipcraft/ci` on HEAD.
 3. Only if CI passed, the review runs and publishes `shipcraft/review` and a comment.
 4. Posts a summary: runs, refusals and time per layer, review tokens, product lines changed (tests, support files, pure renames, lockfiles and binaries excluded), a split hint above `warn_lines`, and a warning for each product file that grows past the project's p90 file size. Warnings never change exit codes or statuses.
+
+**`ci` publishes no status (item 44).** `shipcraft ci` never publishes a status, with or without `--pr`, because it cannot prove that its base is the PR's base or that it ran on the pushed HEAD. An executed CI result reaches `shipcraft/ci` only through `shipcraft pr` (local CI) or the documented GitHub workflow; `pr` still publishes the off-layer status of section 4. In draken-platform#18 an agent ran `shipcraft ci --base origin/main --pr` and `shipcraft review --pr 18` by hand, read "CI ok", and `shipcraft merge` refused for lack of `shipcraft/ci`.
+
+So whenever `ci` exits `0` (suites green, docs only, an empty range, or an accepted open RED cycle), the line `shipcraft: CI ok.` is followed on stdout by exactly one more line, the last, with no blank line, chosen by the `ci` value of the config this run judges by:
+
+| `ci` | Last line |
+|---|---|
+| `local` | `shipcraft: ci publishes no status; shipcraft pr runs CI and publishes shipcraft/ci on HEAD.` |
+| `github` | `shipcraft: ci publishes no status; the GitHub workflow publishes shipcraft/ci on HEAD.` |
+| `off` | `shipcraft: ci publishes no status; with ci = "off", shipcraft pr publishes shipcraft/ci as off.` |
+
+Nothing else changes: refusals and errors print no such line, and exit codes, stderr, the run log and every status stay as they are. Inside `shipcraft pr` the line is the last of the CI child's output; `pr`'s own lines follow as before.
 
 **Docs-only PRs (item 40).** With `--pr`, a PR is docs only when the diff from the merge-base to HEAD is not empty and every entry is a regular file added, modified or deleted (a rename counts as both paths; no link, submodule, mode or type change) whose path is a `*.md` file at the repository root or anything under the top-level `docs/`, and none of those paths is protected (a test or support file of any suite, `.shipcraft.toml`, `.shipcraft/`, hook integration files), and no lock is open at HEAD, and every suite's `root` is a chain of folders of HEAD's tree (no link, file, submodule, missing path, `..` or absolute root; without that, shipcraft cannot tell which `.md` a suite reads as a test). Then CI still checks every commit, skips `[build]`, `check` and the suites, and prints exactly one line, `docs only: the suites do not run`. Any doubt runs everything. There is no config: a `.md` outside the root and `docs/` (for example one embedded in the code) always runs the suites. Every `ci` row of the run log has `docs_only` (`true` or `false`).
 
