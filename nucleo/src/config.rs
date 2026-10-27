@@ -145,13 +145,16 @@ pub struct Build {
 #[derive(Deserialize)]
 #[serde(default)]
 pub struct Execucao {
+    /// Items 42 and 47: `ci`, `review` and `merge` take any TOML value here, so
+    /// that `check_execution` names a wrong one instead of a `config-invalid`.
+    #[serde(deserialize_with = "any_value")]
     pub ci: String,
-    #[serde(rename = "review")]
+    #[serde(rename = "review", deserialize_with = "any_value")]
     pub revisao: String,
     #[serde(rename = "ci_timeout")]
     pub tempo_max_ci: u64,
-    /// Item 42: how `shipcraft merge` merges, `merge` or `squash`; checked
-    /// before deserializing (`check_merge`).
+    /// Item 42: how `shipcraft merge` merges, `merge` or `squash`.
+    #[serde(deserialize_with = "any_value")]
     pub merge: String,
 }
 
@@ -255,11 +258,11 @@ impl Config {
     pub fn parse(text: &str) -> Result<Config> {
         check_legacy_keys(text)?;
         check_min(text)?;
-        check_merge(text)?;
         let mut config: Config = match toml::from_str(text) {
             Ok(config) => config,
             Err(e) => return not_toml(text, &e),
         };
+        check_execution(text)?;
         config.normalize()?;
         Ok(config)
     }
@@ -428,11 +431,34 @@ fn camada(key: &str, value: &str) -> Result<Camada> {
     }
 }
 
-/// Item 42: `[execution] merge` is `"merge"` (the default) or `"squash"`;
-/// any other value, a non-string included, refuses wherever the config is read.
-fn check_merge(text: &str) -> Result<()> {
+/// A string as it is, any other TOML value as TOML; `check_execution` refuses it.
+fn any_value<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<String, D::Error> {
+    Ok(match toml::Value::deserialize(d)? {
+        toml::Value::String(s) => s,
+        other => other.to_string(),
+    })
+}
+
+/// Items 42 and 47: `[execution] ci` and `review` are `"local"`, `"github"` or
+/// `"off"`, and `merge` is `"merge"` (the default) or `"squash"`; any other
+/// value, a non-string included, refuses wherever the config is read, checked
+/// in the order `ci`, `review`, `merge`. `review = "github"` passes here and is
+/// refused by `camadas()`.
+fn check_execution(text: &str) -> Result<()> {
     let Ok(table) = text.parse::<toml::Table>() else { return Ok(()) };
-    let Some(value) = table.get("execution").and_then(|e| e.get("merge")) else { return Ok(()) };
+    let Some(execution) = table.get("execution") else { return Ok(()) };
+    for key in ["ci", "review"] {
+        let Some(value) = execution.get(key) else { continue };
+        if !matches!(value.as_str(), Some("local" | "github" | "off")) {
+            return refuse(
+                "execution-invalid",
+                format!("[execution] {key} = {value} is not a value shipcraft knows"),
+                "each layer runs on this machine, on GitHub or is off, and shipcraft does not guess which",
+                format!("use {key} = \"local\", \"github\" or \"off\" in .shipcraft.toml on main"),
+            );
+        }
+    }
+    let Some(value) = execution.get("merge") else { return Ok(()) };
     if matches!(value.as_str(), Some("merge" | "squash")) {
         return Ok(());
     }
@@ -557,13 +583,24 @@ globs = ["tests/**"]
         assert_eq!(suite.verifica.as_deref(), Some("suite-check"));
         assert!(suite.filtra == super::Filtra::Comando);
         assert!(Config::parse("filter = \"comando\"").is_err());
-        assert!(Config::parse("[execution]\nci = \"desligado\"").unwrap().camadas().is_err());
+        assert!(Config::parse("[execution]\nreview = \"github\"").unwrap().camadas().is_err());
         assert_eq!(Config::parse("").unwrap().execucao.merge, "merge");
         assert_eq!(Config::parse("[execution]\nmerge = \"squash\"").unwrap().execucao.merge, "squash");
-        for bad in ["\"rebase\"", "7", "true"] {
-            let refused = Config::parse(&format!("[execution]\nmerge = {bad}"));
-            assert!(matches!(refused, Err(crate::refusal::Stop::Refused(r)) if r.code == "execution-invalid"));
+        for bad in [
+            "merge = \"rebase\"",
+            "merge = 7",
+            "merge = true",
+            "ci = \"desligado\"",
+            "ci = \"LOCAL\"",
+            "ci = 7",
+            "review = \"off \"",
+            "review = [\"local\"]",
+        ] {
+            let refused = Config::parse(&format!("[execution]\n{bad}"));
+            assert!(matches!(refused, Err(crate::refusal::Stop::Refused(r)) if r.code == "execution-invalid"), "{bad}");
         }
+        let refused = Config::parse("[execution]\nci = \"foo\"\nci_timeout = \"bad\"");
+        assert!(matches!(refused, Err(crate::refusal::Stop::Refused(r)) if r.code == "config-invalid"));
     }
 
     #[test]
