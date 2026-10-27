@@ -74,71 +74,73 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>) -> Result<(
     // Item 38: the ci, review and pr rows of this PR carry its locks.
     let locks = medicao::locks_changed(repo, &base_sha, &head);
     medicao::set_pr_locks(&locks);
-    let size = medicao::product_lines(repo, &config, &base_sha, &head)?;
-    std::env::set_var(medicao::LINHAS_ENV, (size.0 + size.1).to_string());
-    let forma = forma::forma(repo, &config, &base_sha, &head);
-    std::env::set_var(forma::AVISOS_ENV, forma.avisos.map_or("null".to_string(), |n| n.to_string()));
+    // Item 38: from here the PR and its locks are known, so the `pr` row
+    // records how the command ended (passed, refused, or error), whichever
+    // later step stops it.
+    let result = (|| -> Result<()> {
+        let size = medicao::product_lines(repo, &config, &base_sha, &head)?;
+        std::env::set_var(medicao::LINHAS_ENV, (size.0 + size.1).to_string());
+        let forma = forma::forma(repo, &config, &base_sha, &head);
+        std::env::set_var(forma::AVISOS_ENV, forma.avisos.map_or("null".to_string(), |n| n.to_string()));
 
-    let ci_gate = match ci {
-        Camada::Local => local_ci(repo, &config, &branch, &head, &base)?,
-        Camada::Github if revisao == Camada::Local => wait_github_ci(repo, &config, &head)?,
-        Camada::Github => Gate::Passed,
-        Camada::Desligado => {
-            gh::status(repo, &head, "shipcraft/ci", "success", OFF)?;
-            println!("shipcraft: CI {OFF}");
-            Gate::Passed
+        let ci_gate = match ci {
+            Camada::Local => local_ci(repo, &config, &branch, &head, &base)?,
+            Camada::Github if revisao == Camada::Local => wait_github_ci(repo, &config, &head)?,
+            Camada::Github => Gate::Passed,
+            Camada::Desligado => {
+                gh::status(repo, &head, "shipcraft/ci", "success", OFF)?;
+                println!("shipcraft: CI {OFF}");
+                Gate::Passed
+            }
+        };
+        let gate = match (ci_gate, revisao) {
+            (Gate::Passed, Camada::Local) => {
+                let title = gh::json(repo, &["pr", "view", &number.to_string(), "--json", "title"])?["title"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
+                let req = Request {
+                    repo,
+                    config: &config,
+                    diff_sha256: diff_sha256(repo, &base_sha, &head),
+                    sha: head.clone(),
+                    base_sha,
+                    title,
+                    body,
+                    pr: Some(number),
+                    branch: branch.clone(),
+                };
+                review_and_publish(&req)?
+            }
+            (Gate::Passed, _) => {
+                gh::status(repo, &head, "shipcraft/review", "success", OFF)?;
+                println!("shipcraft: review {OFF}");
+                Gate::Passed
+            }
+            (stopped, _) => stopped,
+        };
+        let summary = medicao::summary(repo, &branch) + "\n" + &medicao::size_text(&config, size) + &forma.text;
+        gh::comment(repo, number, &summary)?;
+        match gate {
+            Gate::Passed => {
+                println!(
+                    "shipcraft: PR #{number} ready: enabled layers passed; merge with `shipcraft merge {number}`."
+                );
+                Ok(())
+            }
+            Gate::Stopped(code, why) => refuse(
+                code,
+                format!("PR #{number} is not ready: {why}"),
+                "merging requires green CI and review on the latest PR commit",
+                "fix what the layer reported, commit and run shipcraft pr again",
+            ),
         }
-    };
-    let gate = match (ci_gate, revisao) {
-        (Gate::Passed, Camada::Local) => {
-            let title = gh::json(repo, &["pr", "view", &number.to_string(), "--json", "title"])?["title"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string();
-            let req = Request {
-                repo,
-                config: &config,
-                diff_sha256: diff_sha256(repo, &base_sha, &head),
-                sha: head.clone(),
-                base_sha,
-                title,
-                body,
-                pr: Some(number),
-                branch: branch.clone(),
-            };
-            review_and_publish(&req)?
-        }
-        (Gate::Passed, _) => {
-            gh::status(repo, &head, "shipcraft/review", "success", OFF)?;
-            println!("shipcraft: review {OFF}");
-            Gate::Passed
-        }
-        (stopped, _) => stopped,
-    };
-    let summary = medicao::summary(repo, &branch) + "\n" + &medicao::size_text(&config, size) + &forma.text;
-    gh::comment(repo, number, &summary)?;
-    // Item 38: the PR as a step of the locks it delivers (`locks`, possibly empty).
-    let (result, code) = match &gate {
-        Gate::Passed => ("passed", ""),
-        Gate::Stopped(code, _) => ("refused", *code),
-    };
-    medicao::record(
-        repo,
-        json!({"layer": "pr", "secs": medicao::seconds(started), "result": result, "code": code,
-               "pr": number, "branch": branch, "commit": head, "base": base}),
-    );
-    match gate {
-        Gate::Passed => {
-            println!("shipcraft: PR #{number} ready: enabled layers passed; merge with `shipcraft merge {number}`.");
-            Ok(())
-        }
-        Gate::Stopped(code, why) => refuse(
-            code,
-            format!("PR #{number} is not ready: {why}"),
-            "merging requires green CI and review on the latest PR commit",
-            "fix what the layer reported, commit and run shipcraft pr again",
-        ),
-    }
+    })();
+    let mut row = medicao::row(repo, "pr", started, &result);
+    row["pr"] = json!(number);
+    row["base"] = json!(base);
+    medicao::record(repo, row);
+    result
 }
 
 /// Item 3, rule 2: `shipcraft ci --pr` on this machine, through the queue and with
