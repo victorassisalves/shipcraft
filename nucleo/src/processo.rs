@@ -52,5 +52,9 @@ fn kill_group(pgid: u32) -> std::io::Result<()> {
         return Ok(());
     }
     let err = std::io::Error::last_os_error();
-    if err.raw_os_error() == Some(ESRCH) { Ok(()) } else { Err(err) }
+    if err.raw_os_error() == Some(ESRCH) {
+        Ok(())
+    } else {
+        Err(err)
+    }
 }
