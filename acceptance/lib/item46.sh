@@ -210,6 +210,7 @@ PY
         chk 'prints path and sorted case delta lists' "$PY" - "$CW/redo-output" "$lf" <<'PY'
 import pathlib,sys
 s=pathlib.Path(sys.argv[1]).read_text(); assert sys.argv[2] in s,s
+s=s.split(sys.argv[2],1)[1]
 assert 'test_added_a' in s and 'test_added_z' in s and 'test_fixture' in s,s
 assert s.index('test_added_a')<s.index('test_added_z'),s
 assert 'added' in s.lower() and 'no longer' in s.lower() and 'newly' in s.lower(),s
