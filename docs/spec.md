@@ -20,10 +20,18 @@ On top of that, every PR goes through two layers before merge: `shipcraft` CI an
 |---|---|
 | `format` | The lock format version. A `shipcraft` that does not know it refuses to judge (`lock-format`). |
 | `state` | `open` or `closed`. |
-| `files` | The SHA-256 of each locked file (tests, support files, `.shipcraft.toml`), by path. |
+| `files` | The SHA-256 of each locked file (tests, support files, `.shipcraft.toml`), by path. In format 3 each value is written `sha256:<64 lowercase hex>`. |
 | `cases` | The cases the report showed at RED, skipped ones excluded. |
 | `failing_at_red` | The cases that failed at RED. |
 | `seal` | SHA-256 of the lock with an empty seal. It catches hand edits; it is not a signature. |
+
+**Lock format 3 (item 43).** `red` writes format 3, where every `files` value (tests, support files, runner configs, `.shipcraft.toml`) carries the `sha256:` prefix. In format 2 the value was the bare hex digest, and secret scanners read a 64-character hex value after a path that names `auth`, `access`, `token` or `key` as a leaked credential: gitleaks 8.30.1 with its default rules reported `generic-api-key` twice on one lock in draken-platform#18, and zero on the same lock with the prefix. Paths, case ids and `seal` are unchanged.
+
+- **The seal** is computed as in format 2: SHA-256 of the lock's compact JSON with an empty `seal`, fields in their fixed order and `files` sorted by path, with the `files` values exactly as written (prefixed in format 3). It does not depend on the file's whitespace or key order.
+- **Format belongs to each lock.** A binary that writes format 3 reads format 2 and 3 locks, each by its own `format`, at every snapshot it reads: the hook's parent and index, every commit CI walks, both parents of a merge. A format 2 lock is judged as before: its bare values are compared to the digest of the file's bytes. Repositories are never migrated; a tree can hold locks of both formats.
+- **Closing keeps the format.** Every path that closes a lock (`close` after the commit, and `check` when it closes) changes only `state` and `seal`; `format` and every `files` value stay as they were. A format 2 lock closes as format 2.
+- **Value syntax is part of reading a lock.** A format 3 lock whose `files` value does not match `^sha256:[0-9a-f]{64}$` exactly (no trimming, no case folding), or a format 2 lock with a value that is not 64 lowercase hex characters, is not a valid lock, whatever its seal, state or the files' contents: it is refused like a hand edit (`lock-edited`), where a hand edit is refused today. A lock that is not JSON or not a lock object is handled as today.
+- **Versions.** The item raises the binary to 2.3.0, so `init` writes `shipcraft_min = "2.3"`. `red` does not change an existing config: a project with `shipcraft_min = "2.1"` keeps it. A binary older than 2.3 refuses by the first thing it does not support: `shipcraft-min` when the config asks for 2.3, else `lock-format` on a format 3 lock.
 
 The RED is a commit: the one that adds the open lock, with the tests as locked and the suite failing. If a lock file is in the tree but outside the commit, the hook warns with the `git add` command; the warning never changes the verdict. One cycle at a time per branch: a new `red` is refused while the branch has an open lock (`lock-open`).
 
@@ -357,4 +365,4 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.2.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.3.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.

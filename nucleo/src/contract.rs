@@ -6,7 +6,7 @@ use crate::git::{Repo, Snapshot};
 use crate::init::LEFTHOOK_FILES;
 use crate::init_tool::{HUSKY, PRE_COMMIT_CONFIG};
 use crate::junit::{Outcome, Report};
-use crate::lock::{sha256_hex, Lock, LockFiles, LOCK_DIR};
+use crate::lock::{Lock, LockFiles, LOCK_DIR};
 use crate::refusal::{refuse, short_list, Result};
 use crate::suite::Missing;
 use std::collections::BTreeSet;
@@ -115,7 +115,9 @@ fn judge(
         )
     };
     let Some(lock) = Lock::parse(bytes) else { return edited() };
-    if before.contains(&bytes) {
+    // Item 43: the seal does not depend on whitespace or key order, so a lock
+    // that reads the same as a parent's is kept, whatever its presentation.
+    if before.contains(&bytes) || before.iter().filter_map(|old| Lock::parse(old)).any(|old| old == lock) {
         return Ok(Change::Kept(lock));
     }
     if before.is_empty() && lock.is_open() {
@@ -145,7 +147,7 @@ pub fn check_files(repo: &Repo, snapshot: &Snapshot, lock_path: &str, lock: &Loc
                 format!("restore {file} as it was at RED and make the code pass it"),
             );
         };
-        if sha256_hex(&bytes) == *hash {
+        if lock.digest(&bytes) == *hash {
             continue;
         }
         if file == CONFIG_FILE {

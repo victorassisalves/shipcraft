@@ -4,7 +4,7 @@
 use crate::config::{Config, CONFIG_FILE};
 use crate::git::{Repo, Snapshot};
 use crate::junit::Outcome;
-use crate::lock::{lock_files, new_lock_path, sha256_hex, Lock};
+use crate::lock::{lock_files, new_digest, new_lock_path, Lock};
 use crate::refusal::{failed, refuse, short_list, Result};
 use crate::suite;
 use std::collections::BTreeMap;
@@ -123,7 +123,7 @@ fn locked_files(repo: &Repo, config: &Config) -> Result<BTreeMap<String, String>
     let mut files = BTreeMap::new();
     for path in config.test_files(repo)?.iter().map(String::as_str).chain([CONFIG_FILE]) {
         let bytes = fs::read(repo.path(path)).map_err(|e| failed(format!("read {path}: {e}")))?;
-        files.insert(path.to_string(), sha256_hex(&bytes));
+        files.insert(path.to_string(), new_digest(&bytes));
     }
     Ok(files)
 }

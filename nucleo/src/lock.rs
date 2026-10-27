@@ -8,8 +8,12 @@ use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const LOCK_DIR: &str = ".shipcraft/locks";
-/// The lock format this shipcraft writes and reads (item 9, rule 2).
-pub const FORMAT: u64 = 2;
+/// The lock format this shipcraft writes (item 9, rule 2; item 43: format 3).
+pub const FORMAT: u64 = 3;
+/// The lock formats this shipcraft reads, each lock by its own `format`.
+pub const FORMATS: [u64; 2] = [2, FORMAT];
+/// Item 43: in format 3 each `files` value carries this prefix.
+const PREFIX: &str = "sha256:";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -24,7 +28,8 @@ pub struct Lock {
     #[serde(rename = "format")]
     pub formato: u64,
     pub state: State,
-    /// sha256 of each locked test file and of `.shipcraft.toml`, by path.
+    /// sha256 of each locked test file and of `.shipcraft.toml`, by path; in
+    /// format 3 written `sha256:<hex>` (item 43), in format 2 the bare hex.
     pub files: BTreeMap<String, String>,
     /// The cases the report showed at the RED (skipped ones excluded).
     pub cases: Vec<String>,
@@ -36,11 +41,17 @@ pub struct Lock {
 }
 
 impl Lock {
+    /// A new open lock in the current format; `files` values come from `new_digest`.
     pub fn open(files: BTreeMap<String, String>, cases: Vec<String>, failing_at_red: Vec<String>) -> Lock {
         Lock { formato: FORMAT, state: State::Open, files, cases, failing_at_red, seal: String::new() }.sealed()
     }
 
-    /// The same lock, closed by shipcraft.
+    /// The `files` value these bytes have in this lock's own format (item 43).
+    pub fn digest(&self, bytes: &[u8]) -> String {
+        digest(self.formato, bytes)
+    }
+
+    /// The same lock, closed by shipcraft: only `state` and `seal` change.
     pub fn closed(&self) -> Lock {
         Lock { state: State::Closed, ..self.clone() }.sealed()
     }
@@ -49,10 +60,22 @@ impl Lock {
         self.state == State::Open
     }
 
-    /// None when the bytes are not a lock, or when it was edited by hand.
+    /// None when the bytes are not a lock, or when it was edited by hand: a
+    /// broken seal, or a `files` value outside its format's syntax (item 43).
     pub fn parse(bytes: &[u8]) -> Option<Lock> {
         let lock: Lock = serde_json::from_slice(bytes).ok()?;
-        (lock.seal == lock.compute_seal()).then_some(lock)
+        (lock.files.values().all(|value| lock.valid_value(value)) && lock.seal == lock.compute_seal()).then_some(lock)
+    }
+
+    /// Format 3: exactly `sha256:` and 64 lowercase hex; format 2: exactly 64
+    /// lowercase hex. No trimming, no case folding.
+    fn valid_value(&self, value: &str) -> bool {
+        let hex = match self.formato {
+            2 => Some(value),
+            3 => value.strip_prefix(PREFIX),
+            _ => None,
+        };
+        hex.is_some_and(|hex| hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
     }
 
     pub fn to_json(&self) -> String {
@@ -92,9 +115,9 @@ pub fn lock_files(repo: &Repo, snapshot: &Snapshot) -> Result<LockFiles> {
 fn check_format(path: &str, bytes: &[u8]) -> Result<()> {
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) else { return Ok(()) };
     match value.get("format").or_else(|| value.get("formato")) {
-        Some(f) if value.get("formato").is_some() || f.as_u64() != Some(FORMAT) => refuse(
+        Some(f) if value.get("formato").is_some() || !f.as_u64().is_some_and(|f| FORMATS.contains(&f)) => refuse(
             "lock-format",
-            format!("lock {path} has format {f}, and this shipcraft only knows format {FORMAT}"),
+            format!("lock {path} has format {f}, and this shipcraft only knows formats 2 and 3"),
             "two machines cannot judge the same commit differently without warning",
             "run `shipcraft red` again with this shipcraft to generate a lock in the current format",
         ),
@@ -107,6 +130,22 @@ pub fn new_lock_path() -> String {
     let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     let id = &sha256_hex(format!("{nanos}-{}", std::process::id()).as_bytes())[..12];
     format!("{LOCK_DIR}/{id}.json")
+}
+
+/// The `files` value of these bytes in a new lock (current format).
+pub fn new_digest(bytes: &[u8]) -> String {
+    digest(FORMAT, bytes)
+}
+
+/// The `files` value of these bytes in a lock of `format`: `sha256:<hex>` in
+/// format 3, the bare hex in format 2.
+fn digest(format: u64, bytes: &[u8]) -> String {
+    let hex = sha256_hex(bytes);
+    if format == 2 {
+        hex
+    } else {
+        format!("{PREFIX}{hex}")
+    }
 }
 
 pub fn sha256_hex(bytes: &[u8]) -> String {
