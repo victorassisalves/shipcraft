@@ -15,12 +15,4 @@ The coordinator includes this brief when assigning a spec item's acceptance case
 9. **Defect work starts with a main reproduction** (RULES.md, rule 4). Show the command and output before adding other cases. If it does not reproduce, stop and report `needs_input`: the premise may be wrong. Two prior defect premises failed this check.
 10. **Cases must not depend on the machine or a fixed version.** Do not create filenames differing only by case: common macOS filesystems treat them as one. Read the expected version from `nucleo/Cargo.toml` or `shipcraft --version`.
 11. **Find every case that depends on a changed fixed point.** Search all of `acceptance/` for the affected file, refusal or behavior, and list cases from other items that you adjusted or confirmed. Earlier changes broke 51 cases in one item and five in three others because their shared assumptions were missed.
-12. **Slice first; run the full battery once on the final head.** Run `SHIPCRAFT_ACCEPTANCE_CASES` with the affected IDs first. For a rename, also search fixtures and sealed locks for old names. During the command rename, two full runs were stopped to reseal historical config locks: about 19 minutes lost that a one-minute slice could have caught.
-
-    Detach the full run from the agent process (a capacity error can end the turn and its children; macOS has no `setsid` command):
-
-    ```sh
-    nohup perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV or die' env -u SHIPCRAFT_ACCEPTANCE_CASES -u SHIPCRAFT_ACCEPTANCE_REUSE SHIPCRAFT_ACCEPTANCE_JOBS=4 nice -n 10 bash acceptance/run.sh <binary> all > <log> 2>&1 &
-    ```
-
-    Follow the log or reuse cache without waiting in the foreground. After resuming a seat, inspect its existing log before starting another run. Include the final `run.sh: result saved: <id> (...)` line in the report.
+12. **Run the slice, not the whole battery.** Run `SHIPCRAFT_ACCEPTANCE_CASES` with the item's cases plus every case you adjusted or confirmed under rule 11. For a rename, also search fixtures and sealed locks for old names. The whole battery runs once, in the PR's CI (10 shards, the required `acceptance` check); a local full run repeated it at about 12 minutes a head (item 38 ran it twice). Metric: CI red on a head whose slice was green, at most 1 in 5 items; above that, the local full run comes back. Report the slice command and its `run.sh: total` line.
