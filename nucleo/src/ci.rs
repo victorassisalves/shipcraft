@@ -23,6 +23,12 @@ pub fn run(repo: &Repo, base: &str, pr: bool, docs_only: &mut bool) -> Result<()
     let base =
         repo.resolve(base)?.ok_or_else(|| failed(format!("--base {base} is not a commit in this repository")))?;
     let head_sha = repo.head()?.ok_or_else(|| failed("the repository has no commits"))?;
+    // Item 38: a CI run for a PR carries its locks, set before anything here
+    // can refuse, so the row of an early refusal still names them; `shipcraft
+    // pr` already set them.
+    if pr && medicao::pr_locks().is_none() {
+        medicao::set_pr_locks(&medicao::locks_changed(repo, &base, &head_sha));
+    }
     let head = Snapshot::Commit(head_sha.clone());
     // Item 31: HEAD's config is validated; a HEAD without one uninstalls.
     let head_config = Config::at(repo, &head)?;
@@ -33,10 +39,6 @@ pub fn run(repo: &Repo, base: &str, pr: bool, docs_only: &mut bool) -> Result<()
     };
     let commits = repo.commits_since(&base)?;
     *docs_only = pr && docs::docs_only(repo, &config, &base, &head_sha);
-    // Item 38: a CI run for a PR carries its locks; `shipcraft pr` already set them.
-    if pr && medicao::pr_locks().is_none() {
-        medicao::set_pr_locks(&medicao::locks_changed(repo, &base, &head_sha));
-    }
 
     // How each commit changed the locks; with an empty range, HEAD's locks as they are.
     let head_locks = lock_files(repo, &head)?;
