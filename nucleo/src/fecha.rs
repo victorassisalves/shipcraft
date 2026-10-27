@@ -123,9 +123,10 @@ fn closing_commit(repo: &Repo, marca: &Marca, head: &str) -> Result<Closed, Stri
         locks.push((path.clone(), bytes.unwrap_or_default(), blob, json));
     }
     let tree = git(repo, &on_temp, &["write-tree"])?;
-    let names: Vec<&str> =
+    let mut names: Vec<&str> =
         marca.travas.iter().map(|p| Path::new(p).file_stem().and_then(|s| s.to_str()).unwrap_or(p)).collect();
-    let message = format!("shipcraft: close lock {}", names.join(", "));
+    names.sort_unstable();
+    let message = format!("chore(shipcraft): close lock {}", names.join(", "));
     // `commit-tree` alone ignores commit.gpgsign; the effective config says whether to sign.
     let sign = git(repo, &[], &["config", "--type=bool", "commit.gpgsign"]).is_ok_and(|v| v == "true");
     let mut args = vec!["commit-tree", &tree, "-p", head, "-m", &message];
