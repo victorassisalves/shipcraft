@@ -23,6 +23,15 @@ pub const LOCKFILES: [&str; 7] =
 /// Item 38: the locks of the PR being run, as a JSON list, so the `ci` (a child
 /// process) and `review` rows it causes carry them.
 pub const LOCKS_ENV: &str = "SHIPCRAFT_PR_LOCKS";
+/// Item 50: Shipcraft's own files, `.shipcraft.toml` at the root and every
+/// path under `.shipcraft/`, are not product; matched literally on the
+/// repository-relative path git prints (the HEAD path of a rename).
+pub fn shipcraft_own(path: &[u8]) -> bool {
+    path == b".shipcraft.toml" || path.starts_with(b".shipcraft/")
+}
+/// The same paths as git pathspecs (whole tree minus Shipcraft's own), so a
+/// diff never reads an excluded blob.
+pub const NOT_OWN: [&str; 3] = [":(top)", ":(top,literal,exclude).shipcraft.toml", ":(top,literal,exclude).shipcraft/"];
 const AVISO: &str = "Smaller PRs usually get faster reviews; consider splitting.";
 
 /// Appends a row; measuring never breaks the command it measures.
@@ -165,14 +174,15 @@ pub fn summary(repo: &Repo, branch: &str) -> String {
 
 /// Item 11, rule 2: product lines `(added, removed)` from `base` to `head`.
 /// Out: test and support files, pure renames (0/0 in numstat), the closed
-/// list of lockfiles by name, and binaries (`-` in numstat).
+/// list of lockfiles by name, binaries (`-` in numstat) and Shipcraft's own
+/// files (item 50).
 pub fn product_lines(repo: &Repo, config: &Config, base: &str, head: &str) -> Result<(u64, u64)> {
     let out = repo.run(&["diff", "--numstat", "-z", "-M", base, head])?;
     let (mut added, mut removed) = (0, 0);
     for (path, counts) in numstat(&out) {
         let name = path.rsplit('/').next().unwrap_or(&path);
         let Some((a, r)) = counts else { continue };
-        if !LOCKFILES.contains(&name) && !config.is_test_file(&path) {
+        if !LOCKFILES.contains(&name) && !config.is_test_file(&path) && !shipcraft_own(path.as_bytes()) {
             added += a;
             removed += r;
         }

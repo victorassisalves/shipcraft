@@ -4,7 +4,7 @@
 
 use crate::config::Config;
 use crate::git::Repo;
-use crate::medicao::{numstat, LOCKFILES};
+use crate::medicao::{numstat, shipcraft_own, LOCKFILES, NOT_OWN};
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -60,13 +60,19 @@ fn measure(
     head: &str,
 ) -> Result<Option<(u64, Vec<(Vec<u8>, Option<u64>, u64)>)>, String> {
     let product = |path: &[u8]| {
+        if shipcraft_own(path) {
+            return false;
+        }
         let path = String::from_utf8_lossy(path);
         let name = path.rsplit('/').next().unwrap_or(&path);
         !LOCKFILES.contains(&name) && !config.is_test_file(&path)
     };
     // Binary is what git's numstat says (`-`), as in item 11: attributes count.
     let binaries = |from: &str, to: &str| -> Result<HashSet<String>, String> {
-        let out = git(repo, &["diff", "--numstat", "-z", "-M", from, to])?;
+        // Item 50: Shipcraft's own blobs are never read, not even for this.
+        let mut args = vec!["diff", "--numstat", "-z", "-M", from, to, "--"];
+        args.extend(NOT_OWN);
+        let out = git(repo, &args)?;
         Ok(numstat(&out).into_iter().filter(|(_, counts)| counts.is_none()).map(|(path, _)| path).collect())
     };
     let raw = git(repo, &["diff", "--raw", "-z", "-M", "--no-abbrev", base, head])?;
