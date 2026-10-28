@@ -41,10 +41,12 @@ STAGE=$(mktemp -d "${TMPDIR:-/tmp}/shipcraft-npm.XXXXXX") || exit 2
 trap 'rm -rf "$STAGE"' EXIT
 
 if [ -z "$PACK" ]; then
-  if npm view "shipcraft@$VERSION" version >/dev/null 2>&1; then
-    refuse "shipcraft@$VERSION is already on npm" "npm never accepts the same version twice" \
-      "publish a new release and run this with its version"
-  fi
+  for p in shipcraft shipcraft-darwin-arm64 shipcraft-darwin-x64; do
+    if npm view "$p@$VERSION" version >/dev/null 2>&1; then
+      refuse "$p@$VERSION is already on npm" "npm never accepts the same version twice, and a half-published version is not repaired in place" \
+        "publish a new release and run this with its version"
+    fi
+  done
 fi
 
 ASSETS="$STAGE/assets"; mkdir -p "$ASSETS"
@@ -121,19 +123,7 @@ if [ -n "$PACK" ]; then
   exit 0
 fi
 for p in $PLATFORMS shipcraft; do
-  if npm view "$p@$VERSION" version >/dev/null 2>&1; then
-    # A rerun keeps a package already published only if it carries the released binary.
-    if [ "$p" != shipcraft ]; then
-      got="$STAGE/registry-$p"; mkdir -p "$got"
-      (cd "$got" && npm pack --silent "$p@$VERSION" >/dev/null && tar -xzf ./*.tgz package/bin/shipcraft) || refuse \
-        "could not download $p@$VERSION from npm to check it" "a kept package must carry the released bytes" "run again"
-      [ "$(shasum -a 256 < "$got/package/bin/shipcraft")" = "$(shasum -a 256 < "$STAGE/$p/bin/shipcraft")" ] || refuse \
-        "$p@$VERSION on npm does not carry the released binary" "npm never lets a version be replaced" \
-        "deprecate $p@$VERSION on npm and publish a new release"
-    fi
-    echo "release/npm.sh: $p@$VERSION is already on npm with the released binary, kept"; continue
-  fi
   (cd "$STAGE/$p" && npm publish --access public) || refuse "npm publish of $p failed" \
-    "the registry did not take the package" "check \`npm whoami\` and run again: packages already published are kept"
+    "the registry did not take the package" "check \`npm whoami\`; if some packages of $VERSION were published, publish a new release"
 done
 echo "release/npm.sh: published$PLATFORMS shipcraft $VERSION"
