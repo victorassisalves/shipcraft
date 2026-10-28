@@ -76,7 +76,7 @@ When a locked test is itself wrong, no GREEN can pass it. In draken-platform a l
 
 Before item 53, `red` wrote every case that failed in its one run into `failing_at_red`. A case that failed by chance (a flaky test under load) became part of the contract: the GREEN had to make it pass, and a case whose id the next run does not report (a generated parameter, a timeout at block level) made the RED unpassable. On the Forge (POC-019, 2.11.0 probe, 15,774 cases, load average 8 to 11) a RED with one intended failing test locked four; the three others were in files the RED did not touch.
 
-- **The second run.** After its run is read and judged as today (`[build]`, `check`, `no-report`, `error-before-assertions`, `group-failed`, `red-already-passes` when nothing failed, `suite-without-tests` on the first run's failures; for `--redo`, `redo-drops-case` before `red-already-passes`), `red` runs once more the suites that have a case in `F`, the first run's failed cases (suite-prefixed, as `failing_at_red` writes them), in configuration order, on the same working tree. Each runs as the hook runs a suite for a lock whose `failing_at_red` is `F` and whose `files` are the files `red` is about to lock, read from the working tree just before the second run: the same command, `filter`, `SHIPCRAFT_CASES` and `SHIPCRAFT_FILES` (this run is the one `red` command that receives them; §6), item 51's positional files, and the same fallback to every locked file when a case of `F` does not map to a file. Only the execution and the report reading are the hook's; none of the hook's verdicts (`case-missing`, `case-broke`, `red-already-passes`) apply. `[build]` and `check` do not run again. The second run is part of the same `red` command: one run log row, whose `secs` covers both runs.
+- **The second run.** After its run is read and judged as today (`[build]`, `check`, `no-report`, `error-before-assertions`, `group-failed`, `red-already-passes` when nothing failed, `suite-without-tests` on the first run's failures; for `--redo`, `redo-drops-case` before `red-already-passes`), `red` runs once more the suites that have a case in `F`, the first run's failed cases (suite-prefixed, as `failing_at_red` writes them), in configuration order, on the same working tree. Each runs as the hook runs a suite for a lock whose `failing_at_red` is `F` and whose `files` are the files `red` is about to lock, read from the working tree just before the second run: the same command, `filter`, `SHIPCRAFT_CASES` and `SHIPCRAFT_FILES` (the only `red` run that receives `SHIPCRAFT_CASES`; item 55's narrowed first run receives `SHIPCRAFT_FILES` only; §6), item 51's positional files, and the same fallback to every locked file when a case of `F` does not map to a file. Only the execution and the report reading are the hook's; none of the hook's verdicts (`case-missing`, `case-broke`, `red-already-passes`) apply. `[build]` and `check` do not run again. The second run is part of the same `red` command: one run log row, whose `secs` covers both runs.
 - **What is locked as failing.** Each suite's second report is read by the same reader as the first (duplicates folded to the worst outcome, kept separate from the first run's report). A case of `F` is dropped from `failing_at_red` only if that report shows it passed. A case of `F` that failed, errored, was skipped or is absent from the second report stays locked, and so does every case of `F` of a suite whose second run gives no readable report: absence is not evidence that the behavior passes. A case that fails or errors only in the second run is ignored. `cases` comes from the first run, and `files` is hashed after the second run, as `red` hashes after its run today.
 - **Reported.** When some case of `F` is dropped, `red` prints, before its usual lines and only when it writes the lock, `shipcraft: not locked, passed on a second run: <cases>`, byte-sorted, with item 52's list formatting and control-character escaping. The `red` row of the run log has `rerun_dropped`, the number of dropped cases, on rows that write a lock.
 - **Refusals.** If every case of `F` passed in the second run, `red` refuses `red-not-reproduced`, naming `F`, and writes no lock (`--redo` leaves the lock as it was). `Why:` a RED's failure must happen every time the test runs without the implementation; these failed once and then passed. `Next:` run the command again; if the tests keep passing on their own, fix them (or the setup they depend on). The second run adds no other refusal.
@@ -86,6 +86,102 @@ Before item 53, `red` wrote every case that failed in its one run into `failing_
 - **Known limits.** A flaky case that fails twice in a row is locked. A RED test that passes on its second run, by chance or because it depends on a test file the narrowed run leaves out, is dropped; the lock may then close one commit early, and CI runs it at HEAD. A test that rewrites a protected file when it runs is hashed as the second run leaves it, as `red` hashes after its run today.
 
 Wrong-measurement note: since 1.0 `red` took one run's failures as the RED; found on the Forge in POC-019.
+
+### `red` runs the changed test files (item 55)
+
+Before item 55, `red` ran every suite in full to learn which cases fail, and most of that run went to tests the RED never touched. On Shipcraft's own repository a `red` took 1,521 s at 2 jobs (`metrics/dogfood-hook-2026-10-27.md`), while a whole item takes about 10 min from RED to main (median). On the Forge (15,774 cases) a `red` took about 6 min. A full run also locks a failure the RED did not cause: a test that already fails on the branch, in a file the RED never touched, became part of the contract (the Forge, POC-019). POC-020 replayed items 41 to 50 with only the RED's changed test files run: it missed 0 of 212 failing cases and ran a median of 1.7% of the cases.
+
+**The base.**
+- `red` takes `--base <ref>` when given, else `refs/remotes/origin/HEAD`, and resolves it with `git rev-parse --verify <ref>^{commit}`.
+- The base commit is the merge base of `HEAD` and that commit, as `git merge-base --all` gives it, and there must be exactly one.
+- Anything else falls back to the full run: no ref, a ref that is not a commit, an unborn `HEAD`, zero or several merge bases, or a git command that fails.
+
+**The changed paths.**
+- They are the union of two lists:
+  - the paths that `git diff -z --name-status --no-renames <base commit>` reports between the base commit and the working tree (tracked files, staged or not, compared by their final content, mode and type; a path whose changes cancel out is not changed);
+  - untracked, non-ignored files, from `git ls-files -z --others --exclude-standard`.
+- Ignore rules apply only to untracked files: a tracked file under an ignored folder that changed is a changed path.
+- If either command fails, `red` falls back to the full run.
+
+**The selection.**
+- A suite's *selected files* are its changed paths that:
+  - match the suite's globs, read and matched exactly as protection reads them;
+  - and are not `.shipcraft.toml` itself.
+- Paths are relative to each suite's `root`.
+- Each selected file must be a readable regular file as `lstat` sees it (a symlink is not one), and every path git reports must be valid UTF-8. Otherwise `red` falls back to the full run (`unreadable path`).
+- A changed path that matched a suite's globs at the base commit and was deleted or is no longer a regular file makes `red` fall back to the full run. So does a changed `.shipcraft.toml`.
+
+**The narrowed run.** When some suite has selected files and no fallback applies:
+1. `red` runs `[build]` as today.
+2. It runs the suites in configuration order, each with today's steps in today's order. A suite with selected files runs its `check`, then its command. A suite with none runs its `check` and skips its command. A failing `check` refuses as today, at once; coverage is judged only after every suite has run.
+3. The command of a suite with selected files runs with the hook's filter for its RED files (`filter = "shipcraft"`), where the selected files stand in for the RED files:
+   - for pytest, vitest and jest, every other present test file of the suite is left out, and vitest also gets each selected file as a positional argument;
+   - for Go, every `./...` of the command becomes the packages of the selected files, as in the hook, with no `-run`: the whole package runs, and its cases from other files are left out below;
+   - with `filter = "command"`, the command runs as written;
+   - for any runner, `SHIPCRAFT_FILES` lists the selected files (absolute, NUL-terminated, deduplicated, in byte order, as in section 6), and `SHIPCRAFT_CASES` is not set.
+
+**Coverage, judged before any verdict on the narrowed run.**
+- `red` maps each case of each report to its file with the hook's mapper (section 6: the map from case ids to locked files, with the hook's rules for roots and leading parts).
+- It falls back to the full run, without judging the narrowed reports, when:
+  - a suite that ran gives no readable report;
+  - the mapper finds no single map for a report;
+  - a case of a report maps to no file, or to more than one;
+  - or a selected file holds no case of any outcome. This last one is a helper, fixture or runner config that tests depend on, or a file the runner did not run, and `red` cannot know which tests depend on it.
+- Otherwise the narrowed run stands. Its reports keep only the cases that map to a selected file. Cases from other files that the runner ran anyway are left out, so they are neither in `cases` nor in `failing_at_red`. The result is then judged with today's refusals and precedence (`error-before-assertions`, `group-failed`, `red-already-passes`, `suite-without-tests` on the suites that ran).
+
+**The full run.**
+- On a fallback, `red` runs today's `red`: every suite, every step.
+- If the fallback was decided after the narrowed run had started, `[build]` and the checks already run are not repeated. The suites run again in configuration order: a suite whose check has not run yet runs it first (a failing one refuses as today), then every suite's command runs once in full, without the narrowed lists. The narrowed reports are discarded.
+- Only the full reports supply `cases`, `failing_at_red` and item 53's `F`.
+
+**What the lock holds.**
+- `files` is computed exactly as today: every locked file of every suite, hashed. Protection does not narrow.
+- `cases` holds the kept cases of the reports that stand. After a narrowed run, that means the selected files' cases only, so `--redo`'s `redo-drops-case` compares only those.
+- `failing_at_red` comes from those cases as today, then item 53's second run, unchanged.
+
+**Reported.**
+- `red` prints one line before its usual lines, on success and on any refusal after the selection is decided:
+  - after a narrowed run: `shipcraft: red ran the changed test files: <n> of <m>`;
+  - after a fallback: `shipcraft: red ran every suite: <reason>`.
+- `<n>` is the number of distinct selected files, by repository path. `<m>` is the number of distinct locked files across the suites, by repository path.
+- `<reason>` is the first that applies, in this order: `--redo`, `--all`, `no base`, `no merge base`, `git failed`, `config changed`, `protected file removed`, `unreadable path`, `nothing selected`, `no report`, `case without file`, `file without cases`.
+- The `red` row of the run log gets three fields when the selection is decided:
+  - `selection`: `"changed"` or `"all"`;
+  - `selected_files`: `<n>` when a narrowed run started (kept after a later fallback), else 0;
+  - `fallback`: the reason, or `null` after a narrowed run.
+- A `red` refused before the selection is decided (`lock-open`, a config error) writes its row without the three fields. Each `red` command still writes one row.
+
+**Options.**
+- `--all` forces the full run.
+- `--base <ref>` names the base.
+- `--redo` always runs the full run, as today, since a redo must see every case of the lock it rewrites. With `--redo`, `--base` is accepted and ignored, and so is `--all`.
+- A repeated option or a `--base` without a value is invalid arguments (exit `2`).
+
+**Section 6.** The exception that lets `red` pass `SHIPCRAFT_FILES` now covers two runs, under the same rules:
+- the first run when it is narrowed, which gets `SHIPCRAFT_FILES` only;
+- the second run of item 53.
+
+**Unchanged.** The hook, CI (which runs every suite at HEAD and refuses `suite-red`), the lock format, `check`, `close` and item 53's second run.
+
+**Battery.**
+- The cases whose projects have an `origin` with `origin/HEAD` (`remote_setup`, `pr_main`) now narrow when their RED changes test files. Their assertions must hold unchanged:
+  - `v1-40.trava-aberta`;
+  - `v1-42.closed-*`;
+  - `v1-50.reproduction`, whose tests sit in the base already, so it falls back with `nothing selected`;
+  - `v1-38.*`, one `red` row per command;
+  - `v1-44.local-red`, `v1-44.github-red`, `v1-44.off-red`;
+  - `v1-10.1-execucoes-jsonl`.
+- The cases with no `origin` run in full as before, and their command and environment counts stay as they are: `v1-22.ambiente-red`, `v1-22.ambiente-build`, `v1-22.bash`, `v1-53.*`, `v1-16a.1-red-build`, `v1-45.red-order`.
+
+**Versions.** The item raises the binary to 2.13.0. No lock or config field changes.
+
+**Known limits.**
+- A case outside the selected files that the RED breaks is not run at RED, for example through a product stub the RED changed, or through a helper outside the globs. CI refuses it later as `suite-red`. This costs time, never an escape.
+- A selected file holding cases proves only that it ran, not that no other test depends on it. A vitest test file that other test files import, or a pytest file that registers fixtures for others, can change their results unseen until CI.
+- A failure already on the branch that lives in a selected file is still locked.
+- `origin/HEAD` is taken as the remote's default branch as this clone last recorded it. If the default branch changed since, `red` narrows against the old one and may select more files or fewer: a failing test that is only on the old branch is then missed at RED, and CI catches it. `--base` overrides it.
+- Go's case-to-file map reads test declarations line by line, as the hook does. A test it does not recognize maps to no file, so it falls back to the full run.
+- A fallback after a narrowed run costs both runs. The log's `fallback` field measures how often that happens.
 
 ### The lock closes by itself
 
@@ -121,7 +217,7 @@ Each command is `shipcraft <command>`. Exit codes, unless the row says otherwise
 | `--version` | Prints `shipcraft <X.Y.Z> (<12-char commit>)`, in any folder. |
 | (no arguments) | Prints usage, exit `0`. |
 | `init [--lang python\|node\|go] [--github]` | Sets up the project (below). |
-| `red [--redo]` | Runs the suite, requires assertion failures, reruns the failing cases once and does not lock those that pass (item 53), writes an open lock; `--redo` rewrites the branch's open lock (item 46). Refuses `lock-open`, `red-already-passes`, `error-before-assertions`, `group-failed`, `red-not-reproduced`, `no-report`, `suite-without-tests`, `build-failed`. |
+| `red [--redo] [--base <ref>] [--all]` | Runs the RED's changed test files, or every suite when it cannot narrow safely (item 55), requires assertion failures, reruns the failing cases once and does not lock those that pass (item 53), writes an open lock; `--redo` rewrites the branch's open lock (item 46). Refuses `lock-open`, `red-already-passes`, `error-before-assertions`, `group-failed`, `red-not-reproduced`, `no-report`, `suite-without-tests`, `build-failed`. |
 | `check [--commit-msg <file>]` | The hook: judges the commit against the open locks and closes them when the RED cases pass. With `--commit-msg` it judges the final index and writes a close mark instead of the lock (`mark-failed` if it cannot). |
 | `close` | The `post-commit` half of the `commit-msg` route: if the mark matches the commit just made, adds one commit that only flips the lock to `closed`. On failure it changes nothing and says to rerun it. Always exits `0`. |
 | `ci --base <ref> [--pr]` | CI (section 2). `--pr` allows the docs-only path (section 5). `ci` publishes no status (item 44). |
@@ -295,7 +391,7 @@ Each suite's `command` runs in its `root`, and its globs are relative to `root`.
 - `SHIPCRAFT_CASES`: the RED case ids of that run (`classname::name`, or `name`), without the suite prefix;
 - `SHIPCRAFT_FILES`: the absolute paths of the RED test files, set only when every RED case maps to a file.
 
-A variable is set only when its list is not empty. Every other command `shipcraft` runs gets neither (the one exception is `red`'s second run, item 53, which runs as the hook does), even when inherited, so a stale value never narrows a suite. The command decides whether to use them. A RED case it does not select is `case-missing`.
+A variable is set only when its list is not empty. Every other command `shipcraft` runs gets neither (the exceptions are `red`'s narrowed first run, item 55, which gets `SHIPCRAFT_FILES` only, and `red`'s second run, item 53, which runs as the hook does), even when inherited, so a stale value never narrows a suite. The command decides whether to use them. A RED case it does not select is `case-missing`.
 
 **vitest names the RED files (item 51).** Wherever the hook adds its vitest exclusions today (`filter = "shipcraft"` and a command it recognizes as vitest, exactly as before), it now also appends each RED test file as a positional argument: the same files, in the same judged checkout and the same absolute form as `SHIPCRAFT_FILES`, one shell-quoted argument per distinct file, in byte order, at the same place as the exclusions. Nothing else changes: the exclusions stay as they are (every present non-RED test file of the suite), the command's own file arguments are handled as before, `filter = "command"` is untouched, and when some RED case does not map to a file no positional argument is added (the hook runs all locked files, as before). Verdicts are judged as before: a RED file's cases block; any other file that runs is judged like the files the fallback runs today.
 

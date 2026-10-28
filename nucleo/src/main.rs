@@ -25,6 +25,7 @@ mod lock;
 mod marca;
 mod medicao;
 mod merge;
+mod narrow;
 mod pr;
 mod processo;
 mod red;
@@ -40,7 +41,7 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 const USAGE: &str =
-    "usage: shipcraft --version | shipcraft init [--lang python|node|go] [--github] | shipcraft red [--redo] | shipcraft check [--commit-msg <file>] | shipcraft close
+    "usage: shipcraft --version | shipcraft init [--lang python|node|go] [--github] | shipcraft red [--redo] [--base <ref>] [--all] | shipcraft check [--commit-msg <file>] | shipcraft close
      | shipcraft ci --base <ref> [--pr]
      | shipcraft pr [--title <t>] [--body <file>] | shipcraft review [--pr <n>]
      | shipcraft merge <pr> [--no-review \"<reason>\"] | shipcraft status | shipcraft report [--json]";
@@ -80,36 +81,53 @@ fn run(args: &[&str]) -> Result<()> {
             }
             init::run(&init::open()?, lang, github)
         }
-        ["red"] => {
+        ["red", rest @ ..] => {
+            // Item 55: each option once, in any order; `--redo` ignores the others.
+            let (mut redo, mut all, mut base) = (false, false, None);
+            let mut rest = rest.iter();
+            while let Some(arg) = rest.next() {
+                match *arg {
+                    "--redo" if !redo => redo = true,
+                    "--all" if !all => all = true,
+                    "--base" if base.is_none() => base = Some(*rest.next().ok_or_else(|| invalid(args))?),
+                    _ => return Err(invalid(args)),
+                }
+            }
             // Item 38: a lock written, or a refusal, is a row.
             let started = Instant::now();
             let repo = Repo::open()?;
-            let result = red::run(&repo);
+            let mut chosen = None;
+            if redo {
+                // Item 46: every redo is a `red` row with `redo: true` and HEAD's lock id.
+                let (mut path, mut dropped) = (None, None);
+                let result = red::redo(&repo, &mut path, &mut dropped, &mut chosen);
+                let mut row = medicao::row(&repo, "red", started, &result);
+                row["redo"] = true.into();
+                if let Some(path) = &path {
+                    row["lock"] = medicao::lock_id(path).into();
+                }
+                if let Some(dropped) = dropped {
+                    row["rerun_dropped"] = dropped.into();
+                }
+                if let Some(chosen) = &chosen {
+                    chosen.record(&mut row);
+                }
+                medicao::record(&repo, row);
+                return result;
+            }
+            let result = red::run(&repo, base, all, &mut chosen);
             let mut row = medicao::row(&repo, "red", started, &result);
             if let Ok((path, dropped)) = &result {
                 row["lock"] = medicao::lock_id(path).into();
                 // Item 53: how many cases the second run did not lock.
                 row["rerun_dropped"] = (*dropped).into();
             }
+            // Item 55: how the first run was chosen, once it was decided.
+            if let Some(chosen) = &chosen {
+                chosen.record(&mut row);
+            }
             medicao::record(&repo, row);
             result.map(drop)
-        }
-        ["red", "--redo"] => {
-            // Item 46: every redo is a `red` row with `redo: true` and HEAD's lock id.
-            let started = Instant::now();
-            let repo = Repo::open()?;
-            let (mut path, mut dropped) = (None, None);
-            let result = red::redo(&repo, &mut path, &mut dropped);
-            let mut row = medicao::row(&repo, "red", started, &result);
-            row["redo"] = true.into();
-            if let Some(path) = &path {
-                row["lock"] = medicao::lock_id(path).into();
-            }
-            if let Some(dropped) = dropped {
-                row["rerun_dropped"] = dropped.into();
-            }
-            medicao::record(&repo, row);
-            result
         }
         ["check"] => measured("hook", |repo, _| check::run(repo, false)),
         // The git hook passes the message file, which is ignored.

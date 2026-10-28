@@ -5,17 +5,21 @@ use crate::config::{Config, CONFIG_FILE};
 use crate::git::{Repo, Snapshot};
 use crate::junit::{Outcome, Report};
 use crate::lock::{lock_files, new_digest, new_lock_path, Lock, LOCK_DIR};
+use crate::narrow::{self, Chosen, Fallback, Plan};
 use crate::refusal::{failed, refuse, short_list, Result};
-use crate::suite;
-use std::collections::BTreeMap;
+use crate::suite::{self, Narrowed};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 
 /// The path of the lock written, and how many cases the second run dropped.
-pub fn run(repo: &Repo) -> Result<(String, usize)> {
+/// Item 55: `base` and `all` choose the first run; `chosen`, how it ran, once
+/// the selection is decided.
+pub fn run(repo: &Repo, base: Option<&str>, all: bool, chosen: &mut Option<Chosen>) -> Result<(String, usize)> {
     let config = Config::load(repo)?;
     refuse_if_a_lock_is_open(repo)?;
-    let report = red_report(repo, &config, "shipcraft red")?;
+    let plan = narrow::plan(repo, &config, base, all);
+    let report = red_report(repo, &config, "shipcraft red", plan, chosen)?;
     let failing = failing_at_red(&report, "shipcraft red")?;
 
     let files = locked_files(repo, &config)?;
@@ -46,11 +50,17 @@ pub fn run(repo: &Repo) -> Result<(String, usize)> {
 /// Item 46: `red --redo` rewrites the open lock HEAD holds, in place, as the
 /// lock `red` would write for this tree; it keeps every case of the old one.
 /// `path` is HEAD's lock as soon as it is known, for the run log row;
-/// `rerun_dropped`, the cases the second run dropped, once the lock is written.
-pub fn redo(repo: &Repo, path: &mut Option<String>, rerun_dropped: &mut Option<usize>) -> Result<()> {
+/// `rerun_dropped`, the cases the second run dropped, once the lock is written;
+/// `chosen`, the full run (item 55), once HEAD's lock is known.
+pub fn redo(
+    repo: &Repo,
+    path: &mut Option<String>,
+    rerun_dropped: &mut Option<usize>,
+    chosen: &mut Option<Chosen>,
+) -> Result<()> {
     let config = Config::load(repo)?;
     let (lock_path, old) = head_lock(repo, path)?;
-    let report = red_report(repo, &config, "shipcraft red --redo")?;
+    let report = red_report(repo, &config, "shipcraft red --redo", Plan::All(Fallback::Redo), chosen)?;
     let run = report.cases_run();
     let dropped: Vec<&String> = old.cases.iter().filter(|case| !run.contains(case)).collect();
     if !dropped.is_empty() {
@@ -164,12 +174,16 @@ fn replace(full_path: &Path, lock_path: &str, json: &str) -> Result<()> {
     Ok(())
 }
 
-/// The suite's report at RED: the build, every suite's check, every suite;
-/// refuses no report and errors before assertions. `again` is the command to rerun.
-fn red_report(repo: &Repo, config: &Config, again: &str) -> Result<Report> {
-    // The RED judges its own tree: the build runs there (item 16a).
-    suite::build(repo.root(), config, &format!("; if it fails because the stub is missing, {}", stub_hint(config)))?;
-    let report = match suite::run(repo.root(), false, config)? {
+/// The suite's report at RED: the build, every suite's check, every suite
+/// (item 55: or the changed test files, as `plan` says); refuses no report and
+/// errors before assertions. `again` is the command to rerun. The notice of
+/// how it ran comes first, refusals included.
+fn red_report(repo: &Repo, config: &Config, again: &str, plan: Plan, chosen: &mut Option<Chosen>) -> Result<Report> {
+    let locked: BTreeSet<String> = config.test_files(repo)?.into_iter().chain([CONFIG_FILE.to_string()]).collect();
+    let first = chosen.insert(Chosen::new(&plan, locked.len()));
+    let ran = first_run(repo, config, plan, first);
+    println!("{}", first.notice());
+    let report = match ran? {
         Ok(report) => report,
         // Item 45: a failing check names itself, and says to fix what it reports.
         Err(suite::Missing { reason, check: Some(check) }) => {
@@ -212,6 +226,56 @@ fn red_report(repo: &Repo, config: &Config, again: &str) -> Result<Report> {
     Ok(report)
 }
 
+/// Item 55: the first run's report. The build runs as today; then, with
+/// selected files, the narrowed run, whose reports stand only when every case
+/// maps to one locked file and every selected file holds a case. Otherwise
+/// `chosen` says why, and every suite's command runs in full (its check ran).
+fn first_run(repo: &Repo, config: &Config, plan: Plan, chosen: &mut Chosen) -> Result<suite::Ran<Report>> {
+    // The RED judges its own tree: the build runs there (item 16a).
+    suite::build(repo.root(), config, &format!("; if it fails because the stub is missing, {}", stub_hint(config)))?;
+    let selected = match plan {
+        Plan::All(_) => return suite::run(repo.root(), false, config),
+        Plan::Changed { selected, .. } => selected,
+    };
+    let present = repo.files()?;
+    let ran = match with_lists(repo, |tmp| suite::run_changed(repo.root(), config, &selected, &present, tmp))? {
+        Ok(ran) => ran,
+        Err(check) => return Ok(Err(check)),
+    };
+    let locked = config.test_files(repo)?;
+    let mut report = Report::empty();
+    let mut fallback: Option<Fallback> = None;
+    for ((suite, files), ran) in config.suites().iter().zip(&selected).zip(ran) {
+        let why = match ran {
+            Narrowed::Skipped => continue,
+            Narrowed::NoReport => Fallback::NoReport,
+            Narrowed::Ran(ran) => match suite::covered(repo.root(), suite, &locked, &present, files, ran) {
+                Ok(kept) => {
+                    report.absorb(&suite.nome, kept);
+                    continue;
+                }
+                Err(why) => why,
+            },
+        };
+        fallback = Some(fallback.map_or(why, |first| first.min(why)));
+    }
+    let Some(why) = fallback else { return Ok(Ok(report)) };
+    chosen.fallback = Some(why);
+    suite::run_commands(repo.root(), config)
+}
+
+/// Runs `run` with the directory of item 22's lists, left as it was found
+/// (empty and created here: removed).
+fn with_lists<T>(repo: &Repo, run: impl FnOnce(&Path) -> Result<T>) -> Result<T> {
+    let tmp = repo.root().join(repo.text(&["rev-parse", "--git-path", "shipcraft/tmp"])?);
+    let had_tmp = tmp.exists();
+    let ran = run(&tmp);
+    if !had_tmp {
+        let _ = fs::remove_dir(&tmp);
+    }
+    ran
+}
+
 /// The cases failing at RED; none is `red-already-passes`.
 fn failing_at_red(report: &Report, again: &str) -> Result<Vec<String>> {
     let failing = report.cases_with(Outcome::Failed);
@@ -238,10 +302,7 @@ fn confirm(
     again: &str,
 ) -> Result<(Vec<String>, Vec<String>)> {
     let present = repo.files()?;
-    let tmp = repo.root().join(repo.text(&["rev-parse", "--git-path", "shipcraft/tmp"])?);
-    // The lists' directory is left as it was found (empty and created here: removed).
-    let had_tmp = tmp.exists();
-    let rerun = || -> Result<Vec<String>> {
+    let rerun = |tmp: &Path| -> Result<Vec<String>> {
         let mut dropped = Vec::new();
         for suite in config.suites() {
             let own = if suite.nome.is_empty() { String::new() } else { format!("{}:", suite.nome) };
@@ -255,7 +316,7 @@ fn confirm(
                 files: files.keys().cloned().collect(),
                 cases,
                 present: present.clone(),
-                tmp: tmp.clone(),
+                tmp: tmp.to_path_buf(),
             };
             if let Ok((report, _)) = suite::run_red(repo.root(), false, config, &locked)? {
                 dropped.extend(locked.cases.into_iter().filter(|case| report.outcome(case) == Some(Outcome::Passed)));
@@ -263,11 +324,7 @@ fn confirm(
         }
         Ok(dropped)
     };
-    let dropped = rerun();
-    if !had_tmp {
-        let _ = fs::remove_dir(&tmp);
-    }
-    let mut dropped = dropped?;
+    let mut dropped = with_lists(repo, rerun)?;
     let kept: Vec<String> = failing.iter().filter(|case| !dropped.contains(case)).cloned().collect();
     if kept.is_empty() {
         let shown: Vec<String> = failing.iter().map(|id| one_line(id)).collect();

@@ -76,6 +76,18 @@ impl Report {
         self.cases.iter().filter(|(_, o)| **o != Outcome::Skipped).map(|(id, _)| id.clone()).collect()
     }
 
+    /// Every case of the report, whatever its outcome, sorted.
+    pub fn ids(&self) -> Vec<String> {
+        self.cases.keys().cloned().collect()
+    }
+
+    /// Item 55: the report with only the cases `keep` holds.
+    pub fn only(mut self, keep: &BTreeSet<String>) -> Report {
+        self.cases.retain(|id, _| keep.contains(id));
+        self.groups.retain(|id| keep.contains(id));
+        self
+    }
+
     pub fn is_green(&self) -> bool {
         self.cases.values().all(|o| matches!(o, Outcome::Passed | Outcome::Skipped))
     }
