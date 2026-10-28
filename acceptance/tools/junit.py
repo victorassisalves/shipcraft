@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """junit.py <work dir> <out.xml> <timeout seconds>: the battery's JUnit report.
 
-One testcase per planned case (classname = profile, name = case id), in plan
+One testcase per planned case (classname = the file that defines it, from
+files, else the profile; name = profile::case id), in plan
 order: PASS passes, FAIL becomes failure, a harness error or a case with no result (crash
 or timeout) becomes error. Cases that SHIPCRAFT_ACCEPTANCE_CASES left out become skipped. Each
 case's time runs from its start (starts/) to its result file."""
@@ -22,6 +23,16 @@ def start_of(key):
     except (OSError, ValueError):
         return None
 
+
+files = {}
+try:
+    with open(os.path.join(work, 'files')) as f:
+        for line in f:
+            if line.strip():
+                case, path = line.split()
+                files[case] = path
+except OSError:
+    pass
 
 cases = []  # (profile, id, state, time, message, detail)
 with open(os.path.join(work, 'plan')) as f:
@@ -66,7 +77,8 @@ lines = ['<?xml version="1.0" encoding="UTF-8"?>',
          '  <testsuite name="aceite" tests="%d" failures="%d" errors="%d" skipped="%d" time="%.3f">'
          % (len(cases), count['failure'], count['error'], count['skipped'], total)]
 for lang, case, state, secs, msg, detail in cases:
-    head = '    <testcase classname=%s name=%s time="%.3f"' % (quoteattr(lang), quoteattr(case), secs)
+    head = '    <testcase classname=%s name=%s time="%.3f"' % (
+        quoteattr(files.get(case, lang)), quoteattr('%s::%s' % (lang, case)), secs)
     if state == 'pass':
         lines.append(head + '/>')
         continue

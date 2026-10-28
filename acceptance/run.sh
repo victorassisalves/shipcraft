@@ -29,10 +29,12 @@
 #   SHIPCRAFT_ACCEPTANCE_CACHE    absolute dir for pip/npm/go caches, reused across runs
 #   SHIPCRAFT_ACCEPTANCE_VERBOSE=1  print the log tail of each failing case (on in GitHub Actions)
 #   SHIPCRAFT_ACCEPTANCE_CASES    space-separated case ids to run (default: all)
+#   SHIPCRAFT_ACCEPTANCE_FILES    space-separated repository paths: run only the cases they define
+#                       (see case_file; default: all)
 #   SHIPCRAFT_ACCEPTANCE_SHARD    k/n: run only shard k of n (round robin), for split CI runs
 #   SHIPCRAFT_ACCEPTANCE_CASE_TIMEOUT  seconds before a case is killed (default 900)
 #   SHIPCRAFT_ACCEPTANCE_JUNIT    write a JUnit report there: one testcase per case (classname =
-#                       profile, name = case id); FAIL = failure, harness error or no result
+#                       the file that defines it, name = profile::case id); FAIL = failure, harness error or no result
 #                       (timeout, crash) = error, left out by SHIPCRAFT_ACCEPTANCE_CASES = skipped
 #
 # Portable: bash 3.2+, perl, python3, git, POSIX tools; clone flags are OS-specific.
@@ -251,6 +253,22 @@ go_edit_extra() { perl -pi -e 's/Slugify\("X Y"\); got != "x-y"/Slugify("Z"); go
 go_append_old_test() { printf '\nfunc TestSlugLower(t *testing.T) {\n\tif got := Slugify("AB"); got != "ab" {\n\t\tt.Fatalf("Slugify = %%q", got)\n\t}\n}\n' >> slug_test.go; }
 
 # ---------------------------------------------------------------- case list
+# case_file <id>: the repository path of the file that defines case <id>, as run_case
+# dispatches it. A case not in an item, rename or English library is run.sh's; cases that
+# lib/v1.sh helps run still count as run.sh's, so a change to lib/v1.sh selects no case
+# and shipcraft red falls back to the whole battery (item 55).
+case_file() {
+  case "$1" in
+    r-legacy-config-*) echo acceptance/lib/rename.sh; return ;;
+    e1-*) echo acceptance/lib/english.sh; return ;;
+  esac
+  local _item
+  for _item in $ITEMS; do
+    case "$1" in "v1-$_item."*) echo "acceptance/lib/item$_item.sh"; return ;; esac
+  done
+  echo acceptance/run.sh
+}
+
 case_list() { # case ids for language $1, in table order
   if [ "$1" = core ]; then core_cases; echo r-legacy-config-init r-legacy-config-check r-legacy-config-red r-legacy-config-ci r-legacy-config-coexists r-legacy-config-unstaged-hooks r-legacy-config-commit-msg; return; fi
   echo init-detect init-files init-workflow init-lang-flag
@@ -981,8 +999,12 @@ for l in $LANGS; do
     if [ "$SHARD_N" -gt 1 ] && [ $(( (g - 1) % SHARD_N + 1 )) -ne "$SHARD_K" ]; then
       [ -n "$JUNIT" ] && echo "$l $c" >> "$WORK/skipped"; continue
     fi
+    [ -n "$JUNIT" ] && echo "$c $(case_file "$c")" >> "$WORK/files"
     if [ -n "${SHIPCRAFT_ACCEPTANCE_CASES:-}" ]; then
       case " $SHIPCRAFT_ACCEPTANCE_CASES " in *" $c "*) ;; *) [ -n "$JUNIT" ] && echo "$l $c" >> "$WORK/skipped"; continue ;; esac
+    fi
+    if [ -n "${SHIPCRAFT_ACCEPTANCE_FILES:-}" ]; then
+      case " $SHIPCRAFT_ACCEPTANCE_FILES " in *" $(case_file "$c") "*) ;; *) [ -n "$JUNIT" ] && echo "$l $c" >> "$WORK/skipped"; continue ;; esac
     fi
     printf '%s %03d %s\n' "$l" "$i" "$c" >> "$WORK/plan"
   done
