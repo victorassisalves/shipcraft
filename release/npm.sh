@@ -69,6 +69,11 @@ for pair in "aarch64-apple-darwin darwin arm64" "x86_64-apple-darwin darwin x64"
     [ -n "$PACK" ] && { echo "release/npm.sh: no $target archive, its package is skipped (pack only)"; continue; }
     refuse "the release has no $target archive" "every platform package ships together" "check release v$VERSION"
   fi
+  # Only an archive SHA256SUMS lists, with a matching digest, is packaged.
+  want=$(awk -v f="shipcraft-$VERSION-$target.tar.gz" '$2 == f || $2 == "*" f {print $1}' "$ASSETS/SHA256SUMS")
+  have=$(shasum -a 256 "$archive" | cut -d' ' -f1)
+  [ -n "$want" ] && [ "$want" = "$have" ] || refuse "the $target archive is not in SHA256SUMS with its digest" \
+    "a package must carry the released bytes" "download the release again"
   name="shipcraft-$os-$cpu"; dir="$STAGE/$name"; mkdir -p "$dir/bin"
   tar -xzf "$archive" -C "$dir/bin" shipcraft || refuse "could not unpack $archive" "the package carries the binary" "download the release again"
   chmod 755 "$dir/bin/shipcraft"; cp "$LICENSE_FILE" "$dir/"
