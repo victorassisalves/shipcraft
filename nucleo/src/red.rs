@@ -11,8 +11,8 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-/// The path of the lock written.
-pub fn run(repo: &Repo) -> Result<String> {
+/// The path of the lock written, and how many cases the second run dropped.
+pub fn run(repo: &Repo) -> Result<(String, usize)> {
     let config = Config::load(repo)?;
     refuse_if_a_lock_is_open(repo)?;
     let report = red_report(repo, &config, "shipcraft red")?;
@@ -20,6 +20,9 @@ pub fn run(repo: &Repo) -> Result<String> {
 
     let files = locked_files(repo, &config)?;
     refuse_a_suite_without_tests(repo, &config, &files, &failing)?;
+    let (failing, dropped) = confirm(repo, &config, &files, failing, "shipcraft red")?;
+    // Item 53: hashed as the second run leaves the files.
+    let files = locked_files(repo, &config)?;
 
     let lock = Lock::open(files, report.cases_run(), failing);
     let path = new_lock_path();
@@ -28,6 +31,7 @@ pub fn run(repo: &Repo) -> Result<String> {
         .and_then(|()| fs::write(&full_path, lock.to_json()))
         .map_err(|e| failed(format!("write {path}: {e}")))?;
 
+    print_dropped(&dropped);
     println!(
         "shipcraft: RED locked at {path}: {} file(s), {} case(s), {} failing: {}",
         lock.files.len(),
@@ -36,13 +40,14 @@ pub fn run(repo: &Repo) -> Result<String> {
         short_list(&lock.failing_at_red)
     );
     println!("shipcraft: commit the lock with the tests; the hook checks the RED commit.");
-    Ok(path)
+    Ok((path, dropped.len()))
 }
 
 /// Item 46: `red --redo` rewrites the open lock HEAD holds, in place, as the
 /// lock `red` would write for this tree; it keeps every case of the old one.
-/// `path` is HEAD's lock as soon as it is known, for the run log row.
-pub fn redo(repo: &Repo, path: &mut Option<String>) -> Result<()> {
+/// `path` is HEAD's lock as soon as it is known, for the run log row;
+/// `rerun_dropped`, the cases the second run dropped, once the lock is written.
+pub fn redo(repo: &Repo, path: &mut Option<String>, rerun_dropped: &mut Option<usize>) -> Result<()> {
     let config = Config::load(repo)?;
     let (lock_path, old) = head_lock(repo, path)?;
     let report = red_report(repo, &config, "shipcraft red --redo")?;
@@ -59,6 +64,8 @@ pub fn redo(repo: &Repo, path: &mut Option<String>) -> Result<()> {
     let failing = failing_at_red(&report, "shipcraft red --redo")?;
     let files = locked_files(repo, &config)?;
     refuse_a_suite_without_tests(repo, &config, &files, &failing)?;
+    let (failing, dropped) = confirm(repo, &config, &files, failing, "shipcraft red --redo")?;
+    let files = locked_files(repo, &config)?;
     let lock = Lock::open(files, run, failing);
 
     let full_path = repo.path(&lock_path);
@@ -68,6 +75,8 @@ pub fn redo(repo: &Repo, path: &mut Option<String>) -> Result<()> {
         return Ok(());
     }
     replace(&full_path, &lock_path, &lock.to_json())?;
+    *rerun_dropped = Some(dropped.len());
+    print_dropped(&dropped);
 
     let minus = |a: &[String], b: &[String]| a.iter().filter(|case| !b.contains(case)).cloned().collect::<Vec<_>>();
     let list = |cases: Vec<String>| if cases.is_empty() { "none".to_string() } else { cases.join(", ") };
@@ -215,6 +224,70 @@ fn failing_at_red(report: &Report, again: &str) -> Result<Vec<String>> {
         );
     }
     Ok(failing)
+}
+
+/// Item 53: reruns once, as the hook runs them, the suites that have a case
+/// of `failing`, on the working tree, with `files` as the lock's files; a case
+/// stays failing unless its suite's second report shows it passed. The cases
+/// kept and those dropped; every case dropped is `red-not-reproduced`.
+fn confirm(
+    repo: &Repo,
+    config: &Config,
+    files: &BTreeMap<String, String>,
+    failing: Vec<String>,
+    again: &str,
+) -> Result<(Vec<String>, Vec<String>)> {
+    let present = repo.files()?;
+    let tmp = repo.root().join(repo.text(&["rev-parse", "--git-path", "shipcraft/tmp"])?);
+    // The lists' directory is left as it was found (empty and created here: removed).
+    let had_tmp = tmp.exists();
+    let rerun = || -> Result<Vec<String>> {
+        let mut dropped = Vec::new();
+        for suite in config.suites() {
+            let own = if suite.nome.is_empty() { String::new() } else { format!("{}:", suite.nome) };
+            let cases: Vec<String> = failing.iter().filter(|case| case.starts_with(&own)).cloned().collect();
+            if cases.is_empty() {
+                continue;
+            }
+            // One suite at a time: the hook's run skips every suite without a case,
+            // and a suite with no readable report keeps its cases.
+            let locked = suite::Locked {
+                files: files.keys().cloned().collect(),
+                cases,
+                present: present.clone(),
+                tmp: tmp.clone(),
+            };
+            if let Ok((report, _)) = suite::run_red(repo.root(), false, config, &locked)? {
+                dropped.extend(locked.cases.into_iter().filter(|case| report.outcome(case) == Some(Outcome::Passed)));
+            }
+        }
+        Ok(dropped)
+    };
+    let dropped = rerun();
+    if !had_tmp {
+        let _ = fs::remove_dir(&tmp);
+    }
+    let mut dropped = dropped?;
+    let kept: Vec<String> = failing.iter().filter(|case| !dropped.contains(case)).cloned().collect();
+    if kept.is_empty() {
+        let shown: Vec<String> = failing.iter().map(|id| one_line(id)).collect();
+        return refuse(
+            "red-not-reproduced",
+            format!("every case that failed passed on a second run: {}", short_list(&shown)),
+            "a RED's failure must happen every time the test runs without the implementation; these failed once and then passed",
+            format!("run `{again}` again; if the tests keep passing on their own, fix them (or the setup they depend on)"),
+        );
+    }
+    dropped.sort();
+    Ok((kept, dropped))
+}
+
+/// Item 53: the cases the second run dropped, before the usual lines.
+fn print_dropped(dropped: &[String]) {
+    if !dropped.is_empty() {
+        let shown: Vec<String> = dropped.iter().map(|id| one_line(id)).collect();
+        println!("shipcraft: not locked, passed on a second run: {}", short_list(&shown));
+    }
 }
 
 /// Item 52: a case id on one line of a refusal (a line break in a name is escaped).

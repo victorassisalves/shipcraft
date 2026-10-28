@@ -86,8 +86,10 @@ fn run(args: &[&str]) -> Result<()> {
             let repo = Repo::open()?;
             let result = red::run(&repo);
             let mut row = medicao::row(&repo, "red", started, &result);
-            if let Ok(path) = &result {
+            if let Ok((path, dropped)) = &result {
                 row["lock"] = medicao::lock_id(path).into();
+                // Item 53: how many cases the second run did not lock.
+                row["rerun_dropped"] = (*dropped).into();
             }
             medicao::record(&repo, row);
             result.map(drop)
@@ -96,12 +98,15 @@ fn run(args: &[&str]) -> Result<()> {
             // Item 46: every redo is a `red` row with `redo: true` and HEAD's lock id.
             let started = Instant::now();
             let repo = Repo::open()?;
-            let mut path = None;
-            let result = red::redo(&repo, &mut path);
+            let (mut path, mut dropped) = (None, None);
+            let result = red::redo(&repo, &mut path, &mut dropped);
             let mut row = medicao::row(&repo, "red", started, &result);
             row["redo"] = true.into();
             if let Some(path) = &path {
                 row["lock"] = medicao::lock_id(path).into();
+            }
+            if let Some(dropped) = dropped {
+                row["rerun_dropped"] = dropped.into();
             }
             medicao::record(&repo, row);
             result

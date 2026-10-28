@@ -165,15 +165,18 @@ exec ''' + py + ''' runner.py --runner "$1" "${args[@]}"
     inherited = dict(os.environ, SHIPCRAFT_CASES='/inexistente/herdado-casos', SHIPCRAFT_FILES='/inexistente/herdado-arquivos')
     run(binary, 'red', env=inherited if case in ('ambiente-red', 'ambiente-build') else None)
     if case in ('ambiente-red', 'ambiente-build'):
-        assert rows() and all(all(v is None for v in r['env'].values()) for r in rows()), 'inherited environment reached RED'
+        assert len(rows()) == (4 if case == 'ambiente-build' else 3), rows()
+        assert all(all(v is None for v in r['env'].values()) for r in rows()[:-1]), 'inherited environment reached first RED/build/check'
+        assert all(v and v['hex'] is not None for v in rows()[-1]['env'].values()), 'second RED missing fresh lists'
         if case == 'ambiente-build':
             assert any(r['argv'] == ['probe', 'build'] for r in rows()), 'build did not run'
         return
     locks = list(Path('.shipcraft/locks').glob('*.json'))
     assert len(locks) == 1
     if case == 'bash':
-        assert len(rows()) == 2, 'RED must run verifica and one suite'
-        assert all('--selected' not in r['argv'] for r in rows()), 'without the variable it did not run the whole suite'
+        assert len(rows()) == 3, 'RED must run verifica, full suite, then filtered suite'
+        assert all('--selected' not in r['argv'] for r in rows()[:2]), 'first run must run whole suite'
+        assert '--selected' in rows()[-1]['argv'], 'second run must receive cases'
     d = json.loads(locks[0].read_text())
     assert len(d['failing_at_red']) == len({((c.get('class', '') + '::' if c.get('class') else '') + c['name']) for c in data if c.get('red')}) * (2 if case == 'duas-suites' else 1), d
     git('add', '.')

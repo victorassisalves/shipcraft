@@ -199,7 +199,8 @@ item16a_case() {
       # 16a.1 example: a clean RED builds at the root before any suite.
       b16_project
       run_cmd shipcraft red
-      b16_order
+      chk "build once then both suites twice in config order" eq "$(cat "$CW/order")" "$(printf 'build\nalpha\nbeta\nalpha\nbeta')"
+      chk "build only on judged HEAD" eq "$(cat "$CW/build-heads")" "$(git rev-parse HEAD)"
       chk "real RED accepted" rc_zero
       chk "output written in the tree itself" test -f packages/alpha/dist/mod.js
       chk "generated output is ignored" git check-ignore -q packages/alpha/dist/mod.js
