@@ -201,6 +201,9 @@ The globs `init` writes include each language's support files, so GREEN cannot e
 - **As a git checkout:** the copy it runs on has `HEAD`, history and `git ls-files`, like a clean clone.
 - **Only the RED cases:** every locked file is protected by hash, but the hook executes only the test files that hold `failing_at_red` cases. Each suite's project-wide `check` runs in CI, not in the hook. An error outside the RED files does not block; CI reports it. When cases cannot be mapped to files, the hook runs all locked files but blocks only on RED cases.
 - **The config:** a commit that changes `.shipcraft.toml` is validated, even with no lock open.
+- **Without the hook's git variables (item 57).** Git runs a hook with `GIT_DIR` and `GIT_INDEX_FILE` set, and in some cases `GIT_WORK_TREE`. Every command `shipcraft` runs for a suite (`[build]`, `check`, the test command), in the hook, in `red` and in `ci`, on a copy or in the working tree, runs with those three variables removed from its environment. Other variables are passed on as before. A test that runs git in the project finds the repository from its folder, as in a terminal. A test that runs git in a temporary folder of its own works on that folder.
+
+  Wrong-verdict note: since item 14, the hook removed them only when it ran on a copy (something outside the index). When nothing was, the suite ran in the working tree with the hook's variables. A test that ran `git init` in a temporary folder reinitialized the project's repository instead: in a linked worktree it set `core.bare = true` in the shared config, and every later git command in the worktrees failed (`fatal: this operation must be run in a work tree`). Found on 2026-10-28 by Shipcraft's own battery, at the first RED commit of the dogfooding trial (item 56). The battery should have caught it, but no case ran a suite that uses git through the hook's direct path.
 
 Edge cases are fixed by the acceptance battery (`acceptance/`).
 
