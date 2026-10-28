@@ -169,6 +169,15 @@ impl Repo {
         Ok(paths)
     }
 
+    /// Item 57: whether `GIT_INDEX_FILE` names an index other than the
+    /// repository's own (`git commit --only`, `git commit <paths>`).
+    pub fn other_index(&self) -> Result<bool> {
+        let Some(named) = std::env::var_os("GIT_INDEX_FILE") else { return Ok(false) };
+        let own = self.root.join(self.text(&["rev-parse", "--git-dir"])?).join("index");
+        let real = |path: PathBuf| path.canonicalize().unwrap_or(path);
+        Ok(real(self.root.join(named)) != real(own))
+    }
+
     pub fn add(&self, path: &str) -> Result<()> {
         self.run(&["add", "--", path]).map(drop)
     }
