@@ -189,6 +189,17 @@ fn red_report(repo: &Repo, config: &Config, again: &str) -> Result<Report> {
             format!("{}; then run `{again}` again", stub_hint(config)),
         );
     }
+    // Item 52: a block whose beforeAll failed is reported as a case no passing run reports.
+    let groups = report.group_failures();
+    if !groups.is_empty() {
+        let shown: Vec<String> = groups.iter().map(|id| one_line(id)).collect();
+        return refuse(
+            "group-failed",
+            format!("a describe block's hook failed before its tests ran, in: {}", short_list(&shown)),
+            "the block's hook failed before its tests ran, so the block is reported as a case under a name a passing run never reports, and a lock on it could never close",
+            format!("fix the block's hook (or move any assertion it makes into a test of the block); if it failed under load or by chance, run `{again}` again"),
+        );
+    }
     Ok(report)
 }
 
@@ -204,6 +215,19 @@ fn failing_at_red(report: &Report, again: &str) -> Result<Vec<String>> {
         );
     }
     Ok(failing)
+}
+
+/// Item 52: a case id on one line of a refusal (a line break in a name is escaped).
+fn one_line(id: &str) -> String {
+    id.chars()
+        .map(|c| {
+            if c.is_control() || matches!(c, '\u{2028}' | '\u{2029}') {
+                c.escape_default().to_string()
+            } else {
+                c.to_string()
+            }
+        })
+        .collect()
 }
 
 fn stub_hint(config: &Config) -> &'static str {
