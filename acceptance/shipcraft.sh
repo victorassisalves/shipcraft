@@ -3,7 +3,7 @@
 # Builds the judged core, translates NUL-terminated SHIPCRAFT_CASES IDs into
 # profile/case selection, and writes one JUnit testcase per stable case ID.
 # Shipcraft judges the report, never the process exit code.
-# Unset or empty SHIPCRAFT_CASES runs all profiles. Both list variables are
+# Unset or empty SHIPCRAFT_CASES runs all profiles; SHIPCRAFT_FILES keeps the cases its files define. Both list variables are
 # removed before case execution. Dependency cache defaults to
 # ~/.cache/shipcraft-acceptance-deps; reuse recording defaults to off here.
 set -u
@@ -19,6 +19,8 @@ if [ -n "${SHIPCRAFT_CASES:-}" ]; then
   if [ -r "$SHIPCRAFT_CASES" ]; then
     profiles=""
     while IFS= read -r -d '' id; do
+      # file::profile::case (the JUnit below); profile::case and case still read.
+      case "$id" in */*::*::*) id="${id#*::}" ;; esac
       case "$id" in
         *::*) p="${id%%::*}"; name="${id#*::}" ;;
         *) p=""; name="$id" ;;
@@ -32,6 +34,17 @@ if [ -n "${SHIPCRAFT_CASES:-}" ]; then
     esac
   else
     echo "acceptance/shipcraft.sh: warning: cannot read SHIPCRAFT_CASES ($SHIPCRAFT_CASES); running the full battery." >&2
+  fi
+fi
+# SHIPCRAFT_FILES (absolute, NUL-terminated): run only the cases those files define.
+FILES=""
+if [ -n "${SHIPCRAFT_FILES:-}" ]; then
+  if [ -r "$SHIPCRAFT_FILES" ]; then
+    while IFS= read -r -d '' f; do
+      case "$f" in "$ROOT"/*) FILES="$FILES ${f#"$ROOT"/}" ;; esac
+    done < "$SHIPCRAFT_FILES"
+  else
+    echo "acceptance/shipcraft.sh: warning: cannot read SHIPCRAFT_FILES ($SHIPCRAFT_FILES); running every file's cases." >&2
   fi
 fi
 unset SHIPCRAFT_CASES SHIPCRAFT_FILES
@@ -50,5 +63,10 @@ if [ -n "$CASES" ]; then
   export SHIPCRAFT_ACCEPTANCE_CASES="${CASES# }"
 else
   unset SHIPCRAFT_ACCEPTANCE_CASES
+fi
+if [ -n "$FILES" ]; then
+  export SHIPCRAFT_ACCEPTANCE_FILES="${FILES# }"
+else
+  unset SHIPCRAFT_ACCEPTANCE_FILES
 fi
 exec bash "$ACEITE/run.sh" "$TARGET/release/shipcraft" "$WHICH"

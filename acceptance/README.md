@@ -22,9 +22,9 @@ The runner uses `nice` and at most four parallel cases (`SHIPCRAFT_ACCEPTANCE_JO
 
 `SHIPCRAFT_ACCEPTANCE_CASES="id-a id-b"` selects a slice. Unset or empty means all cases, including normal reuse-cache recording. `SHIPCRAFT_ACCEPTANCE_VERBOSE=1` prints failed-log tails (enabled automatically in GitHub Actions).
 
-`SHIPCRAFT_ACCEPTANCE_JUNIT=<file>` writes one testcase per case (`classname` = profile, `name` = stable ID). Failures become `failure`; harness errors, timeout or missing results become `error`; unselected cases become `skipped`.
+`SHIPCRAFT_ACCEPTANCE_JUNIT=<file>` writes one testcase per case (`classname` = the repository path of the file that defines it, as `case_file` in `run.sh` gives it; `name` = `profile::stable ID`). `SHIPCRAFT_ACCEPTANCE_FILES="path ..."` keeps only the cases those files define. Failures become `failure`; harness errors, timeout or missing results become `error`; unselected cases become `skipped`.
 
-`bash acceptance/shipcraft.sh <junit>` builds the judged `nucleo/`, translates the NUL-terminated `SHIPCRAFT_CASES` IDs into profile and case selection, and writes JUnit. An absent or empty variable runs everything. Shipcraft judges JUnit, not the runner's exit code. Dependency cache defaults to `~/.cache/shipcraft-acceptance-deps`; reuse recording defaults to off in this adapter.
+`bash acceptance/shipcraft.sh <junit>` builds the judged `nucleo/`, translates the NUL-terminated `SHIPCRAFT_CASES` IDs (`file::profile::id`, or the older `profile::id`) into profile and case selection and `SHIPCRAFT_FILES` into `SHIPCRAFT_ACCEPTANCE_FILES`, and writes JUnit. With these, `shipcraft red` on this repository runs only the item files the RED changed (item 55). An absent or empty variable runs everything. Shipcraft judges JUnit, not the runner's exit code. Dependency cache defaults to `~/.cache/shipcraft-acceptance-deps`; reuse recording defaults to off in this adapter.
 
 Each core case has its own HOME, TMPDIR and XDG directories. Queue cases intentionally share a HOME among their projects. The case PATH hides real `gh`, `codex`, `claude` and `gemini`: directories containing them are mirrored without them, then case stubs are prepended.
 
