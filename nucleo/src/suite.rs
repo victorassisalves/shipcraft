@@ -65,12 +65,12 @@ pub struct Locked {
 /// Item 22: the lists the hook's suite gets, each the path of a file.
 pub const LIST_VARS: [&str; 2] = ["SHIPCRAFT_CASES", "SHIPCRAFT_FILES"];
 
-/// Runs every suite of the config in `dir` (each in its `raiz`; `copy` when
-/// `dir` is a checkout copy), as one report, each after its `verifica`.
+/// Runs every suite of the config in `dir` (each in its `raiz`; `clean`
+/// without the hook's git variables), as one report, each after its `verifica`.
 /// Missing when a `verifica` failed or a runner wrote no report: the suite did
 /// not compile, or the runner broke before running.
-pub fn run(dir: &Path, copy: bool, config: &Config) -> Result<Ran<Report>> {
-    Ok(run_suites(dir, copy, config, None, true)?.map(|(report, _)| report))
+pub fn run(dir: &Path, clean: bool, config: &Config) -> Result<Ran<Report>> {
+    Ok(run_suites(dir, clean, config, None, true)?.map(|(report, _)| report))
 }
 
 /// Item 55: every suite's command in full, without the checks: `red`'s full
@@ -215,13 +215,13 @@ pub fn build(dir: &Path, config: &Config, hint: &str) -> Result<()> {
 /// RED case. When shipcraft cannot tie the RED's cases to their files, every locked
 /// file runs and no failure is in that set: only the RED's cases decide, and
 /// the rest is the CI's. A wrong map costs time, never a false refusal.
-pub fn run_red(dir: &Path, copy: bool, config: &Config, locked: &Locked) -> Result<Ran<(Report, BTreeSet<String>)>> {
-    run_suites(dir, copy, config, Some(locked), false)
+pub fn run_red(dir: &Path, clean: bool, config: &Config, locked: &Locked) -> Result<Ran<(Report, BTreeSet<String>)>> {
+    run_suites(dir, clean, config, Some(locked), false)
 }
 
 fn run_suites(
     dir: &Path,
-    copy: bool,
+    clean: bool,
     config: &Config,
     locked: Option<&Locked>,
     checks: bool,
@@ -262,14 +262,14 @@ fn run_suites(
         // the hook's (item 13); when it fails there is no report.
         if let (None, true, Some(check)) = (locked, checks, &suite.verifica) {
             eprintln!("shipcraft: checking the project ({label})");
-            let ran = shell(check, &dir.join(&suite.raiz), copy, &[])?;
+            let ran = shell(check, &dir.join(&suite.raiz), clean, &[])?;
             if !ran.status.success() {
                 return Ok(Err(check_failed(&name, suite.shown_root(), check, &ran)));
             }
         }
         eprintln!("shipcraft: running the suite ({label})");
         let vars = lists.map_or_else(Vec::new, |(tmp, lists)| write_lists(tmp, lists));
-        let ran = shell(&command, &dir.join(&suite.raiz), copy, &vars);
+        let ran = shell(&command, &dir.join(&suite.raiz), clean, &vars);
         for (_, path) in &vars {
             let _ = fs::remove_file(path);
         }
@@ -358,15 +358,16 @@ struct Shell {
     first_out: Option<String>,
 }
 
-/// Runs `command` with `sh` in `dir`, its output on stderr; `copy` when `dir`
-/// is a checkout copy; `vars`, the lists of item 22. Both streams pass
-/// through and the start of each is kept.
-fn shell(command: &str, dir: &Path, copy: bool, vars: &[(&str, PathBuf)]) -> Result<Shell> {
+/// Runs `command` with `sh` in `dir`, its output on stderr; `clean` without
+/// the hook's git variables (a checkout copy, or the hook: item 57); `vars`,
+/// the lists of item 22. Both streams pass through and the start of each is
+/// kept.
+fn shell(command: &str, dir: &Path, clean: bool, vars: &[(&str, PathBuf)]) -> Result<Shell> {
     let mut sh = Command::new("sh");
     sh.arg("-c").arg(command).current_dir(dir).stdout(Stdio::piped()).stderr(Stdio::piped());
     sh.envs(vars.iter().map(|(var, path)| (var, path)));
-    if copy {
-        // A test that calls git sees the copy's repository (item 14).
+    if clean {
+        // A test that calls git finds its repository from its folder (items 14, 57).
         for var in HOOK_GIT_ENV {
             sh.env_remove(var);
         }

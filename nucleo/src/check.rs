@@ -78,9 +78,11 @@ pub fn run(repo: &Repo, commit_msg: bool) -> Result<()> {
         None => Config::load(repo)?,
     };
 
-    // With nothing outside the index the tree is the commit; otherwise the
-    // suite runs on a git checkout of the index (item 14).
-    let copy = if repo.unstaged()?.is_empty() { None } else { Some(repo.export(&Snapshot::Index)?) };
+    // With nothing outside the index the tree is the commit; otherwise, or
+    // when the commit has an index of its own (item 57), the suite runs on a
+    // git checkout of the index (item 14).
+    let inside = repo.unstaged()?.is_empty() && !repo.other_index()?;
+    let copy = if inside { None } else { Some(repo.export(&Snapshot::Index)?) };
     let dir = copy.as_ref().map_or(repo.root(), |c| c.path());
     let locked = suite::Locked {
         files: binding.iter().flat_map(|(_, _, lock)| lock.files.keys().cloned()).collect(),
@@ -95,7 +97,9 @@ pub fn run(repo: &Repo, commit_msg: bool) -> Result<()> {
         .filter(|suite| suite.filtra == Filtra::Comando)
         .map(|suite| if suite.nome.is_empty() { String::new() } else { format!("{}:", suite.nome) })
         .collect();
-    let (report, blocking) = suite::run_red(dir, copy.is_some(), &config, &locked)?.or_else(no_report)?;
+    // Item 57: the hook's suite runs without the hook's git variables, on a
+    // copy or in the tree.
+    let (report, blocking) = suite::run_red(dir, true, &config, &locked)?.or_else(no_report)?;
     let mut closing = Vec::new();
     for (path, change, lock) in binding {
         match (
