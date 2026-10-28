@@ -265,6 +265,8 @@ Each suite's `command` runs in its `root`, and its globs are relative to `root`.
 
 A variable is set only when its list is not empty. Every other command `shipcraft` runs gets neither, even when inherited, so a stale value never narrows a suite. The command decides whether to use them. A RED case it does not select is `case-missing`.
 
+**vitest names the RED files (item 51).** With vitest, the hook appends each RED test file of the suite to the command as a positional filter, by its absolute path, and still excludes every other locked file of the suite with `--exclude`. In a vitest workspace (a `vitest.workspace.*` file, or `test.workspace` or `test.projects` in the root config), a command-line `--exclude` does not reach the workspace's projects, so with the exclusions alone every test file ran: on the Forge (vitest 2.1.9, 1360 locked files) the hook took 214 and 237 s with a lock open, where its refusals took 6 s. A positional filter is vitest's match on a file's path, so an absolute path selects that file in every project. A filter can also match another file whose path contains it; that file runs too, and the hook still blocks only on RED cases. Filters the command already has stay, and vitest runs the files that match any filter, so they can add files but never drop a RED file. Wrong-measurement note: since 2.0.0 (item 13); found on the Forge in POC-019; the battery should have caught it, but its vitest fixtures have no workspace.
+
 ### `filter`
 
 `filter = "shipcraft"` (the default) lets `shipcraft` add its own filter for the runners it knows. `filter = "command"` runs the command as written. The two never stack.
