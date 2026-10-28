@@ -162,7 +162,7 @@ On a public repository (or a paid GitHub plan), `shipcraft init --github` also m
 
 ## Measured, not asserted
 
-Shipcraft records every hook, CI and review run in `.git/shipcraft/runs.jsonl`: layer, result, refusal code and time. Nothing is sent anywhere. `shipcraft pr` puts the branch's numbers in the PR summary. A `shipcraft report` command that gives time-to-main per item is next on the roadmap.
+Shipcraft records every hook, CI and review run in `.git/shipcraft/runs.jsonl`: layer, result, refusal code and time. Nothing is sent anywhere. `shipcraft pr` puts the branch's numbers in the PR summary. `shipcraft report` reads the same log and gives, per lock, the times from RED to close and to merge, with daily runs, refusals and hook times (`--json` for scripts).
 
 Every rule in Shipcraft has to pay for itself. It ships with the metric that justifies it and the condition that removes it. Rules that don't catch anything in practice get deleted.
 
