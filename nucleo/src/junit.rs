@@ -1,6 +1,6 @@
 //! The JUnit report: what happened to each test case.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Ordered from best to worst, so a case reported twice keeps its worst outcome.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -14,6 +14,8 @@ pub enum Outcome {
 
 pub struct Report {
     cases: BTreeMap<String, Outcome>,
+    /// Item 52: failed cases that are a vitest block whose tests were all skipped.
+    groups: BTreeSet<String>,
 }
 
 impl Report {
@@ -25,17 +27,21 @@ impl Report {
             return None;
         }
         let mut cases = BTreeMap::new();
+        let mut names = Vec::new();
         for case in document.descendants().filter(|n| n.has_tag_name("testcase")) {
             let outcome = outcome_of(case);
-            let id = case_id(case.attribute("classname").unwrap_or(""), case.attribute("name").unwrap_or(""));
+            let (classname, name) = (case.attribute("classname").unwrap_or(""), case.attribute("name").unwrap_or(""));
+            let id = case_id(classname, name);
             let worst = cases.get(&id).map_or(outcome, |seen: &Outcome| outcome.max(*seen));
             cases.insert(id, worst);
+            names.push((classname, name));
         }
-        Some(Report { cases })
+        let groups = group_failures(&cases, &names);
+        Some(Report { cases, groups })
     }
 
     pub fn empty() -> Report {
-        Report { cases: BTreeMap::new() }
+        Report { cases: BTreeMap::new(), groups: BTreeSet::new() }
     }
 
     /// Adds another suite's cases; with a suite name, its cases are
@@ -46,6 +52,14 @@ impl Report {
             let worst = self.cases.get(&id).map_or(outcome, |seen| outcome.max(*seen));
             self.cases.insert(id, worst);
         }
+        for id in other.groups {
+            self.groups.insert(if suite.is_empty() { id } else { format!("{suite}:{id}") });
+        }
+    }
+
+    /// Item 52: the failed cases that are a group failure, sorted.
+    pub fn group_failures(&self) -> Vec<String> {
+        self.groups.iter().filter(|id| self.outcome(id) == Some(Outcome::Failed)).cloned().collect()
     }
 
     pub fn outcome(&self, case: &str) -> Option<Outcome> {
@@ -65,6 +79,27 @@ impl Report {
     pub fn is_green(&self) -> bool {
         self.cases.values().all(|o| matches!(o, Outcome::Passed | Outcome::Skipped))
     }
+}
+
+/// Item 52: a failed case `C::N` (C not empty) is a vitest block whose
+/// `beforeAll` failed when the same document holds cases `C::N > ...` and
+/// every one of them is skipped.
+fn group_failures(cases: &BTreeMap<String, Outcome>, names: &[(&str, &str)]) -> BTreeSet<String> {
+    let outcome = |classname: &str, name: &str| cases.get(&case_id(classname, name)).copied();
+    let mut groups = BTreeSet::new();
+    for &(classname, name) in names {
+        if classname.is_empty() || outcome(classname, name) != Some(Outcome::Failed) {
+            continue;
+        }
+        let prefix = format!("{name} > ");
+        let mut children =
+            names.iter().filter(|(c, n)| *c == classname && n.starts_with(&prefix)).map(|(c, n)| outcome(c, n));
+        let first = children.next();
+        if first.is_some() && first.into_iter().chain(children).all(|o| o == Some(Outcome::Skipped)) {
+            groups.insert(case_id(classname, name));
+        }
+    }
+    groups
 }
 
 fn outcome_of(case: roxmltree::Node) -> Outcome {
