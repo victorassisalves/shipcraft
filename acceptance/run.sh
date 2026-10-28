@@ -25,6 +25,7 @@
 #   SHIPCRAFT_ACCEPTANCE_CLONE=0  disable base clones; use cp -R (default: clone, copy on failure)
 #   SHIPCRAFT_ACCEPTANCE_JOBS     parallel cases (default 4, capped at 4)
 #   SHIPCRAFT_ACCEPTANCE_KEEP=1   keep the work dir (logs in <work>/logs)
+#   SHIPCRAFT_ACCEPTANCE_RETAIN_HOURS  remove earlier work dirs older than this at start (default 24)
 #   SHIPCRAFT_ACCEPTANCE_CACHE    absolute dir for pip/npm/go caches, reused across runs
 #   SHIPCRAFT_ACCEPTANCE_VERBOSE=1  print the log tail of each failing case (on in GitHub Actions)
 #   SHIPCRAFT_ACCEPTANCE_CASES    space-separated case ids to run (default: all)
@@ -817,8 +818,25 @@ REUSE_START=$(date +%s)
 
 TMPROOT="${TMPDIR:-/tmp}"; TMPROOT="${TMPROOT%/}/shipcraft.noindex"
 mkdir -p "$TMPROOT" || exit 2
+# Earlier runs leave logs and failed cases (about 1.5 GB for a failing full run), and a
+# killed run leaves everything. Remove work dirs older than the retention whose run is gone.
+# Metric: $TMPROOT size; 30 GB had piled up by 2026-10-28. Revert: drop this block.
+RETAIN_H="${SHIPCRAFT_ACCEPTANCE_RETAIN_HOURS:-24}"
+case "$RETAIN_H" in ''|*[!0-9]*|?????*) RETAIN_H=24 ;; esac
+RETAIN_M=$(( 10#$RETAIN_H * 60 ))
+# A dir is stale only when nothing in it changed within the retention (a live run writes logs)
+# and its run.pid, when there is one, is not alive. The glob cannot split a name.
+for old in "$TMPROOT"/shipcraft-acceptance.*; do
+  [ -d "$old" ] && [ ! -L "$old" ] || continue
+  recent=$(find "$old" -mmin -"$RETAIN_M" -print 2>/dev/null) || continue
+  [ -z "$recent" ] || continue
+  owner=$(cat "$old/run.pid" 2>/dev/null)
+  case "$owner" in ''|*[!0-9]*) ;; *) kill -0 "$owner" 2>/dev/null && continue ;; esac
+  chmod -R u+w "$old" 2>/dev/null; rm -rf "$old"
+done
 WORK=$(mktemp -d "$TMPROOT/shipcraft-acceptance.XXXXXX") || { echo "run.sh: mktemp failed" >&2; exit 2; }
 WORK=$(cd "$WORK" && pwd -P)
+echo $$ > "$WORK/run.pid"
 # Dependency installers and Python tempfile must use the same confined work root.
 mkdir -p "$WORK/tmp" || exit 2
 export TMPDIR="$WORK/tmp"
