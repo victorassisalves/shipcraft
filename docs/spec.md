@@ -248,13 +248,25 @@ Each command is `shipcraft <command>`. Exit codes, unless the row says otherwise
 
 ### `init` writes no check that checks nothing (item 56)
 
-Before item 56, `init` wrote `check = "tsc --noEmit"` for every Node suite with a `tsconfig.json`. A *solution* tsconfig, `"files": []` with `references` to the real projects, makes that command check no file: `tsc` succeeds without reading any source, so the check always passes. On the Forge (POC-019), the root tsconfig is such a file; the project type-checks with `pnpm tsc -b && pnpm typecheck:tests`.
+Before item 56, `init` wrote `check = "tsc --noEmit"` for every Node suite with a `tsconfig.json`. A *solution* tsconfig, `"files": []` with `references` to the real projects, makes that command check no file: `tsc` reads no source and the check always passes. The Forge's root tsconfig is such a file (POC-019). The project type-checks with `pnpm tsc -b && pnpm typecheck:tests`.
 
-- **What counts as checking nothing.** The suite folder's `tsconfig.json`, read with the reader `[build]` already uses for tsconfig files (JSON with comments and trailing commas), is an object whose `files` is an empty array, whose `include` is absent or an empty array, and that has no `extends`. A file that cannot be read or parsed, or that has `extends`, is not judged: `init` writes `tsc --noEmit` as before, since the base config may bring in files.
-- **What `init` writes then.** No `check` for that suite, and one line: `shipcraft: <suite folder>/tsconfig.json checks no file (files: [] without include); no check written for <suite>: set check in .shipcraft.toml to the project's type-check command (for example tsc -b)`. The folder is `.` for the root. It still exits `0`.
-- **`[build]` is unchanged.** When the same tsconfig has `references`, `[build]` is decided as today: its `tsc -b` type-checks the referenced projects whenever it runs.
-- **Unchanged.** Every other suite and language, a project whose tsconfig lists files or include, and configs already written: `init` does not rewrite an existing `.shipcraft.toml`.
-- **Known limit.** A tsconfig with `extends` whose base has no `include` either still gets `tsc --noEmit`, which checks nothing. `init` does not follow `extends`.
+- **What is read.** `init` reads the suite folder's `tsconfig.json` from the working tree, tracked or not, as suite detection does. A symlink, a file that cannot be read, or one the tsconfig parser that `[build]` uses (JSON with comments and trailing commas) cannot parse, is not judged: `init` writes `tsc --noEmit` as today.
+- **What checks nothing.** The file is a JSON object, and:
+  - its `files` key holds an empty array;
+  - its `include` key is absent or holds an empty array;
+  - its `extends` key is absent (any value of it, `null` included, means not judged);
+  - its `references` key holds a non-empty array.
+  Any other value of any of these keys means not judged.
+- **What `init` writes then.** It depends on `[build]`, which is decided first, as today:
+  - **`[build]` written** (its `tsc -b` succeeded and includes this suite's folder): no `check` key for that suite. `[build]` type-checks the referenced projects whenever it runs. `init` prints one line: `shipcraft: <path> checks no file; no check written for suite <name>: [build] type-checks its references`.
+  - **`[build]` not written** (its command failed, as today's warning says): `check = "tsc --noEmit"` as today, so no gate is lost. `init` prints one line: `shipcraft: <path> checks no file; the check of suite <name> passes without checking: set check to the project's own type-check command`.
+  - `<path>` is the tsconfig's path relative to the repository (`tsconfig.json` at the root). `<name>` is the generated suite name, or `default` for the top-level single suite. Control characters in either are escaped as in item 52's lists. The line comes after the `[build]` lines, one per affected suite, in suite order, on stdout.
+- **Unchanged.** Every other suite and language. A tsconfig that lists files, has a non-empty `include` or has `extends`. An existing `.shipcraft.toml`, which `init` does not rewrite, prints no line. `init` still exits `0`. `init` writes no run-log row.
+- **Battery.** README fixed points 40 and 57 (a check wherever a tsconfig exists) get item 56's exception. `v1-16b.1-build-reference`, whose solution tsconfig references a missing folder and whose build fails, keeps every assertion: `[build]` is not written, so its check stays. It gains the second line only. `v1-13.1-*` and `v1-12.1-*`, whose tsconfigs have a non-empty `include`, are unchanged.
+- **Known limits.**
+  - `init` does not follow `extends`. A tsconfig whose effective files and include, after inheritance, are empty still gets `tsc --noEmit`, which checks nothing.
+  - The judgement is per suite folder. A root solution tsconfig in a workspace whose root holds no tests is not a suite and is not read; `[build]` still covers it when written.
+  - A solution tsconfig without `references` (`"files": []` alone) is not judged. `tsc` reports it as an error, so today's check already fails there.
 
 ## 4. Configuration
 
