@@ -32,6 +32,8 @@ pub struct Request<'a> {
     pub branch: String,
     /// Item 35: empty when there is no key; then it is not recorded.
     pub diff_sha256: String,
+    /// Item 54: SHA-256 of title, NUL, body; empty when the text could not be read.
+    pub text_sha256: String,
 }
 
 pub enum Verdict {
@@ -92,6 +94,9 @@ pub fn run(req: &Request) -> Result<Review> {
     });
     if !req.diff_sha256.is_empty() {
         row["diff_sha256"] = json!(req.diff_sha256);
+    }
+    if !req.text_sha256.is_empty() {
+        row["text_sha256"] = json!(req.text_sha256);
     }
     medicao::record(req.repo, row);
     Ok(review)
