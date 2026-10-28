@@ -76,7 +76,7 @@ When a locked test is itself wrong, no GREEN can pass it. In draken-platform a l
 
 Before item 53, `red` wrote every case that failed in its one run into `failing_at_red`. A case that failed by chance (a flaky test under load) became part of the contract: the GREEN had to make it pass, and a case whose id the next run does not report (a generated parameter, a timeout at block level) made the RED unpassable. On the Forge (POC-019, 2.11.0 probe, 15,774 cases, load average 8 to 11) a RED with one intended failing test locked four; the three others were in files the RED did not touch.
 
-- **The second run.** After its run is read and judged as today (`[build]`, `check`, `no-report`, `error-before-assertions`, `group-failed`, `red-already-passes` when nothing failed, `suite-without-tests` on the first run's failures; for `--redo`, `redo-drops-case` before `red-already-passes`), `red` runs once more the suites that have a case in `F`, the first run's failed cases (suite-prefixed, as `failing_at_red` writes them), in configuration order, on the same working tree. Each runs as the hook runs a suite for a lock whose `failing_at_red` is `F` and whose `files` are the files `red` is about to lock, read from the working tree just before the second run: the same command, `filter`, `SHIPCRAFT_CASES` and `SHIPCRAFT_FILES` (this run is the one `red` command that receives them; §6), item 51's positional files, and the same fallback to every locked file when a case of `F` does not map to a file. Only the execution and the report reading are the hook's; none of the hook's verdicts (`case-missing`, `case-broke`, `red-already-passes`) apply. `[build]` and `check` do not run again. The second run is part of the same `red` command: one run log row, whose `secs` covers both runs.
+- **The second run.** After its run is read and judged as today (`[build]`, `check`, `no-report`, `error-before-assertions`, `group-failed`, `red-already-passes` when nothing failed, `suite-without-tests` on the first run's failures; for `--redo`, `redo-drops-case` before `red-already-passes`), `red` runs once more the suites that have a case in `F`, the first run's failed cases (suite-prefixed, as `failing_at_red` writes them), in configuration order, on the same working tree. Each runs as the hook runs a suite for a lock whose `failing_at_red` is `F` and whose `files` are the files `red` is about to lock, read from the working tree just before the second run: the same command, `filter`, `SHIPCRAFT_CASES` and `SHIPCRAFT_FILES` (the only `red` run that receives `SHIPCRAFT_CASES`; item 55's narrowed first run receives `SHIPCRAFT_FILES` only; §6), item 51's positional files, and the same fallback to every locked file when a case of `F` does not map to a file. Only the execution and the report reading are the hook's; none of the hook's verdicts (`case-missing`, `case-broke`, `red-already-passes`) apply. `[build]` and `check` do not run again. The second run is part of the same `red` command: one run log row, whose `secs` covers both runs.
 - **What is locked as failing.** Each suite's second report is read by the same reader as the first (duplicates folded to the worst outcome, kept separate from the first run's report). A case of `F` is dropped from `failing_at_red` only if that report shows it passed. A case of `F` that failed, errored, was skipped or is absent from the second report stays locked, and so does every case of `F` of a suite whose second run gives no readable report: absence is not evidence that the behavior passes. A case that fails or errors only in the second run is ignored. `cases` comes from the first run, and `files` is hashed after the second run, as `red` hashes after its run today.
 - **Reported.** When some case of `F` is dropped, `red` prints, before its usual lines and only when it writes the lock, `shipcraft: not locked, passed on a second run: <cases>`, byte-sorted, with item 52's list formatting and control-character escaping. The `red` row of the run log has `rerun_dropped`, the number of dropped cases, on rows that write a lock.
 - **Refusals.** If every case of `F` passed in the second run, `red` refuses `red-not-reproduced`, naming `F`, and writes no lock (`--redo` leaves the lock as it was). `Why:` a RED's failure must happen every time the test runs without the implementation; these failed once and then passed. `Next:` run the command again; if the tests keep passing on their own, fix them (or the setup they depend on). The second run adds no other refusal.
@@ -106,17 +106,18 @@ Before item 55, `red` ran every suite in full to learn which cases fail, and mos
 **The selection.**
 - A suite's *selected files* are its changed paths that:
   - match the suite's globs, read and matched exactly as protection reads them;
-  - are regular files in the working tree;
   - and are not `.shipcraft.toml` itself.
 - Paths are relative to each suite's `root`.
+- Each selected file must be a readable regular file as `lstat` sees it (a symlink is not one), and every path git reports must be valid UTF-8. Otherwise `red` falls back to the full run (`unreadable path`).
 - A changed path that matched a suite's globs at the base commit and was deleted or is no longer a regular file makes `red` fall back to the full run. So does a changed `.shipcraft.toml`.
 
 **The narrowed run.** When some suite has selected files and no fallback applies:
 1. `red` runs `[build]` as today.
-2. It runs the suites in configuration order, each with today's steps in today's order. A suite with selected files runs its `check`, then its command. A suite with none runs its `check` and skips its command. A failing `check` refuses as today.
-3. The command of a suite with selected files runs with the hook's filter for its RED files, where the selected files stand in for the RED files:
+2. It runs the suites in configuration order, each with today's steps in today's order. A suite with selected files runs its `check`, then its command. A suite with none runs its `check` and skips its command. A failing `check` refuses as today, at once; coverage is judged only after every suite has run.
+3. The command of a suite with selected files runs with the hook's filter for its RED files (`filter = "shipcraft"`), where the selected files stand in for the RED files:
    - for pytest, vitest and jest, every other present test file of the suite is left out, and vitest also gets each selected file as a positional argument;
-   - for Go, the packages of the selected files are run, and `-run` holds the tests those files declare;
+   - for Go, every `./...` of the command becomes the packages of the selected files, as in the hook, with no `-run`: the whole package runs, and its cases from other files are left out below;
+   - with `filter = "command"`, the command runs as written;
    - for any runner, `SHIPCRAFT_FILES` lists the selected files (absolute, NUL-terminated, deduplicated, in byte order, as in section 6), and `SHIPCRAFT_CASES` is not set.
 
 **Coverage, judged before any verdict on the narrowed run.**
@@ -124,13 +125,13 @@ Before item 55, `red` ran every suite in full to learn which cases fail, and mos
 - It falls back to the full run, without judging the narrowed reports, when:
   - a suite that ran gives no readable report;
   - the mapper finds no single map for a report;
-  - a case of a report maps to no file;
+  - a case of a report maps to no file, or to more than one;
   - or a selected file holds no case of any outcome. This last one is a helper, fixture or runner config that tests depend on, or a file the runner did not run, and `red` cannot know which tests depend on it.
 - Otherwise the narrowed run stands. Its reports keep only the cases that map to a selected file. Cases from other files that the runner ran anyway are left out, so they are neither in `cases` nor in `failing_at_red`. The result is then judged with today's refusals and precedence (`error-before-assertions`, `group-failed`, `red-already-passes`, `suite-without-tests` on the suites that ran).
 
 **The full run.**
 - On a fallback, `red` runs today's `red`: every suite, every step.
-- If the fallback was decided after the narrowed run had started, `[build]` and the checks that passed are not repeated. Every suite's command runs once in full, in configuration order, without the narrowed lists, and the narrowed reports are discarded.
+- If the fallback was decided after the narrowed run had started, `[build]` and the checks already run are not repeated. The suites run again in configuration order: a suite whose check has not run yet runs it first (a failing one refuses as today), then every suite's command runs once in full, without the narrowed lists. The narrowed reports are discarded.
 - Only the full reports supply `cases`, `failing_at_red` and item 53's `F`.
 
 **What the lock holds.**
@@ -143,10 +144,10 @@ Before item 55, `red` ran every suite in full to learn which cases fail, and mos
   - after a narrowed run: `shipcraft: red ran the changed test files: <n> of <m>`;
   - after a fallback: `shipcraft: red ran every suite: <reason>`.
 - `<n>` is the number of distinct selected files, by repository path. `<m>` is the number of distinct locked files across the suites, by repository path.
-- `<reason>` is the first that applies, in this order: `--all`, `no base`, `no merge base`, `git failed`, `config changed`, `protected file removed`, `nothing selected`, `no report`, `case without file`, `file without cases`.
+- `<reason>` is the first that applies, in this order: `--redo`, `--all`, `no base`, `no merge base`, `git failed`, `config changed`, `protected file removed`, `unreadable path`, `nothing selected`, `no report`, `case without file`, `file without cases`.
 - The `red` row of the run log gets three fields when the selection is decided:
   - `selection`: `"changed"` or `"all"`;
-  - `selected_files`: `<n>`, or 0 when no narrowed run ran;
+  - `selected_files`: `<n>` when a narrowed run started (kept after a later fallback), else 0;
   - `fallback`: the reason, or `null` after a narrowed run.
 - A `red` refused before the selection is decided (`lock-open`, a config error) writes its row without the three fields. Each `red` command still writes one row.
 
@@ -167,7 +168,9 @@ Before item 55, `red` ran every suite in full to learn which cases fail, and mos
   - `v1-40.trava-aberta`;
   - `v1-42.closed-*`;
   - `v1-50.reproduction`, whose tests sit in the base already, so it falls back with `nothing selected`;
-  - `v1-38.*`, one `red` row per command.
+  - `v1-38.*`, one `red` row per command;
+  - `v1-44.local-red`, `v1-44.github-red`, `v1-44.off-red`;
+  - `v1-10.1-execucoes-jsonl`.
 - The cases with no `origin` run in full as before, and their command and environment counts stay as they are: `v1-22.ambiente-red`, `v1-22.ambiente-build`, `v1-22.bash`, `v1-53.*`, `v1-16a.1-red-build`, `v1-45.red-order`.
 
 **Versions.** The item raises the binary to 2.13.0. No lock or config field changes.
@@ -176,7 +179,8 @@ Before item 55, `red` ran every suite in full to learn which cases fail, and mos
 - A case outside the selected files that the RED breaks is not run at RED, for example through a product stub the RED changed, or through a helper outside the globs. CI refuses it later as `suite-red`. This costs time, never an escape.
 - A selected file holding cases proves only that it ran, not that no other test depends on it. A vitest test file that other test files import, or a pytest file that registers fixtures for others, can change their results unseen until CI.
 - A failure already on the branch that lives in a selected file is still locked.
-- `origin/HEAD` is taken as the remote's default branch. If it is stale, `red` narrows against an older base and selects more files. `--base` overrides it.
+- `origin/HEAD` is taken as the remote's default branch as this clone last recorded it. If the default branch changed since, `red` narrows against the old one and may select more files or fewer: a failing test that is only on the old branch is then missed at RED, and CI catches it. `--base` overrides it.
+- Go's case-to-file map reads test declarations line by line, as the hook does. A test it does not recognize maps to no file, so it falls back to the full run.
 - A fallback after a narrowed run costs both runs. The log's `fallback` field measures how often that happens.
 
 ### The lock closes by itself
