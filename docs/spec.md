@@ -235,7 +235,7 @@ Each command is `shipcraft <command>`. Exit codes, unless the row says otherwise
 `init` decides everything before it asks or writes. A refusal leaves the tree as it was; a write that fails midway is rolled back.
 
 - **Language:** `pyproject.toml` or `requirements*.txt` is Python (pytest), `package.json` with vitest or jest is Node, `go.mod` is Go (gotestsum); `--lang` overrides. Workspaces (`pnpm-workspace.yaml`, `package.json` `workspaces`, `go.work`) get one `[[suite]]` per package with tests.
-- **Config:** writes `.shipcraft.toml` with the test command, globs, `check` (`tsc --noEmit` or `go vet`), `[execution]`, `[roles]`, `shipcraft_min` and, when it applies, `[build]`. Every `npx` it writes puts `--` before the tool's arguments.
+- **Config:** writes `.shipcraft.toml` with the test command, globs, `check` (`tsc --noEmit`, except for a tsconfig that checks no file, item 56; or `go vet`), `[execution]`, `[roles]`, `shipcraft_min` and, when it applies, `[build]`. Every `npx` it writes puts `--` before the tool's arguments.
 - **Review:** `init` asks nothing. With an agent installed it writes `review = "local"` and the first one found in `[roles] review`, and says that the diff goes to that agent's provider and how to turn review off. With none installed, review is `off` and it says how to enable it.
 - **AGENTS.md:** `init` creates `AGENTS.md` with a short block (marked `<!-- shipcraft -->`) telling agents the RED/GREEN workflow, or appends the block once to an existing file. A symlink or a failed write is left alone with a notice; it never fails the init. The block is the text below `AGENTS_BLOCK` in `nucleo/src/init.rs`.
 - **Hook:** there is one route: `shipcraft check --commit-msg` in `commit-msg` and `shipcraft close` in `post-commit`, so the hook sees the index after formatters ran. `init` integrates only when it can prove which configuration runs the hook:
@@ -245,6 +245,16 @@ Each command is `shipcraft <command>`. Exit codes, unless the row says otherwise
 
   Anything `init` cannot prove (another tool's hook, `core.hooksPath` elsewhere, two hook managers, flow-style YAML, symlinks) refuses with `foreign-hook` and says where to add `shipcraft check` by hand. Edge cases are fixed by the acceptance battery (`acceptance/`).
 - **GitHub:** `init` never writes a workflow. With `--github` it marks `shipcraft/ci` and, when review is on, `shipcraft/review` as required checks where GitHub offers branch protection.
+
+### `init` writes no check that checks nothing (item 56)
+
+Before item 56, `init` wrote `check = "tsc --noEmit"` for every Node suite with a `tsconfig.json`. A *solution* tsconfig, `"files": []` with `references` to the real projects, makes that command check no file: `tsc` succeeds without reading any source, so the check always passes. On the Forge (POC-019), the root tsconfig is such a file; the project type-checks with `pnpm tsc -b && pnpm typecheck:tests`.
+
+- **What counts as checking nothing.** The suite folder's `tsconfig.json`, read with the reader `[build]` already uses for tsconfig files (JSON with comments and trailing commas), is an object whose `files` is an empty array, whose `include` is absent or an empty array, and that has no `extends`. A file that cannot be read or parsed, or that has `extends`, is not judged: `init` writes `tsc --noEmit` as before, since the base config may bring in files.
+- **What `init` writes then.** No `check` for that suite, and one line: `shipcraft: <suite folder>/tsconfig.json checks no file (files: [] without include); no check written for <suite>: set check in .shipcraft.toml to the project's type-check command (for example tsc -b)`. The folder is `.` for the root. It still exits `0`.
+- **`[build]` is unchanged.** When the same tsconfig has `references`, `[build]` is decided as today: its `tsc -b` type-checks the referenced projects whenever it runs.
+- **Unchanged.** Every other suite and language, a project whose tsconfig lists files or include, and configs already written: `init` does not rewrite an existing `.shipcraft.toml`.
+- **Known limit.** A tsconfig with `extends` whose base has no `include` either still gets `tsc --noEmit`, which checks nothing. `init` does not follow `extends`.
 
 ## 4. Configuration
 
