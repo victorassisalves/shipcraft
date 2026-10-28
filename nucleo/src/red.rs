@@ -348,7 +348,7 @@ fn print_dropped(dropped: &[String]) {
 }
 
 /// Item 52: a case id on one line of a refusal (a line break in a name is escaped).
-fn one_line(id: &str) -> String {
+pub(crate) fn one_line(id: &str) -> String {
     id.chars()
         .map(|c| {
             if c.is_control() || matches!(c, '\u{2028}' | '\u{2029}') {
