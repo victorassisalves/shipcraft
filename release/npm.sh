@@ -115,7 +115,7 @@ $deps
 JSON
 
 if [ -n "$PACK" ]; then
-  mkdir -p "$PACK" || exit 2
+  mkdir -p "$PACK" && PACK=$(cd "$PACK" && pwd) || exit 2
   for p in $PLATFORMS shipcraft; do (cd "$STAGE/$p" && npm pack --silent --pack-destination "$PACK") || exit 2; done
   echo "release/npm.sh: packed$PLATFORMS shipcraft $VERSION into $PACK"
   exit 0
