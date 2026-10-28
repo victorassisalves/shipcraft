@@ -5,7 +5,7 @@
 
 use crate::config::{minimum_version, version_parts, CONFIG_FILE};
 use crate::git::{Repo, Snapshot};
-use crate::init::{block_layout, insert_text, is_executable};
+use crate::init::{block_layout, insert_text, is_executable, LOCAL};
 use crate::lock::{lock_files, Lock};
 use crate::refusal::{failed, refuse, Result};
 use serde_norway::{Mapping, Value};
@@ -41,9 +41,18 @@ fn command<'a>(doc: &'a Value, block: &str) -> Option<&'a Value> {
     doc.get(block)?.get("commands")?.get("shipcraft")
 }
 
+/// Item 58: a `shipcraft` command that is just `run: <run>`, with `shipcraft` or the
+/// project's `./node_modules/.bin/shipcraft`.
+fn generated(shipcraft: &Value, run: &str) -> bool {
+    shipcraft.as_mapping().is_some_and(|m| m.len() == 1)
+        && [run.to_string(), run.replacen("shipcraft", LOCAL, 1)]
+            .iter()
+            .any(|r| shipcraft.get("run") == Some(&r.as_str().into()))
+}
+
 /// 20.2 and 20.3: the checks of this route and the text with the commands
 /// that are missing; any doubt refuses, nothing written (rule 17).
-pub fn plan(repo: &Repo, file: &str, text: String) -> Result<Plan> {
+pub fn plan(repo: &Repo, file: &str, text: String, local: bool) -> Result<Plan> {
     let stop = |problem: String| alien(format!("{file} {problem}"), &problem);
     let doc: Value = parse(&text).map_err(|_| failed(format!("{file} disappeared while it was read")))?;
     let mut top = match doc {
@@ -76,19 +85,15 @@ pub fn plan(repo: &Repo, file: &str, text: String) -> Result<Plan> {
             Some(_) => return stop(format!("has commands in {block} that is not a map")),
         };
         match commands.get("shipcraft") {
-            Some(shipcraft)
-                if shipcraft.as_mapping().is_some_and(|m| m.len() == 1)
-                    && shipcraft.get("run") == Some(&run.into()) =>
-            {
-                continue
-            }
+            Some(shipcraft) if generated(shipcraft, run) => continue,
             Some(_) => {
                 return stop(format!("already has an `shipcraft` command in {block} that is not just `run: {run}`"))
             }
             None => {}
         }
+        let run = if local { run.replacen("shipcraft", LOCAL, 1) } else { run.to_string() };
         let mut shipcraft = Mapping::new();
-        shipcraft.insert("run".into(), run.into());
+        shipcraft.insert("run".into(), run.as_str().into());
         commands.insert("shipcraft".into(), Value::Mapping(shipcraft));
         map.insert("commands".into(), Value::Mapping(commands));
         top.insert(block.into(), Value::Mapping(map));
@@ -253,8 +258,7 @@ pub fn status(repo: &Repo, integrates: bool) -> String {
     let mut wants = Vec::new();
     for (block, run) in BLOCKS {
         let shipcraft = command(&doc, block);
-        if !shipcraft.is_some_and(|c| c.as_mapping().is_some_and(|m| m.len() == 1) && c.get("run") == Some(&run.into()))
-        {
+        if !shipcraft.is_some_and(|c| generated(c, run)) {
             wants.push(format!("the `shipcraft` command with `run: {run}` in {block}"));
         }
     }

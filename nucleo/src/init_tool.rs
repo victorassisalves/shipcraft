@@ -6,7 +6,7 @@
 
 use crate::config::CONFIG_FILE;
 use crate::git::Repo;
-use crate::init::{is_executable, layout, single_source};
+use crate::init::{is_executable, layout, single_source, LOCAL};
 use crate::refusal::{failed, refuse, Result, Stop};
 use serde_norway::Value;
 use std::fs;
@@ -55,7 +55,8 @@ fn checks(text: &str) -> bool {
 
 /// Points 1 to 4: the plan, decided before anything is written; any doubt
 /// refuses, nothing written (rule 17). `dir` is the raw `core.hooksPath`.
-pub fn decide(repo: &Repo, dir: Option<&str>) -> Result<Tool> {
+/// Item 58: `local` writes `./node_modules/.bin/shipcraft` for `shipcraft`; both forms are recognized.
+pub fn decide(repo: &Repo, dir: Option<&str>, local: bool) -> Result<Tool> {
     let husky = husky_path(dir) || old_husky(repo) || repo.path(".husky").symlink_metadata().is_ok();
     let other = if husky && repo.path(PRE_COMMIT_CONFIG).symlink_metadata().is_ok() {
         Some("husky (.husky/) and the pre-commit framework (.pre-commit-config.yaml)".to_string())
@@ -68,13 +69,13 @@ pub fn decide(repo: &Repo, dir: Option<&str>) -> Result<Tool> {
         return alien(format!("the project uses two hook tools: {both}"), "keep only one");
     }
     if husky {
-        husky_plan(repo, dir)
+        husky_plan(repo, dir, local)
     } else {
-        pre_commit_plan(repo, dir)
+        pre_commit_plan(repo, dir, local)
     }
 }
 
-fn husky_plan(repo: &Repo, dir: Option<&str>) -> Result<Tool> {
+fn husky_plan(repo: &Repo, dir: Option<&str>, local: bool) -> Result<Tool> {
     let old = old_husky(repo);
     let h = fs::read(repo.path(".husky/_/h"));
     if old || dir != Some(".husky/_") || h.is_err() {
@@ -84,17 +85,19 @@ fn husky_plan(repo: &Repo, dir: Option<&str>) -> Result<Tool> {
     if h.is_ok_and(|bytes| bytes.is_empty()) {
         return alien(".husky/_/h is empty: husky installation was interrupted".into(), "run `npx husky`");
     }
-    let shipcraft = |l: &&str| l.split_whitespace().next() == Some("shipcraft");
+    let shipcraft = |l: &&str| matches!(l.split_whitespace().next(), Some("shipcraft" | LOCAL));
     if read(repo, ".husky/pre-commit")?.is_some_and(|t| checks(&t)) {
         return alien(".husky/pre-commit has an `shipcraft check`".into(), TWICE);
     }
     let mut writes = Vec::new();
-    for (file, line) in HUSKY {
+    for (file, plain) in HUSKY {
+        let project = plain.replacen("shipcraft", LOCAL, 1);
+        let line = if local { project.as_str() } else { plain };
         let Some(text) = read(repo, file)? else {
             writes.push((file.to_string(), None, format!("{line}\n")));
             continue;
         };
-        match text.lines().filter(shipcraft).find(|l| l.trim() != line) {
+        match text.lines().filter(shipcraft).find(|l| l.trim() != plain && l.trim() != project) {
             Some(other) => {
                 return alien(
                     format!("{file} already calls shipcraft another way ({})", other.trim()),
@@ -121,7 +124,7 @@ fn husky_plan(repo: &Repo, dir: Option<&str>) -> Result<Tool> {
     Ok(Tool { name: "husky", writes, missing, install: "npx husky" })
 }
 
-fn pre_commit_plan(repo: &Repo, dir: Option<&str>) -> Result<Tool> {
+fn pre_commit_plan(repo: &Repo, dir: Option<&str>, local: bool) -> Result<Tool> {
     if let Some(dir) = dir.filter(|d| *d != ".git/hooks") {
         return alien(
             format!("core.hooksPath is {dir:?}, and shipcraft only accepts .git/hooks, exactly"),
@@ -147,7 +150,7 @@ fn pre_commit_plan(repo: &Repo, dir: Option<&str>) -> Result<Tool> {
     for hook in repos.iter().filter_map(|r| r.get("hooks")?.as_sequence()).flatten() {
         let id = hook.get("id").and_then(Value::as_str);
         if let Some(i) = HOOKS.iter().position(|(h, ..)| Some(*h) == id) {
-            if *hook != canonical(i) {
+            if *hook != canonical(i, false) && *hook != canonical(i, true) {
                 return stop(&format!(
                     "has hook `{}` ({}) different from what shipcraft writes",
                     HOOKS[i].0, HOOKS[i].2
@@ -172,9 +175,10 @@ fn pre_commit_plan(repo: &Repo, dir: Option<&str>) -> Result<Tool> {
     }
     let mut writes = Vec::new();
     if !wanted.is_empty() {
-        let new = append(&text, &wanted).ok_or(()).or_else(|()| stop("cannot prove where to put shipcraft hooks"))?;
+        let new =
+            append(&text, &wanted, local).ok_or(()).or_else(|()| stop("cannot prove where to put shipcraft hooks"))?;
         let mut expected = doc.clone();
-        let item = parse(&item(&wanted, 0, 1, "\n")).ok().and_then(|v| v.as_sequence()?.first().cloned());
+        let item = parse(&item(&wanted, 0, 1, "\n", local)).ok().and_then(|v| v.as_sequence()?.first().cloned());
         expected.get_mut("repos").and_then(Value::as_sequence_mut).zip(item).map(|(r, i)| r.push(i));
         if !parse(&new).is_ok_and(|back| back == expected) {
             return stop("cannot prove where to put shipcraft hooks without changing the rest");
@@ -266,14 +270,15 @@ fn parse(text: &str) -> std::result::Result<Value, serde_norway::Error> {
 }
 
 /// The hook `i` as the init writes it: exactly its 7 keys.
-fn canonical(i: usize) -> Value {
-    let doc = parse(&item(&[i], 0, 1, "\n")).unwrap_or(Value::Null);
+fn canonical(i: usize, local: bool) -> Value {
+    let doc = parse(&item(&[i], 0, 1, "\n", local)).unwrap_or(Value::Null);
     doc.get(0).and_then(|r| r.get("hooks")).and_then(|h| h.get(0)).cloned().unwrap_or(Value::Null)
 }
 
 /// A `repo: local` item with the hooks `wanted`, its dash at column `d` and
-/// `s` spaces after each dash, in block layout (25.4: `stages` too).
-fn item(wanted: &[usize], d: usize, s: usize, eol: &str) -> String {
+/// `s` spaces after each dash, in block layout (25.4: `stages` too); `local`, the
+/// entry calls `./node_modules/.bin/shipcraft` (item 58).
+fn item(wanted: &[usize], d: usize, s: usize, eol: &str, local: bool) -> String {
     let pad = |n: usize| " ".repeat(n);
     let dash = |n: usize| format!("{}-{}", pad(n), pad(s));
     let (k, h) = (d + 1 + s, 2 * d + 2 + 2 * s);
@@ -281,6 +286,7 @@ fn item(wanted: &[usize], d: usize, s: usize, eol: &str) -> String {
     for &i in wanted {
         let (id, entry, stage) = HOOKS[i];
         let name = entry.trim_end_matches(" --commit-msg");
+        let entry = if local { entry.replacen("shipcraft", LOCAL, 1) } else { entry.to_string() };
         out += &format!("{}id: {id}{eol}", dash(k + d));
         for line in [format!("name: {name}"), format!("entry: {entry}"), "language: system".into(), "stages:".into()] {
             out += &format!("{}{line}{eol}", pad(h));
@@ -293,7 +299,7 @@ fn item(wanted: &[usize], d: usize, s: usize, eol: &str) -> String {
 
 /// The text with the item appended at the end of the `repos` list, in the
 /// indentation and the line ending the list already uses; None if unproved.
-fn append(text: &str, wanted: &[usize]) -> Option<String> {
+fn append(text: &str, wanted: &[usize], local: bool) -> Option<String> {
     // Every line break the parser reads (YAML 1.1); the first one is the eol.
     let breaks = ['\n', '\r', '\u{85}', '\u{2028}', '\u{2029}'];
     let (mut lines, mut from) = (Vec::new(), 0);
@@ -319,7 +325,7 @@ fn append(text: &str, wanted: &[usize]) -> Option<String> {
     if !new.ends_with(breaks) {
         new += eol;
     }
-    Some(new + &item(wanted, d, s.max(1), eol) + &lines[last + 1..].concat())
+    Some(new + &item(wanted, d, s.max(1), eol, local) + &lines[last + 1..].concat())
 }
 
 /// The writes of `tool` and the `.shipcraft.toml` raise in one transaction: if a
@@ -395,14 +401,14 @@ mod tests {
     #[test]
     fn appends_in_the_list_indentation() {
         let text = "repos:\n-   repo: x\n    hooks:\n    -   id: y\n        stages: [pre-commit]\ndefault_stages: [pre-commit]\n";
-        let new = append(text, &[0, 1]).unwrap();
+        let new = append(text, &[0, 1], false).unwrap();
         assert!(new.starts_with(text.trim_end_matches("default_stages: [pre-commit]\n")));
         assert!(
             new.contains("-   repo: local\n    hooks:\n    -   id: shipcraft-check\n        name: shipcraft check\n")
         );
         assert!(new.ends_with("default_stages: [pre-commit]\n"));
         let doc = parse(&new).unwrap();
-        assert_eq!(doc["repos"][1]["hooks"][1], canonical(1));
+        assert_eq!(doc["repos"][1]["hooks"][1], canonical(1, false));
         assert_eq!(doc["repos"][1]["hooks"][0]["stages"][0], Value::from("commit-msg"));
     }
 }
