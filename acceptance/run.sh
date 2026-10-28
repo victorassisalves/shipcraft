@@ -828,7 +828,8 @@ RETAIN_M=$(( 10#$RETAIN_H * 60 ))
 # and its run.pid, when there is one, is not alive. The glob cannot split a name.
 for old in "$TMPROOT"/shipcraft-acceptance.*; do
   [ -d "$old" ] && [ ! -L "$old" ] || continue
-  [ -z "$(find "$old" -mmin -"$RETAIN_M" -print 2>/dev/null | head -n 1)" ] || continue
+  recent=$(find "$old" -mmin -"$RETAIN_M" -print 2>/dev/null) || continue
+  [ -z "$recent" ] || continue
   owner=$(cat "$old/run.pid" 2>/dev/null)
   case "$owner" in ''|*[!0-9]*) ;; *) kill -0 "$owner" 2>/dev/null && continue ;; esac
   chmod -R u+w "$old" 2>/dev/null; rm -rf "$old"
