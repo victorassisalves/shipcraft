@@ -822,9 +822,13 @@ mkdir -p "$TMPROOT" || exit 2
 # killed run leaves everything. Remove work dirs older than the retention whose run is gone.
 # Metric: $TMPROOT size; 30 GB had piled up by 2026-10-28. Revert: drop this block.
 RETAIN_H="${SHIPCRAFT_ACCEPTANCE_RETAIN_HOURS:-24}"
-case "$RETAIN_H" in ''|*[!0-9]*) RETAIN_H=24 ;; esac
-find "$TMPROOT" -mindepth 1 -maxdepth 1 -type d -name 'shipcraft-acceptance.*' -mmin +$((RETAIN_H * 60)) 2>/dev/null |
-while IFS= read -r old; do
+case "$RETAIN_H" in ''|*[!0-9]*|?????*) RETAIN_H=24 ;; esac
+RETAIN_M=$(( 10#$RETAIN_H * 60 ))
+# A dir is stale only when nothing in it changed within the retention (a live run writes logs)
+# and its run.pid, when there is one, is not alive. The glob cannot split a name.
+for old in "$TMPROOT"/shipcraft-acceptance.*; do
+  [ -d "$old" ] && [ ! -L "$old" ] || continue
+  [ -z "$(find "$old" -mmin -"$RETAIN_M" -print 2>/dev/null | head -n 1)" ] || continue
   owner=$(cat "$old/run.pid" 2>/dev/null)
   case "$owner" in ''|*[!0-9]*) ;; *) kill -0 "$owner" 2>/dev/null && continue ;; esac
   chmod -R u+w "$old" 2>/dev/null; rm -rf "$old"
