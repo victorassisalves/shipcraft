@@ -122,7 +122,16 @@ if [ -n "$PACK" ]; then
 fi
 for p in $PLATFORMS shipcraft; do
   if npm view "$p@$VERSION" version >/dev/null 2>&1; then
-    echo "release/npm.sh: $p@$VERSION is already on npm, kept"; continue
+    # A rerun keeps a package already published only if it carries the released binary.
+    if [ "$p" != shipcraft ]; then
+      got="$STAGE/registry-$p"; mkdir -p "$got"
+      (cd "$got" && npm pack --silent "$p@$VERSION" >/dev/null && tar -xzf ./*.tgz package/bin/shipcraft) || refuse \
+        "could not download $p@$VERSION from npm to check it" "a kept package must carry the released bytes" "run again"
+      [ "$(shasum -a 256 < "$got/package/bin/shipcraft")" = "$(shasum -a 256 < "$STAGE/$p/bin/shipcraft")" ] || refuse \
+        "$p@$VERSION on npm does not carry the released binary" "npm never lets a version be replaced" \
+        "deprecate $p@$VERSION on npm and publish a new release"
+    fi
+    echo "release/npm.sh: $p@$VERSION is already on npm with the released binary, kept"; continue
   fi
   (cd "$STAGE/$p" && npm publish --access public) || refuse "npm publish of $p failed" \
     "the registry did not take the package" "check \`npm whoami\` and run again: packages already published are kept"
