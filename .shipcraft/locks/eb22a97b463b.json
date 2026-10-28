@@ -1,6 +1,6 @@
 {
   "format": 3,
-  "state": "open",
+  "state": "closed",
   "files": {
     ".shipcraft.toml": "sha256:e47b386c556c59e994d60a4b9984fdc77d78ccf1f342c7230bd2264f07703500",
     "acceptance/fixtures/item30/go/config.toml": "sha256:cc23597859839f6906f615a217400a817863eb15d8e7957c5ca6acf833e73f8c",
@@ -97,5 +97,5 @@
     "acceptance:acceptance/lib/item57.sh::python::v1-57.log-fails",
     "acceptance:acceptance/lib/item57.sh::python::v1-57.main"
   ],
-  "seal": "f23834b267658f74ffc1ee14ae1886164ef74650cb03ff611a04bde7d81d579e"
+  "seal": "666dfc7da25850c71119b307c7705ed6f84ce31c0bb2d84b63741f4fa1039ebd"
 }
