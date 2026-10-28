@@ -274,6 +274,21 @@ Before item 56, `init` wrote `check = "tsc --noEmit"` for every Node suite with 
   - The judgement is per suite folder. A root solution tsconfig in a workspace whose root holds no tests is not a suite and is not read; `[build]` still covers it when written.
   - A solution tsconfig without `references` (`"files": []` alone) is not judged. `tsc` reports it as an error, so today's check already fails there.
 
+### `init` for a project-local install (item 58)
+
+Before item 58, `init` wired the hooks to the binary that ran it: plain git hooks named its absolute path, and lefthook, husky and the pre-commit framework a bare `shipcraft` found on `PATH`. Every project on a machine then used the machine's one binary. Upgrading it upgraded every project at once and without a commit: draken-platform ran three versions in one day (2026-10-28) while its owner believed it was on 2.11.0. A Node project can instead pin Shipcraft as a dev dependency (`pnpm add -D shipcraft`), so the version is in its lockfile and every clone gets the same binary.
+
+- **When the install is the project's.** `init` takes the real path of the binary running it (symlinks resolved). The install is the project's when that path is inside a folder named `node_modules` that lies inside the repository root. The binary is then reached as `<prefix>/node_modules/.bin/shipcraft`, where `<prefix>` is the repository-relative folder holding the outermost such `node_modules` (empty at the root). If that `.bin/shipcraft` does not exist, the install is not treated as the project's, and `init` wires the hooks as today. Otherwise `init` wires them as today, with the absolute path for plain git and a bare `shipcraft` for the hook managers.
+- **What `init` writes then.**
+  - **Plain git:** the two hooks call `"$(git rev-parse --show-toplevel)/<prefix>node_modules/.bin/shipcraft"`, with the same arguments as today. When that file is not executable, as in a fresh clone before the dependencies are installed, the hook prints `shipcraft: not installed in this checkout (<prefix>node_modules/.bin/shipcraft): install the project's dependencies` and exits `1`. The commit is refused, never let through unjudged. The hooks keep their `# shipcraft hook` marker, so `status` reads them as installed.
+  - **lefthook, husky 9, pre-commit framework:** the commands become `./<prefix>node_modules/.bin/shipcraft check --commit-msg …` and `./<prefix>node_modules/.bin/shipcraft close`, relative to the repository root, where those tools run hooks. They are committed, so every clone calls its own install.
+  - `init` prints one line: `shipcraft: hooks call this project's install (<prefix>node_modules/.bin/shipcraft); upgrade it with your package manager`.
+- **Unchanged.** A binary outside the repository's `node_modules` (`install.sh`, Homebrew later, `cargo install`) is wired as today. Existing hook files and configs are not rewritten: `init` integrates as before. `shipcraft_min` is still written as the running binary's `major.minor`. Every command other than `init` is unchanged.
+- **Known limits.**
+  - A hook manager that runs hooks from another folder than the repository root does not find the relative path. lefthook's `root:` option is one case; the refusal then names the path it tried.
+  - The project-local install needs Node at commit time, because the package's `.bin/shipcraft` launcher is a Node script.
+  - Projects without Node keep the machine's binary.
+
 ## 4. Configuration
 
 `.shipcraft.toml` lives at the project root.
