@@ -16,9 +16,9 @@ use std::collections::BTreeSet;
 const UNKNOWN: [&str; 5] = ["{", "[", "+(", "@(", "!("];
 
 /// The `[build] comando` to write: `tsc -b` on every folder (the root as `.`)
-/// whose own `tsconfig.json` has the signal. None without the signal, or
-/// after saying why it was left out.
-pub fn infer(repo: &Repo) -> Result<Option<String>> {
+/// whose own `tsconfig.json` has the signal, with those folders. None without
+/// the signal, or after saying why it was left out.
+pub fn infer(repo: &Repo) -> Result<Option<(String, Vec<String>)>> {
     let tracked: BTreeSet<String> = repo.tracked()?.into_iter().collect();
     let Some(packages) = packages(repo, &tracked)? else { return Ok(None) };
     let mut dirs = Vec::new();
@@ -39,7 +39,7 @@ pub fn infer(repo: &Repo) -> Result<Option<String>> {
     dirs.sort();
     let targets: Vec<String> = dirs.iter().map(|dir| shell_word(dir)).collect();
     let command = format!("npx --no -- tsc -b {}", targets.join(" "));
-    let Err(how) = suite::run_build(&command, repo.root())? else { return Ok(Some(command)) };
+    let Err(how) = suite::run_build(&command, repo.root())? else { return Ok(Some((command, dirs))) };
     warn(
         format!("did not write [build]: `{command}` {how}"),
         "init proves the build in the tree before writing it; a failing [build] would refuse every shipcraft ci and shipcraft red",

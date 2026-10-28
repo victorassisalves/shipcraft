@@ -103,7 +103,7 @@ These readings remain part of the acceptance contract. Historical item numbers i
 37. product_lines is an integer on PR CI/review rows, including explicit 0; hook rows have no historical case.
 38. The npm workspace fixture has two packages, TypeScript outDir without noEmit, and installed TypeScript; npm 11 can swallow flags without `--`.
 39. Every init-generated npx invocation places its first nonflag argument after `--`.
-40. Packages with tsconfig.json use `npx --no -- tsc --noEmit` in their suite check.
+40. Packages with tsconfig.json use `npx --no -- tsc --noEmit` in their suite check, except item 56 solution configs covered by a successful inferred [build].
 41. No build means no dist directory or new tree files outside locks after RED and GREEN.
 42. failing_at_red lists case IDs; old tests already existed and passed at RED, so they are locked but not failing_at_red.
 43. A probe outside the project records old-test runs; GREEN's hook leaves it empty when filtering succeeds.
@@ -120,7 +120,7 @@ These readings remain part of the acceptance contract. Historical item numbers i
 54. Before the first commit, judged copies are git repositories containing the index, without HEAD/history; git ls-files still works through RED/GREEN.
 55. Mapping failure with pytest junit-prefix or doctest-modules may cost time but cannot falsely refuse GREEN; CI catches old failures. These cases do not constrain old-test run counts.
 56. Collection/compile failures outside RED files do not block GREEN (Python import, Node module, other Go package/vet), including explicitly listed Python test files; CI refuses.
-57. Suite `check` runs type checking/vet before RED/CI, separately from test_command/command. Init writes tsc where tsconfig exists and go vet for Go.
+57. Suite `check` runs type checking/vet before RED/CI, separately from test_command/command. Init writes tsc where tsconfig exists (except item 56 solution configs covered by a successful inferred [build]) and go vet for Go.
 58. The npx check uses `npx --no -- tsc --noEmit`.
 59. Type-only/vet-only errors with passing tests are accepted by the hook and refused by CI; old packages that stop compiling do not block GREEN.
 60. Even explicitly listed pytest test files are narrowed to RED files in the hook; the old-test probe stays empty.

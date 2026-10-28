@@ -14,6 +14,7 @@ use crate::git::{git_in, text, Repo, Snapshot};
 use crate::glob;
 use crate::init_msg::{self, Plan};
 use crate::init_tool::{self, Tool};
+use crate::jsonc;
 use crate::lang::{self, Lang, Profile};
 use crate::lock::LOCK_DIR;
 use crate::refusal::{failed, refuse, Result};
@@ -50,11 +51,16 @@ pub fn open() -> Result<Repo> {
 
 pub fn run(repo: &Repo, lang_flag: Option<&str>, github: bool) -> Result<()> {
     crate::config::reject_legacy_file(repo, &Snapshot::Tree)?;
-    let (lang, suites) = plan(repo, lang_flag)?;
+    let (lang, mut suites) = plan(repo, lang_flag)?;
     let hook = decide_hook(repo)?;
     let raise = init_msg::raise_min(repo)?;
     // Item 16b: proved on the tree before anything is written.
-    let build = if repo.path(CONFIG_FILE).symlink_metadata().is_ok() { None } else { tsbuild::infer(repo)? };
+    let kept = repo.path(CONFIG_FILE).symlink_metadata().is_ok();
+    let (build, built) = match if kept { None } else { tsbuild::infer(repo)? } {
+        Some((command, dirs)) => (Some(command), dirs),
+        None => (None, Vec::new()),
+    };
+    let unchecked = if kept || lang != Lang::Node { Vec::new() } else { drop_empty_checks(repo, &mut suites, &built) };
     match suites.as_slice() {
         [(_, raiz, profile)] if raiz == "." => {
             println!("shipcraft: language {} (runner {})", lang.name(), profile.runner)
@@ -81,6 +87,9 @@ pub fn run(repo: &Repo, lang_flag: Option<&str>, github: bool) -> Result<()> {
     let agents = agents_block(repo);
     if let Some(command) = &build {
         println!("shipcraft: [build] in {CONFIG_FILE} runs `{command}` before suites");
+    }
+    for line in &unchecked {
+        println!("{line}");
     }
     if let Hook::Msg(Plan { missing, .. }) = &hook {
         if !missing.is_empty() {
@@ -187,6 +196,46 @@ fn workspace_suites(repo: &Repo, lang: Lang, patterns: &[String]) -> Result<Suit
         }
     }
     Ok(suites)
+}
+
+/// Item 56: a suite whose `tsconfig.json` checks no file (a solution config)
+/// loses its `tsc --noEmit` when `[build]` type-checks its folder, and keeps it
+/// otherwise; either way a line says so. Returns those lines, in suite order.
+fn drop_empty_checks(repo: &Repo, suites: &mut Suites, built: &[String]) -> Vec<String> {
+    let mut lines = Vec::new();
+    for (name, root, profile) in suites.iter_mut() {
+        let path = if root == "." { "tsconfig.json".to_string() } else { format!("{root}/tsconfig.json") };
+        if profile.check.is_none() || !checks_no_file(&repo.path(&path)) {
+            continue;
+        }
+        let shown = if name.is_empty() { "default".to_string() } else { crate::red::one_line(name) };
+        let what = if built.contains(root) {
+            profile.check = None;
+            format!("no check written for suite {shown}: [build] type-checks its references")
+        } else {
+            format!(
+                "the check of suite {shown} passes without checking: set check to the project's own type-check command"
+            )
+        };
+        lines.push(format!("shipcraft: {} checks no file; {what}", crate::red::one_line(&path)));
+    }
+    lines
+}
+
+/// A regular file that reads as a JSON object with `files: []`, `include`
+/// absent or `[]`, no `extends` and a non-empty `references` array. Anything
+/// else is not judged (item 56).
+fn checks_no_file(path: &Path) -> bool {
+    if !path.symlink_metadata().is_ok_and(|m| m.is_file()) {
+        return false;
+    }
+    let Some(config) = fs::read_to_string(path).ok().and_then(|text| jsonc::parse(&text)) else { return false };
+    let Some(config) = config.as_object() else { return false };
+    let empty = |v: &serde_json::Value| v.as_array().is_some_and(Vec::is_empty);
+    config.get("files").is_some_and(empty)
+        && config.get("include").is_none_or(empty)
+        && !config.contains_key("extends")
+        && config.get("references").and_then(|v| v.as_array()).is_some_and(|r| !r.is_empty())
 }
 
 fn choose_lang(repo: &Repo, flag: Option<&str>) -> Result<Lang> {

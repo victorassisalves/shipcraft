@@ -241,7 +241,7 @@ Each command is `shipcraft <command>`. Exit codes, unless the row says otherwise
 `init` decides everything before it asks or writes. A refusal leaves the tree as it was; a write that fails midway is rolled back.
 
 - **Language:** `pyproject.toml` or `requirements*.txt` is Python (pytest), `package.json` with vitest or jest is Node, `go.mod` is Go (gotestsum); `--lang` overrides. Workspaces (`pnpm-workspace.yaml`, `package.json` `workspaces`, `go.work`) get one `[[suite]]` per package with tests.
-- **Config:** writes `.shipcraft.toml` with the test command, globs, `check` (`tsc --noEmit` or `go vet`), `[execution]`, `[roles]`, `shipcraft_min` and, when it applies, `[build]`. Every `npx` it writes puts `--` before the tool's arguments.
+- **Config:** writes `.shipcraft.toml` with the test command, globs, `check` (`tsc --noEmit`, except for a tsconfig that checks no file, item 56; or `go vet`), `[execution]`, `[roles]`, `shipcraft_min` and, when it applies, `[build]`. Every `npx` it writes puts `--` before the tool's arguments.
 - **Review:** `init` asks nothing. With an agent installed it writes `review = "local"` and the first one found in `[roles] review`, and says that the diff goes to that agent's provider and how to turn review off. With none installed, review is `off` and it says how to enable it.
 - **AGENTS.md:** `init` creates `AGENTS.md` with a short block (marked `<!-- shipcraft -->`) telling agents the RED/GREEN workflow, or appends the block once to an existing file. A symlink or a failed write is left alone with a notice; it never fails the init. The block is the text below `AGENTS_BLOCK` in `nucleo/src/init.rs`.
 - **Hook:** there is one route: `shipcraft check --commit-msg` in `commit-msg` and `shipcraft close` in `post-commit`, so the hook sees the index after formatters ran. `init` integrates only when it can prove which configuration runs the hook:
@@ -251,6 +251,28 @@ Each command is `shipcraft <command>`. Exit codes, unless the row says otherwise
 
   Anything `init` cannot prove (another tool's hook, `core.hooksPath` elsewhere, two hook managers, flow-style YAML, symlinks) refuses with `foreign-hook` and says where to add `shipcraft check` by hand. Edge cases are fixed by the acceptance battery (`acceptance/`).
 - **GitHub:** `init` never writes a workflow. With `--github` it marks `shipcraft/ci` and, when review is on, `shipcraft/review` as required checks where GitHub offers branch protection.
+
+### `init` writes no check that checks nothing (item 56)
+
+Before item 56, `init` wrote `check = "tsc --noEmit"` for every Node suite with a `tsconfig.json`. A *solution* tsconfig, `"files": []` with `references` to the real projects, makes that command check no file: `tsc` reads no source and the check always passes. The Forge's root tsconfig is such a file (POC-019). The project type-checks with `pnpm tsc -b && pnpm typecheck:tests`.
+
+- **What is read.** `init` reads the suite folder's `tsconfig.json` from the working tree, tracked or not, as suite detection does. A symlink, a file that cannot be read, or one the tsconfig parser that `[build]` uses (JSON with comments and trailing commas) cannot parse, is not judged: `init` writes `tsc --noEmit` as today.
+- **What checks nothing.** The file is a JSON object, and:
+  - its `files` key holds an empty array;
+  - its `include` key is absent or holds an empty array;
+  - its `extends` key is absent (any value of it, `null` included, means not judged);
+  - its `references` key holds a non-empty array.
+  Any other value of any of these keys means not judged.
+- **What `init` writes then.** It depends on `[build]`, which is decided first, as today:
+  - **`[build]` written** (its `tsc -b` succeeded and includes this suite's folder): no `check` key for that suite. `[build]` type-checks the referenced projects whenever it runs. `init` prints one line: `shipcraft: <path> checks no file; no check written for suite <name>: [build] type-checks its references`.
+  - **`[build]` not written** (its command failed, as today's warning says): `check = "tsc --noEmit"` as today, so no gate is lost. `init` prints one line: `shipcraft: <path> checks no file; the check of suite <name> passes without checking: set check to the project's own type-check command`.
+  - `<path>` is the tsconfig's path relative to the repository (`tsconfig.json` at the root). `<name>` is the generated suite name, or `default` for the top-level single suite. Control characters in either are escaped as in item 52's lists. The line comes after the `[build]` lines, one per affected suite, in suite order, on stdout.
+- **Unchanged.** Every other suite and language. A tsconfig that lists files, has a non-empty `include` or has `extends`. An existing `.shipcraft.toml`, which `init` does not rewrite, prints no line. `init` still exits `0`. `init` writes no run-log row.
+- **Battery.** README fixed points 40 and 57 (a check wherever a tsconfig exists) get item 56's exception. `v1-16b.1-build-reference`, whose solution tsconfig references a missing folder and whose build fails, keeps every assertion: `[build]` is not written, so its check stays. It gains the second line only. `v1-13.1-*` and `v1-12.1-*`, whose tsconfigs have a non-empty `include`, are unchanged.
+- **Known limits.**
+  - `init` does not follow `extends`. A tsconfig whose effective files and include, after inheritance, are empty still gets `tsc --noEmit`, which checks nothing.
+  - The judgement is per suite folder. A root solution tsconfig in a workspace whose root holds no tests is not a suite and is not read; `[build]` still covers it when written.
+  - A solution tsconfig without `references` (`"files": []` alone) is not judged. `tsc` reports it as an error, so today's check already fails there.
 
 ## 4. Configuration
 
