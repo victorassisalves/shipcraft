@@ -143,6 +143,13 @@ SH55
   case "$c" in
     missing-base|repeated-all) chk 'invalid arguments' eq "$RC" 2; pass; return ;;
     error)
+      if [ "$LP" != python ]; then
+        # vitest reports a module-level throw as a failed case, not an error (item 52, v1-52.precedence):
+        # red locks it as today; only the selection is this item's.
+        chk 'vitest import failure locked as today' rc_zero
+        chk 'selection notice printed' match 'shipcraft: red ran the changed test files: 1 of' "$(cat "$OUT")"
+        pass; return
+      fi
       chk 'collection error refuses' eq "$RC" 1
       chk 'selection notice survives refusal' match 'shipcraft: red ran the changed test files: 1 of' "$(cat "$OUT")"
       chk 'refusal code and selection recorded' "$PY" - <<'PY'
