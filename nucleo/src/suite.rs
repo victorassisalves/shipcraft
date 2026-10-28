@@ -436,7 +436,12 @@ impl Selection {
             ignore.chain(["--continue-on-collection-errors".to_string()]).collect()
         } else if runner.contains("vitest") {
             let glob = |f: &String| glob_escape(&absolute(f));
-            others.iter().map(|f| format!("--exclude={}", shell_quote(&glob(f)))).collect()
+            let exclude = others.iter().map(|f| format!("--exclude={}", shell_quote(&glob(f))));
+            // Item 51: a workspace's projects ignore `--exclude`; a positional
+            // path is vitest's file filter, so each RED file is named too, in
+            // the same form as SHIPCRAFT_FILES (none when a case has no file).
+            let named = self.files(&root, cases).unwrap_or_default().into_iter().map(|f| shell_quote(&f));
+            exclude.chain(named).collect()
         } else if runner.contains("jest") {
             let pattern = |f: &String| format!("^{}$", regex_escape(&absolute(f)));
             others.iter().map(|f| format!("--testPathIgnorePatterns={}", shell_quote(&pattern(f)))).collect()
