@@ -239,21 +239,35 @@ fn confirm(
 ) -> Result<(Vec<String>, Vec<String>)> {
     let present = repo.files()?;
     let tmp = repo.root().join(repo.text(&["rev-parse", "--git-path", "shipcraft/tmp"])?);
-    let mut dropped = Vec::new();
-    for suite in config.suites() {
-        let own = if suite.nome.is_empty() { String::new() } else { format!("{}:", suite.nome) };
-        let cases: Vec<String> = failing.iter().filter(|case| case.starts_with(&own)).cloned().collect();
-        if cases.is_empty() {
-            continue;
+    // The lists' directory is left as it was found (empty and created here: removed).
+    let had_tmp = tmp.exists();
+    let rerun = || -> Result<Vec<String>> {
+        let mut dropped = Vec::new();
+        for suite in config.suites() {
+            let own = if suite.nome.is_empty() { String::new() } else { format!("{}:", suite.nome) };
+            let cases: Vec<String> = failing.iter().filter(|case| case.starts_with(&own)).cloned().collect();
+            if cases.is_empty() {
+                continue;
+            }
+            // One suite at a time: the hook's run skips every suite without a case,
+            // and a suite with no readable report keeps its cases.
+            let locked = suite::Locked {
+                files: files.keys().cloned().collect(),
+                cases,
+                present: present.clone(),
+                tmp: tmp.clone(),
+            };
+            if let Ok((report, _)) = suite::run_red(repo.root(), false, config, &locked)? {
+                dropped.extend(locked.cases.into_iter().filter(|case| report.outcome(case) == Some(Outcome::Passed)));
+            }
         }
-        // One suite at a time: the hook's run skips every suite without a case,
-        // and a suite with no readable report keeps its cases.
-        let locked =
-            suite::Locked { files: files.keys().cloned().collect(), cases, present: present.clone(), tmp: tmp.clone() };
-        if let Ok((report, _)) = suite::run_red(repo.root(), false, config, &locked)? {
-            dropped.extend(locked.cases.into_iter().filter(|case| report.outcome(case) == Some(Outcome::Passed)));
-        }
+        Ok(dropped)
+    };
+    let dropped = rerun();
+    if !had_tmp {
+        let _ = fs::remove_dir(&tmp);
     }
+    let mut dropped = dropped?;
     let kept: Vec<String> = failing.iter().filter(|case| !dropped.contains(case)).cloned().collect();
     if kept.is_empty() {
         let shown: Vec<String> = failing.iter().map(|id| one_line(id)).collect();
