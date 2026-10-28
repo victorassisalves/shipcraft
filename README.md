@@ -55,7 +55,11 @@ Every refusal is three lines: **what happened, why it matters, and the next step
 ## Quick start
 
 ```bash
-# macOS (Apple silicon or Intel): the latest release, checksum-verified, into ~/.local/bin
+# A Node/TypeScript project (macOS): pin Shipcraft in the project, like any dev dependency
+pnpm add -D shipcraft          # or: npm i -D shipcraft
+pnpm exec shipcraft init       # the hooks call this project's install
+
+# macOS (Apple silicon or Intel), any language: the latest release, checksum-verified, into ~/.local/bin
 gh repo clone victorassisalves/shipcraft && bash shipcraft/install.sh
 
 # or build from source (macOS or Linux, Rust toolchain)
