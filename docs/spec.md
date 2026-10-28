@@ -35,6 +35,17 @@ On top of that, every PR goes through two layers before merge: `shipcraft` CI an
 
 The RED is a commit: the one that adds the open lock, with the tests as locked and the suite failing. If a lock file is in the tree but outside the commit, the hook warns with the `git add` command; the warning never changes the verdict. The empty `.shipcraft/locks/.gitkeep` that `init` writes is never warned about (item 48): before item 48 every commit warned that it was outside the commit even when it was committed, because an empty blob in the index also marks `git add -N` (draken-platform, every commit since the install). The exception is only that exact path at the repository root, whoever created it, in any git state (untracked, ignored, `git add -N`, staged, committed), and only while it is empty as the warning's own reader sees it (the effective index's blob for an index entry, a regular file of zero bytes in the tree otherwise); a non-empty or non-regular entry there, and every other path, warn as before. It is dropped before the warnings are ordered and counted, so it takes no line and is not in "and N more". A failed query still prints the one `could not read` warning. One cycle at a time per branch: a new `red` is refused while the branch has an open lock (`lock-open`).
 
+### A failing group is not a case (item 52)
+
+vitest reports a failure in a `describe` block's own hooks (`beforeAll`, `afterAll`, or their timeout) as a test case named after the block (`a.spec.ts::licensing store`); the block's tests are reported skipped. A run where the hook succeeds never reports that name, only the tests (`a.spec.ts::licensing store > one`). Locked as a RED case, that id is `case-missing` in every later run, so the RED commit can never pass, and `red --redo` cannot drop it (`redo-drops-case`).
+
+- **What is a group failure.** A failed case `C::N` of a report is a group failure when the same report has at least one other case `C::M`, any outcome, whose name `M` starts with `N` followed by ` > ` (vitest's separator between a block and what it holds), compared byte for byte after the report reader's unescaping. `C` must be equal, byte for byte, and not empty. Only failed cases are judged; a passing or skipped case is never a group failure.
+- **`red` and `red --redo` refuse it.** When any case that would go into `failing_at_red` is a group failure, `red` refuses `group-failed`, naming them (sorted), and writes nothing; `--redo` does the same and leaves HEAD's lock as it was. The check runs after the report is read and judged for `error-before-assertions`, before `redo-drops-case` and `red-already-passes`. The `Why:` says a block's setup failure is not a test of the behavior, and a passing run never reports the block's name. The `Next:` says to fix the block's setup, or, if it failed under load or by chance, to run the command again.
+- **Unchanged.** Group failures in a report the hook or CI reads are judged as today (a failed case is a failed case). Locks already written are read as before: a lock that holds a group id stays `case-missing`, and the way out is the one before item 52 (rewrite the branch's history). `cases` and the other refusals are unchanged.
+- **Known limits.** Only vitest's ` > ` naming is recognized; a runner that reports a group's failure under a name with no case nested under it is not caught. A real test whose name equals a block's name in the same file, with that block's cases also in the report, is read as a group failure. A failure at file level (an error outside any block) is today's `error-before-assertions` when nothing asserted, and is otherwise not covered.
+
+Wrong-measurement note: since 2.0.0 (item 13, the first lock of node suites). Found on the Forge in POC-019 (2.11.0 probe): `red` locked `licence-store.spec.ts::licensing licence-store (SPEC-037 …)`, a block whose setup failed under load (load average 8 to 11), and the hook refused the RED commit `case-missing` while all 55 of the block's tests passed. The battery had no case where a block's hook fails.
+
 ### What is refused while a lock is open
 
 A commit is refused if:
@@ -95,7 +106,7 @@ Each command is `shipcraft <command>`. Exit codes, unless the row says otherwise
 | `--version` | Prints `shipcraft <X.Y.Z> (<12-char commit>)`, in any folder. |
 | (no arguments) | Prints usage, exit `0`. |
 | `init [--lang python\|node\|go] [--github]` | Sets up the project (below). |
-| `red [--redo]` | Runs the suite, requires assertion failures, writes an open lock; `--redo` rewrites the branch's open lock (item 46). Refuses `lock-open`, `red-already-passes`, `error-before-assertions`, `no-report`, `suite-without-tests`, `build-failed`. |
+| `red [--redo]` | Runs the suite, requires assertion failures, writes an open lock; `--redo` rewrites the branch's open lock (item 46). Refuses `lock-open`, `red-already-passes`, `error-before-assertions`, `group-failed`, `no-report`, `suite-without-tests`, `build-failed`. |
 | `check [--commit-msg <file>]` | The hook: judges the commit against the open locks and closes them when the RED cases pass. With `--commit-msg` it judges the final index and writes a close mark instead of the lock (`mark-failed` if it cannot). |
 | `close` | The `post-commit` half of the `commit-msg` route: if the mark matches the commit just made, adds one commit that only flips the lock to `closed`. On failure it changes nothing and says to rerun it. Always exits `0`. |
 | `ci --base <ref> [--pr]` | CI (section 2). `--pr` allows the docs-only path (section 5). `ci` publishes no status (item 44). |
@@ -303,6 +314,7 @@ Output from a project command that `shipcraft` passes through always ends before
 | `error-before-assertions` | At RED, the suite errored before any assertion (import, collection). |
 | `execution-invalid` | An `[execution] ci`, `review` or `merge` value `shipcraft` does not know (items 42 and 47). |
 | `foreign-hook` | `init` cannot prove which hook runs, or another tool owns it. |
+| `group-failed` | At RED, a failing case is a `describe` block's setup failure, not a test (item 52). |
 | `lang-multiple` | `init` found more than one language. |
 | `lang-unknown` | `--lang` names an unsupported language. |
 | `lang-unrecognized` | `init` found no known project file. |
