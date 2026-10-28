@@ -90,12 +90,13 @@ pub fn comment(repo: &Repo, pr: u64, text: &str) -> Result<()> {
 }
 
 /// The open PR of a branch: (number, body).
-pub fn open_pr(repo: &Repo, branch: &str) -> Result<Option<(u64, String)>> {
+/// Item 54: the body is `None` when gh's field is missing, null or not a string.
+pub fn open_pr(repo: &Repo, branch: &str) -> Result<Option<(u64, Option<String>)>> {
     let list = json(repo, &["pr", "list", "--head", branch, "--state", "open", "--json", "number,body"])?;
     Ok(list
         .as_array()
         .and_then(|l| l.first())
-        .map(|pr| (pr["number"].as_u64().unwrap_or(0), pr["body"].as_str().unwrap_or_default().to_string())))
+        .map(|pr| (pr["number"].as_u64().unwrap_or(0), pr["body"].as_str().map(str::to_string))))
 }
 
 pub fn create_pr(repo: &Repo, branch: &str, base: &str, title: &str, body: &str) -> Result<u64> {

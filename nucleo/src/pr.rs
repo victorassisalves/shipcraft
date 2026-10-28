@@ -58,7 +58,7 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>) -> Result<(
             if title.is_some() || body_given.is_some() {
                 gh::edit_pr(repo, n, title, body_given.as_deref())?;
             }
-            (n, body_given.unwrap_or(existing))
+            (n, body_given.or(existing))
         }
         None => {
             let title = match title {
@@ -66,7 +66,7 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>) -> Result<(
                 None => repo.text(&["log", "-1", "--format=%s"])?,
             };
             let body = body_given.unwrap_or_default();
-            (gh::create_pr(repo, &branch, &base, &title, &body)?, body)
+            (gh::create_pr(repo, &branch, &base, &title, &body)?, Some(body))
         }
     };
     println!("shipcraft: PR #{number}");
@@ -99,16 +99,16 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>) -> Result<(
             (Gate::Passed, Camada::Local) => {
                 let title = gh::json(repo, &["pr", "view", &number.to_string(), "--json", "title"])?["title"]
                     .as_str()
-                    .unwrap_or_default()
-                    .to_string();
+                    .map(str::to_string);
                 let req = Request {
                     repo,
                     config: &config,
                     diff_sha256: diff_sha256(repo, &base_sha, &head),
+                    text_sha256: text_sha256(title.as_deref(), body.as_deref()),
                     sha: head.clone(),
                     base_sha,
-                    title,
-                    body,
+                    title: title.unwrap_or_default(),
+                    body: body.clone().unwrap_or_default(),
                     pr: Some(number),
                     branch: branch.clone(),
                 };
@@ -259,9 +259,24 @@ fn diff_sha256(repo: &Repo, base_sha: &str, head: &str) -> String {
     }
 }
 
+/// Item 54: SHA-256 of the title's bytes, one NUL, the body's bytes, exactly as
+/// the brief receives them; empty (no key) when either could not be read.
+fn text_sha256(title: Option<&str>, body: Option<&str>) -> String {
+    match (title, body) {
+        (Some(title), Some(body)) => sha256_hex(&[title.as_bytes(), b"\0", body.as_bytes()].concat()),
+        _ => String::new(),
+    }
+}
+
+/// Item 54: a recorded text key is a source only when it is 64 lowercase hex.
+fn valid_key(key: &str) -> bool {
+    key.len() == 64 && key.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
 /// Item 4, rule 4: the verdict of an earlier review of the same file versions.
-fn earlier_verdict(repo: &Repo, diff_sha256: &str) -> Option<(String, String)> {
-    if diff_sha256.is_empty() {
+/// Item 54: and of the same PR title and body.
+fn earlier_verdict(repo: &Repo, diff_sha256: &str, text_sha256: &str) -> Option<(String, String)> {
+    if diff_sha256.is_empty() || !valid_key(text_sha256) {
         return None;
     }
     medicao::rows(repo)
@@ -271,6 +286,7 @@ fn earlier_verdict(repo: &Repo, diff_sha256: &str) -> Option<(String, String)> {
             r["layer"] == "review"
                 && r["reused"] != true
                 && r["diff_sha256"] == diff_sha256
+                && r["text_sha256"].as_str() == Some(text_sha256)
                 && (r["result"] == "passed" || r["result"] == "refused")
         })
         .map(|r| {
@@ -281,20 +297,21 @@ fn earlier_verdict(repo: &Repo, diff_sha256: &str) -> Option<(String, String)> {
 /// Runs (or reuses) the review and publishes `shipcraft/review` and the comment.
 fn review_and_publish(req: &Request) -> Result<Gate> {
     let (repo, sha) = (req.repo, req.sha.as_str());
-    if let Some((resultado, from)) = earlier_verdict(repo, &req.diff_sha256) {
+    if let Some((resultado, from)) = earlier_verdict(repo, &req.diff_sha256, &req.text_sha256) {
         let (state, gate) = if resultado == "passed" {
             ("success", Gate::Passed)
         } else {
             ("failure", Gate::Stopped("review-changes-requested", "review requested changes".to_string()))
         };
         // Item 38: a reused verdict is recorded, and is not a new round.
-        medicao::record(
-            repo,
-            json!({"layer": "review", "secs": 0, "result": resultado,
-                   "code": if resultado == "passed" { "" } else { "changes-requested" },
-                   "branch": req.branch, "commit": sha, "tokens": 0, "agent": req.config.papeis.revisao,
-                   "pr": req.pr, "reused": true}),
-        );
+        let mut row = json!({"layer": "review", "secs": 0, "result": resultado,
+               "code": if resultado == "passed" { "" } else { "changes-requested" },
+               "branch": req.branch, "commit": sha, "tokens": 0, "agent": req.config.papeis.revisao,
+               "pr": req.pr, "reused": true});
+        // Item 54: a reused row records both keys (reuse needs both).
+        row["diff_sha256"] = json!(req.diff_sha256);
+        row["text_sha256"] = json!(req.text_sha256);
+        medicao::record(repo, row);
         let description = format!("on this machine: verdict from {} reused (same file versions)", short(&from));
         gh::status(repo, sha, "shipcraft/review", state, &description)?;
         println!("shipcraft: shipcraft/review {state}: {description}");
@@ -334,12 +351,16 @@ pub fn local(repo: &Repo) -> Result<()> {
     let base_ref = if repo.resolve(&base_ref)?.is_some() { base_ref } else { base };
     let base_sha = repo.text(&["merge-base", &base_ref, "HEAD"])?;
     let log = repo.text(&["log", "--format=- %s%n%b", &format!("{base_sha}..HEAD")])?;
+    let title = repo.text(&["log", "-1", "--format=%s"])?;
+    let body = format!("(No PR yet: a local review of the branch before its PR. Its commits:)\n\n{log}");
     let req = Request {
         repo,
         config: &config,
         diff_sha256: diff_sha256(repo, &base_sha, &head),
-        title: repo.text(&["log", "-1", "--format=%s"])?,
-        body: format!("(No PR yet: a local review of the branch before its PR. Its commits:)\n\n{log}"),
+        // Item 54: local rows get the key; local review still runs every time.
+        text_sha256: text_sha256(Some(&title), Some(&body)),
+        title,
+        body,
         sha: head,
         base_sha,
         pr: None,
@@ -385,6 +406,8 @@ pub fn of_pr(repo: &Repo, number: &str) -> Result<()> {
         repo,
         config: &config,
         diff_sha256: diff_sha256(repo, &base_sha, &sha),
+        // Item 54: no text key when gh's title or body is missing, null or not a string.
+        text_sha256: text_sha256(pr["title"].as_str(), pr["body"].as_str()),
         sha,
         base_sha,
         title: field("title"),
