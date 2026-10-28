@@ -4,6 +4,7 @@ use crate::config::{Config, Filtra, Suite};
 use crate::git::HOOK_GIT_ENV;
 use crate::glob;
 use crate::junit::{Outcome, Report};
+use crate::narrow::Fallback;
 use crate::refusal::{failed, refuse, Result};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -69,7 +70,127 @@ pub const LIST_VARS: [&str; 2] = ["SHIPCRAFT_CASES", "SHIPCRAFT_FILES"];
 /// Missing when a `verifica` failed or a runner wrote no report: the suite did
 /// not compile, or the runner broke before running.
 pub fn run(dir: &Path, copy: bool, config: &Config) -> Result<Ran<Report>> {
-    Ok(run_suites(dir, copy, config, None)?.map(|(report, _)| report))
+    Ok(run_suites(dir, copy, config, None, true)?.map(|(report, _)| report))
+}
+
+/// Item 55: every suite's command in full, without the checks: `red`'s full
+/// run after a narrowed run that ran every check falls back.
+pub fn run_commands(dir: &Path, config: &Config) -> Result<Ran<Report>> {
+    Ok(run_suites(dir, false, config, None, false)?.map(|(report, _)| report))
+}
+
+/// Item 55: what one suite's narrowed first run gave.
+pub enum Narrowed {
+    /// No selected file: its command did not run.
+    Skipped,
+    NoReport,
+    Ran(Report),
+}
+
+/// Item 55: `red`'s narrowed first run, in `dir`. Every suite runs its check,
+/// in configuration order; a suite with selected files (`selected`, one set
+/// per suite, from its root) then runs its command with the hook's filter,
+/// the selected files standing in for the RED files, and `SHIPCRAFT_FILES`
+/// only. Missing only when a check failed; a suite with no readable report
+/// is the caller's to judge, once every suite has run.
+pub fn run_changed(
+    dir: &Path,
+    config: &Config,
+    selected: &[BTreeSet<String>],
+    present: &[String],
+    tmp: &Path,
+) -> Result<Ran<Vec<Narrowed>>> {
+    let mut ran_all = Vec::new();
+    for (suite, files) in config.suites().into_iter().zip(selected) {
+        let label = if suite.nome.is_empty() { config.runner.clone().unwrap_or_default() } else { suite.nome.clone() };
+        let root = dir.join(&suite.raiz);
+        if !root.is_dir() {
+            ran_all.push(Narrowed::NoReport);
+            continue;
+        }
+        if let Some(check) = &suite.verifica {
+            eprintln!("shipcraft: checking the project ({label})");
+            let ran = shell(check, &root, false, &[])?;
+            if !ran.status.success() {
+                return Ok(Err(check_failed(suite.name(), suite.shown_root(), check, &ran)));
+            }
+        }
+        if files.is_empty() {
+            ran_all.push(Narrowed::Skipped);
+            continue;
+        }
+        let report_path = std::env::temp_dir().join(format!("shipcraft-junit-{}-{}.xml", std::process::id(), nanos()));
+        let mut command = suite.comando.replace("{junit}", &shell_quote(&report_path.to_string_lossy()));
+        let chosen = Selection::changed(files.clone());
+        if suite.filtra == Filtra::Shipcraft {
+            command = chosen.command(command, dir, &suite, present, &[]);
+        }
+        eprintln!("shipcraft: running the suite ({label})");
+        let vars = write_lists(tmp, [BTreeSet::new(), chosen.named(&root, &[]).unwrap_or_default()]);
+        let ran = shell(&command, &root, false, &vars);
+        for (_, path) in &vars {
+            let _ = fs::remove_file(path);
+        }
+        ran?;
+        let report = fs::read_to_string(&report_path).ok().and_then(|xml| Report::parse(&xml));
+        let _ = fs::remove_file(&report_path);
+        ran_all.push(report.map_or(Narrowed::NoReport, Narrowed::Ran));
+    }
+    Ok(Ok(ran_all))
+}
+
+/// Item 55: the cases of a suite's narrowed report that are in its selected
+/// files, mapped by the hook's mapper to the suite's `locked` files (paths
+/// from the project's root). Fails when the mapper finds no single map, a
+/// case maps to no locked file or to more than one, or a selected file holds
+/// no case: then `red` runs every suite.
+pub fn covered(
+    dir: &Path,
+    suite: &Suite,
+    locked: &[String],
+    present: &[String],
+    selected: &BTreeSet<String>,
+    report: Report,
+) -> std::result::Result<Report, Fallback> {
+    let ids = report.ids();
+    if ids.is_empty() {
+        return Err(Fallback::FileWithoutCases);
+    }
+    let cases: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let prefix = suite.prefix();
+    let root = dir.join(&suite.raiz);
+    let files = of_suite(suite, locked);
+    let map = if is_go(&suite.comando) {
+        let tests = files.iter().filter(|f| f.ends_with(".go")).map(|f| (f.clone(), go_tests(&root.join(f)))).collect();
+        go_module(dir, &root).map(|module| Map::Go { module, tests })
+    } else {
+        let present: Vec<String> =
+            present.iter().filter_map(|path| path.strip_prefix(&prefix)).map(str::to_string).collect();
+        let names = |python| Map::names(python, &prefix, &files, &present, &cases, true);
+        if ["pytest", "vitest", "jest"].iter().any(|r| suite.comando.contains(r)) {
+            names(suite.comando.contains("pytest"))
+        } else {
+            match (names(true), names(false)) {
+                (Some(map), None) | (None, Some(map)) => Some(map),
+                _ => None,
+            }
+        }
+    };
+    let Some(map) = map else { return Err(Fallback::CaseWithoutFile) };
+    let mut held = BTreeSet::new();
+    let mut keep = BTreeSet::new();
+    for case in &cases {
+        let mut holders = map.holders(case).into_iter().collect::<BTreeSet<_>>().into_iter();
+        let (Some(file), None) = (holders.next(), holders.next()) else { return Err(Fallback::CaseWithoutFile) };
+        if selected.contains(&file) {
+            keep.insert(case.to_string());
+        }
+        held.insert(file);
+    }
+    if !selected.is_subset(&held) {
+        return Err(Fallback::FileWithoutCases);
+    }
+    Ok(report.only(&keep))
 }
 
 /// Item 16a: the `[build] comando`, once, at the root of the tree being
@@ -95,7 +216,7 @@ pub fn build(dir: &Path, config: &Config, hint: &str) -> Result<()> {
 /// file runs and no failure is in that set: only the RED's cases decide, and
 /// the rest is the CI's. A wrong map costs time, never a false refusal.
 pub fn run_red(dir: &Path, copy: bool, config: &Config, locked: &Locked) -> Result<Ran<(Report, BTreeSet<String>)>> {
-    run_suites(dir, copy, config, Some(locked))
+    run_suites(dir, copy, config, Some(locked), false)
 }
 
 fn run_suites(
@@ -103,6 +224,7 @@ fn run_suites(
     copy: bool,
     config: &Config,
     locked: Option<&Locked>,
+    checks: bool,
 ) -> Result<Ran<(Report, BTreeSet<String>)>> {
     let mut all = Report::empty();
     let mut blocking = BTreeSet::new();
@@ -120,7 +242,7 @@ fn run_suites(
             let chosen = Selection::new(dir, &suite, locked, &cases);
             // Item 22.4: with `filtra = "comando"` the command runs as written.
             if suite.filtra == Filtra::Shipcraft {
-                command = chosen.command(command, dir, &suite, locked, &cases);
+                command = chosen.command(command, dir, &suite, &locked.present, &cases);
             }
             let ids: BTreeSet<String> = cases.iter().map(|case| case.to_string()).collect();
             lists = Some((&locked.tmp, [ids, chosen.files(&dir.join(&suite.raiz), &cases).unwrap_or_default()]));
@@ -138,7 +260,7 @@ fn run_suites(
         }
         // The check of the whole project is the CI's (and the RED's), never
         // the hook's (item 13); when it fails there is no report.
-        if let (None, Some(check)) = (locked, &suite.verifica) {
+        if let (None, true, Some(check)) = (locked, checks, &suite.verifica) {
             eprintln!("shipcraft: checking the project ({label})");
             let ran = shell(check, &dir.join(&suite.raiz), copy, &[])?;
             if !ran.status.success() {
@@ -351,6 +473,9 @@ struct Selection {
     red: BTreeSet<String>,
     /// Go: the tests each locked file declares.
     go: BTreeMap<String, Vec<String>>,
+    /// Item 55: `red`'s narrowed first run, where `red` holds the selected
+    /// files: each is named, and Go runs their whole packages.
+    narrowed: bool,
 }
 
 impl Selection {
@@ -368,7 +493,7 @@ impl Selection {
         } else {
             let present: Vec<String> =
                 locked.present.iter().filter_map(|path| path.strip_prefix(&prefix)).map(str::to_string).collect();
-            let names = |python| Map::names(python, &prefix, &locked_files, &present, cases);
+            let names = |python| Map::names(python, &prefix, &locked_files, &present, cases, false);
             if ["pytest", "vitest", "jest"].iter().any(|r| suite.comando.contains(r)) {
                 names(suite.comando.contains("pytest"))
             } else {
@@ -384,18 +509,30 @@ impl Selection {
             Some(map) => cases.iter().flat_map(|case| map.holders(case)).collect(),
             None => locked_files.into_iter().collect(),
         };
-        Selection { map, red, go }
+        Selection { map, red, go, narrowed: false }
+    }
+
+    /// Item 55: the selection of `red`'s narrowed first run: the selected
+    /// files stand in for the RED files.
+    fn changed(red: BTreeSet<String>) -> Selection {
+        Selection { map: None, red, go: BTreeMap::new(), narrowed: true }
+    }
+
+    /// The absolute paths of the files named to the runner (item 51's
+    /// positional files, item 22's `SHIPCRAFT_FILES`): every selected file of
+    /// a narrowed run, else those of `files`.
+    fn named(&self, root: &Path, cases: &[&str]) -> Option<BTreeSet<String>> {
+        if !self.narrowed {
+            return self.files(root, cases);
+        }
+        Some(self.red.iter().map(|rel| absolute(root, rel)).collect())
     }
 
     /// Item 22.1: the absolute paths, from `root`, of the files that hold the
     /// RED's cases; None unless the map ties every case to a file.
     fn files(&self, root: &Path, cases: &[&str]) -> Option<BTreeSet<String>> {
         self.map.as_ref().filter(|map| map.covers(cases))?;
-        let absolute = |rel: &String| {
-            let path = root.join(rel);
-            fs::canonicalize(&path).unwrap_or(path).to_string_lossy().into_owned()
-        };
-        Some(self.red.iter().map(absolute).collect())
+        Some(self.red.iter().map(|rel| absolute(root, rel)).collect())
     }
 
     /// Whether a failure in the hook's report blocks: its case is in a file
@@ -412,16 +549,13 @@ impl Selection {
     /// left out, by its absolute path (never from a root the runner may set
     /// elsewhere: jest's rootDir, vitest's root); Go compiles a package as a
     /// whole, so there each `./...` of the command becomes the packages of
-    /// those files, and their tests are named with `-run`.
-    fn command(&self, mut command: String, dir: &Path, suite: &Suite, locked: &Locked, cases: &[&str]) -> String {
+    /// those files, and their tests are named with `-run` (not in a narrowed
+    /// run, item 55: the whole package runs). `present` is the snapshot's files.
+    fn command(&self, mut command: String, dir: &Path, suite: &Suite, present: &[String], cases: &[&str]) -> String {
         let runner = &suite.comando;
         let root = dir.join(&suite.raiz);
-        let others: Vec<String> =
-            of_suite(suite, &locked.present).into_iter().filter(|rel| !self.red.contains(rel)).collect();
-        let absolute = |rel: &String| -> String {
-            let path = root.join(rel);
-            fs::canonicalize(&path).unwrap_or(path).to_string_lossy().into_owned()
-        };
+        let others: Vec<String> = of_suite(suite, present).into_iter().filter(|rel| !self.red.contains(rel)).collect();
+        let absolute = |rel: &String| absolute(&root, rel);
         if ["pytest", "vitest", "jest"].iter().any(|r| runner.contains(r)) {
             // A file the command names runs despite the exclusions: out with it.
             let left_out: BTreeSet<String> = others.iter().map(absolute).collect();
@@ -440,7 +574,7 @@ impl Selection {
             // Item 51: a workspace's projects ignore `--exclude`; a positional
             // path is vitest's file filter, so each RED file is named too, in
             // the same form as SHIPCRAFT_FILES (none when a case has no file).
-            let named = self.files(&root, cases).unwrap_or_default().into_iter().map(|f| shell_quote(&f));
+            let named = self.named(&root, cases).unwrap_or_default().into_iter().map(|f| shell_quote(&f));
             exclude.chain(named).collect()
         } else if runner.contains("jest") {
             let pattern = |f: &String| format!("^{}$", regex_escape(&absolute(f)));
@@ -463,12 +597,21 @@ impl Selection {
                 let packages: Vec<String> = packages.iter().map(|p| shell_quote(p)).collect();
                 command = command.replace("./...", &packages.join(" "));
             }
+            if self.narrowed {
+                return command;
+            }
             vec![format!("-run {}", shell_quote(&format!("^({})$", names.join("|"))))]
         } else {
             Vec::new()
         };
         args.iter().fold(command, |command, a| format!("{command} {a}"))
     }
+}
+
+/// The absolute path of a file from `root`, links resolved when it exists.
+fn absolute(root: &Path, rel: &str) -> String {
+    let path = root.join(rel);
+    fs::canonicalize(&path).unwrap_or(path).to_string_lossy().into_owned()
 }
 
 /// `command` without the words that name one of the `left_out` files (by
@@ -536,8 +679,10 @@ enum Map {
     /// pytest names a file by its dotted path from its rootdir (plus the
     /// test's class), vitest and jest by its path from their root. `names`
     /// holds each locked file under that name; `strip` is a leading part
-    /// every classname carries (`--junit-prefix`), or empty.
-    Names { python: bool, strip: String, names: BTreeMap<String, Vec<String>> },
+    /// every classname carries (`--junit-prefix`), or empty. With `modules`
+    /// (item 55, `red` only), a pytest id without a classname (a collection
+    /// error) names its file by the dotted path.
+    Names { python: bool, modules: bool, strip: String, names: BTreeMap<String, Vec<String>> },
     /// Go: a file holds a case when its package (the module plus the file's
     /// folder) is the classname and it declares the case's test.
     Go { module: String, tests: BTreeMap<String, Vec<String>> },
@@ -549,7 +694,14 @@ impl Map {
     /// tests) from which every RED case names a locked file, or comes from a
     /// file that is not a test (a doctest, which does not count). None when
     /// no folder or more than one does.
-    fn names(python: bool, prefix: &str, files: &[String], present: &[String], cases: &[&str]) -> Option<Map> {
+    fn names(
+        python: bool,
+        prefix: &str,
+        files: &[String],
+        present: &[String],
+        cases: &[&str],
+        modules: bool,
+    ) -> Option<Map> {
         let mut roots: BTreeSet<String> = BTreeSet::from([String::new()]);
         let mut dir = prefix.trim_end_matches('/');
         while !dir.is_empty() {
@@ -577,9 +729,10 @@ impl Map {
         for strip in &strips {
             let mut found: Option<(Map, BTreeSet<String>)> = None;
             for root in &roots {
-                let map = Map::Names { python, strip: strip.clone(), names: named(python, prefix, root, files) };
+                let map =
+                    Map::Names { python, modules, strip: strip.clone(), names: named(python, prefix, root, files) };
                 let product =
-                    Map::Names { python, strip: strip.clone(), names: named(python, prefix, root, &products) };
+                    Map::Names { python, modules, strip: strip.clone(), names: named(python, prefix, root, &products) };
                 let mut red = BTreeSet::new();
                 let mut fits = true;
                 for case in cases {
@@ -613,9 +766,13 @@ impl Map {
 
     /// The files that hold `case`, relative to the suite's root.
     fn holders(&self, case: &str) -> Vec<String> {
-        let Some((class, _)) = case.split_once("::") else { return Vec::new() };
+        let class = match (case.split_once("::"), self) {
+            (Some((class, _)), _) => class,
+            (None, Map::Names { python: true, modules: true, .. }) => case,
+            (None, _) => return Vec::new(),
+        };
         match self {
-            Map::Names { python, strip, names } => {
+            Map::Names { python, strip, names, .. } => {
                 let Some(class) = class.strip_prefix(strip.as_str()) else { return Vec::new() };
                 // pytest adds the test's class to the module: `pkg.test_x.TestY`.
                 let mut keys = vec![class];
