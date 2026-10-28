@@ -87,6 +87,33 @@ Before item 53, `red` wrote every case that failed in its one run into `failing_
 
 Wrong-measurement note: since 1.0 `red` took one run's failures as the RED; found on the Forge in POC-019.
 
+### `red` runs the changed test files (item 55)
+
+Before item 55, `red` ran every suite in full to learn which cases fail. Most of that run is spent on tests the RED did not touch. On Shipcraft's own repository a `red` took 1,521 s at 2 jobs (`metrics/dogfood-hook-2026-10-27.md`), against a median of about 10 min for a whole item from RED to main. On the Forge (15,774 cases) it took about 6 min. A full run also locks a failure the RED did not cause: a test that already fails on the branch, in a file the RED never touched, becomes part of the contract (the Forge, POC-019). Replayed on items 41 to 50 (POC-020), running only the RED's changed test files missed 0 of the 212 failing cases, and ran a median of 1.7% of the cases.
+
+- **The selection.** `red` takes the base: `--base <ref>` when given, else `refs/remotes/origin/HEAD`. It computes the merge base of `HEAD` and that ref. The changed paths are those that differ between the merge base and the working tree as `red` reads it: committed on the branch, staged, unstaged, and untracked files that are not ignored. A deleted path does not count. A changed path is *selected* for a suite when it matches that suite's globs and exists in the working tree. Paths are relative to each suite's `root`, as the globs are.
+- **The narrowed run.** When the selection is not empty and no fallback below applies, `red` runs `[build]` and every suite's `check` exactly as today. It then runs only the suites with a selected path. Each one runs as the hook runs it for a set of RED test files, with that set being the suite's selected paths. For a runner `shipcraft` filters, its filter applies to those files. For any runner, `SHIPCRAFT_FILES` lists them, and `SHIPCRAFT_CASES` is not set. Suites with no selected path do not run. The run is read and judged with today's refusals and precedence. `suite-without-tests` applies to the suites that ran.
+- **Falls back to the full run** (today's `red`, every suite) when:
+  - `--all` is given;
+  - the base cannot be resolved, or the merge base cannot be computed (no common history, a shallow clone);
+  - no path is selected in any suite;
+  - `.shipcraft.toml` is a changed path;
+  - in the narrowed run, a selected path holds no case of its suite's report. This means it is a support file (a helper, fixture or runner config that tests import) or a file the runner did not run, and `red` cannot know which tests depend on it. `red` then discards the narrowed run and runs every suite in full, once.
+
+  `red` prints the fallback reason in one line before its usual lines: `shipcraft: red ran every suite: <reason>`.
+- **What the lock holds.** `files` is computed exactly as today: every locked file of every suite, hashed. Protection does not narrow. `cases` holds the cases of the reports that ran. In a narrowed run that is the selected files' cases only, so `--redo`'s `redo-drops-case` compares only those. `failing_at_red` is computed from that run as today, followed by item 53's second run, unchanged.
+- **Reported.** After a narrowed run, `red` prints, before its usual lines, `shipcraft: red ran the changed test files: <n> of <m>`. Here `<n>` is the number of selected paths and `<m>` the number of locked files that are test files of the suites, counted as the hook counts them. The `red` row of the run log has `selection`: `"changed"` or `"all"`, and `selected_files`: `<n>` (0 for `"all"`).
+- **`--redo`.** It runs every suite in full, as today. A redo is rare and must see every case of the lock it rewrites.
+- **Unchanged.** The hook, CI (which runs every suite at HEAD and refuses `suite-red`), the lock format, `check`, `close` and item 53's second run.
+- **Battery.** Battery cases build their projects without an `origin` remote. They therefore run in full, as today, unless a case sets the base. The cases that count `red`'s commands or environment stay as they are.
+- **Versions.** The item raises the binary to 2.13.0. Nothing in a lock or config changes, so `init` writes `shipcraft_min = "2.13"` only as the running binary's version, as always.
+- **Known limits.**
+  - A case outside the changed files that the RED breaks (for example through a product stub the RED changed) is not run at RED. CI refuses it later as `suite-red`. This costs time, never an escape.
+  - A test helper outside the globs that the RED changed is not seen as changed.
+  - A failure already on the branch that lives in a changed file is still locked.
+  - The selection reads `origin/HEAD` as the remote's default branch. A clone without it, or with a stale one, falls back to the full run or narrows against an older base. `--base` overrides it.
+  - A JavaScript project whose tests import other test files through the module graph is protected only by the fallback: a selected file with no cases. A selected test file that imports a changed helper that is itself a selected path is fine. One that imports a helper outside the globs is the limit above.
+
 ### The lock closes by itself
 
 The first commit after RED in which every case in `failing_at_red` passes, none skipped or missing, closes the lock. The `commit-msg` hook judges the commit and the `post-commit` hook writes `closed` in a separate closing commit right after it (see `init`). The closing commit that `close` creates (post-commit or a manual retry; not a user's own commit judged by `check`) has the subject `chore(shipcraft): close lock <ids>`: the lock ids (file names without `.json`) in bytewise ascending order joined by `, `, one line ending in LF, no body or trailers (item 49; this fixes the order item 17 left free). Before item 49 the subject was `shipcraft: close lock <ids>`, outside the Conventional Commits form draken-platform's checks use. The guarantee is this literal subject, not acceptance by every project policy: a commitlint scope list without `shipcraft`, or a subject-length limit with many locks, can still refuse it, and closing commits already in history keep their old subject. No hook runs on the closing commit, as before; nothing in Shipcraft reads the subject, and a lock closed under either subject is judged by its state. A merge is judged against both parents, as in CI. A closed lock no longer restricts the tests.
@@ -121,7 +148,7 @@ Each command is `shipcraft <command>`. Exit codes, unless the row says otherwise
 | `--version` | Prints `shipcraft <X.Y.Z> (<12-char commit>)`, in any folder. |
 | (no arguments) | Prints usage, exit `0`. |
 | `init [--lang python\|node\|go] [--github]` | Sets up the project (below). |
-| `red [--redo]` | Runs the suite, requires assertion failures, reruns the failing cases once and does not lock those that pass (item 53), writes an open lock; `--redo` rewrites the branch's open lock (item 46). Refuses `lock-open`, `red-already-passes`, `error-before-assertions`, `group-failed`, `red-not-reproduced`, `no-report`, `suite-without-tests`, `build-failed`. |
+| `red [--redo] [--base <ref>] [--all]` | Runs the RED's changed test files, or every suite when it cannot narrow safely (item 55), requires assertion failures, reruns the failing cases once and does not lock those that pass (item 53), writes an open lock; `--redo` rewrites the branch's open lock (item 46). Refuses `lock-open`, `red-already-passes`, `error-before-assertions`, `group-failed`, `red-not-reproduced`, `no-report`, `suite-without-tests`, `build-failed`. |
 | `check [--commit-msg <file>]` | The hook: judges the commit against the open locks and closes them when the RED cases pass. With `--commit-msg` it judges the final index and writes a close mark instead of the lock (`mark-failed` if it cannot). |
 | `close` | The `post-commit` half of the `commit-msg` route: if the mark matches the commit just made, adds one commit that only flips the lock to `closed`. On failure it changes nothing and says to rerun it. Always exits `0`. |
 | `ci --base <ref> [--pr]` | CI (section 2). `--pr` allows the docs-only path (section 5). `ci` publishes no status (item 44). |
