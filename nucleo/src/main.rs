@@ -163,10 +163,12 @@ fn run(args: &[&str]) -> Result<()> {
         // Item 21.1: any folder, no repository nor .shipcraft.toml needed.
         ["--version"] => {
             println!("{}", version_line());
+            setup_hint();
             Ok(())
         }
         [] | ["help" | "-h" | "--help"] => {
             println!("{USAGE}");
+            setup_hint();
             Ok(())
         }
         _ => Err(invalid(args)),
@@ -175,6 +177,25 @@ fn run(args: &[&str]) -> Result<()> {
 
 fn version_line() -> String {
     format!("shipcraft {} ({})", config::VERSION, env!("SHIPCRAFT_COMMIT"))
+}
+
+/// Item 61: inside a git work tree whose root has no `.shipcraft.toml` (lstat
+/// not-found only), one stderr line says to run `init`; it reads no config.
+fn setup_hint() {
+    let Ok(cwd) = std::env::current_dir() else { return };
+    let Ok(out) = git::git_in(&cwd, &["rev-parse", "--show-toplevel"]) else { return };
+    let root = git::text(&out.stdout);
+    let root = root.trim_end_matches('\n');
+    if !out.status.success() || root.is_empty() {
+        return;
+    }
+    if std::path::Path::new(root)
+        .join(config::CONFIG_FILE)
+        .symlink_metadata()
+        .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+    {
+        eprintln!("shipcraft: not set up in this repository: run shipcraft init (from a package install: pnpm exec shipcraft init, or npx shipcraft init)");
+    }
 }
 
 fn invalid(args: &[&str]) -> Stop {
