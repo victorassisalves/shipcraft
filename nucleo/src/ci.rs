@@ -6,10 +6,10 @@
 //! With `--pr`, a docs-only PR skips the build, the `check` and the suites
 //! (item 40).
 
-use crate::config::{Camada, Config};
+use crate::config::{self, Camada, Config, CONFIG_FILE};
 use crate::contract::{
     arrive_closed, bindings, changed_paths, check_files, check_lefthook, judge_locks, judge_locks_admitting,
-    judge_suite, no_report, Change, Scope, Verdict,
+    judge_suite, no_report, Change, Scope, Suites, Verdict,
 };
 use crate::docs;
 use crate::gh;
@@ -90,9 +90,15 @@ pub fn run(repo: &Repo, base: &str, pr: bool, docs_only: &mut bool) -> Result<()
     let dir = copy.as_ref().map_or(repo.root(), |c| c.path());
     suite::build(dir, &config, "")?;
     let report = suite::run(dir, copy.is_some(), &config)?.or_else(no_report)?;
+    // Item 59: HEAD's suite names, read as TOML alone, name the cause of a missing case.
+    let at_head = repo.read(&head, CONFIG_FILE).ok().flatten();
+    let suites = at_head.as_deref().and_then(config::suite_names).filter(|names| !names.is_empty()).map(|lock| {
+        let judged = config.suites().into_iter().map(|suite| suite.nome).filter(|n| !n.is_empty()).collect();
+        Suites { lock, judged }
+    });
     let mut cycle_open = false;
     for (path, change, lock) in bindings(&head_changes) {
-        match (change, judge_suite(&report, path, change, lock, Scope::Ci)?) {
+        match (change, judge_suite(&report, path, change, lock, Scope::Ci { suites: suites.as_ref() })?) {
             (Change::Kept(_), Verdict::Green) => {
                 return refuse(
                     "lock-not-closed",

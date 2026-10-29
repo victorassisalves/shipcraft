@@ -149,6 +149,8 @@ Two rules keep the config honest:
 - **The config is part of the lock.** It can't change while a lock is open.
 - **A PR is judged by the config on the base branch,** not by its own. A PR can't switch off its own review.
 
+**Adding a package with a new suite.** Once the base branch has a `.shipcraft.toml`, a `[[suite]]` added in the same PR as its first tests doesn't run in CI, and `shipcraft ci` refuses its locked cases as missing. Bring the suite first, in a PR of its own: the package, its `[[suite]]` entry and one passing test. Once that's merged, rebase and write the RED. `shipcraft red` warns when changed test files match no suite's globs, or when the lock has cases in a suite the base doesn't have.
+
 A layer that is switched off is labeled "off in .shipcraft.toml" on every PR, so nobody mistakes it for a check that ran.
 
 ## The layers
