@@ -54,10 +54,12 @@ Every refusal is three lines: **what happened, why it matters, and the next step
 
 ## Quick start
 
+Installing is two steps: add the package (or the binary), then run `shipcraft init` in the project. Until `init` runs, nothing checks your commits.
+
 ```bash
 # A Node/TypeScript project (macOS): pin Shipcraft in the project, like any dev dependency
-pnpm add -D shipcraft          # or: npm i -D shipcraft
-pnpm exec shipcraft init       # the hooks call this project's install
+pnpm add -D shipcraft          # step 1, or: npm i -D shipcraft
+pnpm exec shipcraft init       # step 2: the hooks call this project's install
 
 # macOS (Apple silicon or Intel), any language: the latest release, checksum-verified, into ~/.local/bin
 gh repo clone victorassisalves/shipcraft && bash shipcraft/install.sh
@@ -69,7 +71,7 @@ cargo install --path nucleo
 
 `install.sh --version <v>` pins a version and `install.sh --uninstall` removes the binary. It needs `gh` logged in.
 
-Then, in your project:
+Then, in your project (step 2):
 
 ```bash
 shipcraft init          # detects the language, writes .shipcraft.toml, wires the hook
