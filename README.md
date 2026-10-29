@@ -221,6 +221,10 @@ bash acceptance/run.sh nucleo/target/release/shipcraft all   # the full acceptan
 
 Shipcraft is developed with Shipcraft: specs in `docs/`, RED and GREEN by separate agents, and every change gated by the battery and a review.
 
+## Contributing
+
+Pull requests from outside the project are not accepted for now; bug reports and field reports are welcome as issues. See [CONTRIBUTING.md](CONTRIBUTING.md), and [SECURITY.md](SECURITY.md) for vulnerabilities.
+
 ## License
 
 [Apache License 2.0](LICENSE)

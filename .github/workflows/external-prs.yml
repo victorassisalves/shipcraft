@@ -1,0 +1,28 @@
+name: external-prs
+
+# Closes pull requests from anyone who is not a collaborator, with a pointer to
+# CONTRIBUTING.md (outside contributions are not accepted for now). It runs on
+# pull_request_target so it can comment and close fork PRs; it never checks out
+# or runs the PR's code.
+on:
+  pull_request_target:
+    types: [opened, reopened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  close:
+    if: >-
+      github.event.pull_request.author_association != 'OWNER' &&
+      github.event.pull_request.author_association != 'MEMBER' &&
+      github.event.pull_request.author_association != 'COLLABORATOR'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Comment and close
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh pr close "$PR" --repo "$REPO" --comment "Thanks for the interest. Shipcraft does not accept pull requests from outside the project for now (see CONTRIBUTING.md). Bug reports and ideas are very welcome as issues."
