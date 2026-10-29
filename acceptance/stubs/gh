@@ -15,7 +15,7 @@ Supported surface (anything not listed here exits with code 1 and the message
   gh pr edit   [N] [--title T] [--body B | --body-file F|-]
   gh pr comment [N] (--body B | --body-file F|-) [--edit-last]
   gh pr review [N] --comment (--body B | --body-file F|-)       (counts as a comment)
-  gh pr merge  [N] (--merge|--squash|--rebase) [--delete-branch] [--subject S] [--body B]
+  gh pr merge  [N] (--merge|--squash|--rebase) [--delete-branch] [--subject S] [--body B] [--match-head-commit SHA]
   gh pr checkout N [-b NAME]      gh pr diff [N]
   gh api PATH [-X M] [-f k=v] [-F k=v] [--input F|-] [-q JQ] [--paginate]
     repos/O/R                                   GET
@@ -28,7 +28,7 @@ Supported surface (anything not listed here exits with code 1 and the message
     repos/O/R/statuses/SHA                      POST
     repos/O/R/commits/SHA/statuses              GET (list, newest first)
     repos/O/R/commits/SHA/status                GET (combined)
-    repos/O/R/commits/SHA/check-runs            GET (always empty)
+    repos/O/R/commits/SHA/check-runs            GET (state/check-runs.json; check_name, filter=latest)
     repos/O/R/commits/SHA/pulls                 GET
     repos/O/R/commits/REF | git/ref/heads/B | branches/B   GET
     repos/O/R/branches/B/protection[/...]       GET, PUT, POST, PATCH, DELETE
@@ -37,6 +37,7 @@ Supported surface (anything not listed here exits with code 1 and the message
 {owner} {repo} {branch} in paths become acme proj main.
 """
 import json, os, re, subprocess, sys, tempfile, time
+from urllib.parse import parse_qsl
 
 HERE = os.path.dirname(os.path.abspath(sys.argv[0]))
 ST = os.path.join(HERE, "state")
@@ -510,6 +511,16 @@ def cmd_pr(args):
             method = "merge"
         if not method:
             fail("--merge, --rebase, or --squash required when not running interactively")
+        # Optional compare-and-merge guard, matching gh's --match-head-commit.
+        # Cases can move the live head after the gate without touching the checked commit.
+        moved = readfile("merge-head", "")
+        if moved:
+            with Lock():
+                d = prs(); d[str(p["number"])]["headOid"] = moved; save_prs(d)
+            p = prs()[str(p["number"])]
+        if o.get("match") and o["match"] != head_oid(p):
+            log_call(None, "")
+            fail("GraphQL: Head branch was modified. Review and try the merge again. (mergePullRequest)")
         with Lock():
             log_call("merge", "merge pr=%s method=%s subject=%s body=%s" % (p["number"], method, o.get("subject", ""), o.get("body", "")))
             if p["state"] != "OPEN":
@@ -637,7 +648,7 @@ def cmd_api(args):
     path = o["path"].lstrip("/")
     path = path.replace("{owner}", OWNER).replace("{repo}", REPO).replace("{branch}", "main")
     path, _, query = path.partition("?")
-    q = dict(kv.split("=", 1) if "=" in kv else (kv, "") for kv in query.split("&") if kv)
+    q = dict(parse_qsl(query, keep_blank_values=True))
     method = o["method"] or ("POST" if (o["fields"] or o["input"]) else "GET")
     payload = fields_to_dict(o["fields"])
     raw_input = ""
@@ -784,6 +795,22 @@ def cmd_api(args):
         ref, what = m2.group(1), m2.group(2)
         sha = ogit("rev-parse", "-q", "--verify", ref + "^{commit}")[1] or ref
         log_call(None, "")
+        # Deliberately invalid API documents/failures are opt-in per-case fixtures.
+        override = rd("responses.json", {}).get(what)
+        if override is not None:
+            with Lock():
+                responses = rd("responses.json", {})
+                if isinstance(override, list):
+                    value = override[0]
+                    if len(override) > 1:
+                        responses[what] = override[1:]; wr("responses.json", responses)
+                else:
+                    value = override
+            if value.get("error"):
+                fail("gh: injected %s failure (HTTP 503)" % what)
+            if "raw" in value:
+                print(value["raw"]); return
+            out(value["json"]); return
         if what == "statuses":
             out([status_json(s) for s in statuses_for(sha)])
         elif what == "status":
@@ -792,7 +819,17 @@ def cmd_api(args):
             comb = "pending" if not ls else max((s["state"] for s in ls.values()), key=lambda s: order[s])
             out({"state": comb, "sha": sha, "total_count": len(ls), "statuses": [status_json(s) for s in ls.values()]})
         elif what == "check-runs":
-            out({"total_count": 0, "check_runs": []})
+            runs = [r for r in rd("check-runs.json", []) if r.get("head_sha") == sha]
+            if q.get("check_name") is not None:
+                runs = [r for r in runs if r.get("name") == q["check_name"]]
+            if q.get("filter", "latest") == "latest":
+                latest = {}
+                for r in runs:
+                    key = (r.get("name"), r.get("app", {}).get("id"), r.get("check_suite", {}).get("id"))
+                    if key not in latest or r.get("id", 0) > latest[key].get("id", 0):
+                        latest[key] = r
+                runs = list(latest.values())
+            out({"total_count": len(runs), "check_runs": runs})
         else:
             res = []
             for p in prs().values():

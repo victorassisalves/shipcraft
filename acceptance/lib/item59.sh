@@ -278,7 +278,7 @@ if ci or mode=='files-many':
  assert result.returncode==1,result.returncode
  rs=rows(); assert rs[:len(beforeci)]==beforeci and len(rs)==len(beforeci)+1,rs
  row=rs[-1]
- assert set(row)=={'at','branch','code','commit','docs_only','layer','lock','locks','reason','result','secs'},row
+ assert set(row)=={'at','branch','code','commit','docs_only','layer','lock','locks','reason','result','secs','suite_in_checks'},row
  assert row['locks']==[locks()[0].stem] and row['branch']=='feature/item59' and row['commit']==git('rev-parse','HEAD') and row['secs']>=0,row
  assert row['layer']=='ci' and row['result']=='refused' and row['code']=='case-missing',row
  assert locks()[0].read_bytes()==redlock,'CI diagnosis changed the lock'
