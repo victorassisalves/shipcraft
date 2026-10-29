@@ -59,7 +59,7 @@ Installing is two steps: add the package (or the binary), then run `shipcraft in
 ```bash
 # A Node/TypeScript project (macOS): pin Shipcraft in the project, like any dev dependency
 pnpm add -D shipcraft          # step 1, or: npm i -D shipcraft
-pnpm exec shipcraft init       # step 2: the hooks call this project's install
+pnpm exec shipcraft init       # step 2, or: npx -- shipcraft init; the hooks call this project's install
 
 # macOS (Apple silicon or Intel), any language: the latest release, checksum-verified, into ~/.local/bin
 gh repo clone victorassisalves/shipcraft && bash shipcraft/install.sh
@@ -69,18 +69,30 @@ git clone https://github.com/victorassisalves/shipcraft && cd shipcraft
 cargo install --path nucleo
 ```
 
-`install.sh --version <v>` pins a version and `install.sh --uninstall` removes the binary. It needs `gh` logged in.
+`install.sh --version <v>` pins a version and `install.sh --uninstall` removes the binary. It needs `gh` logged in. With the npm install, `shipcraft` is not on your `PATH`: run it through the project (`pnpm exec shipcraft …` or `npx -- shipcraft …`).
 
-Then, in your project (step 2):
+With `install.sh` or `cargo install`, step 2 is, in your project (`install.sh` puts the binary in `~/.local/bin`; if that folder is not on your `PATH`, run `export PATH="$HOME/.local/bin:$PATH"` first, or add it to your shell profile):
 
 ```bash
 shipcraft init          # detects the language, writes .shipcraft.toml, wires the hook
-git add .shipcraft.toml && git commit -m "add shipcraft"
 ```
+
+Either way, `init` ends with the files to commit (`shipcraft: ready. Commit …`): `.shipcraft.toml`, `.shipcraft/`, and the hook manager's file and `AGENTS.md`/`CLAUDE.md` when it wrote them. Commit all of them, plus `package.json` and its lockfile with the npm install:
+
+```bash
+git add .shipcraft.toml .shipcraft    # plus every other file init listed (AGENTS.md, CLAUDE.md, the hook manager's file),
+                                      # and package.json with pnpm-lock.yaml or package-lock.json
+git commit -m "add shipcraft"
+```
+
+Git does not commit hooks: every other clone installs the dependencies and runs `init` once (or the hook manager's install). Until then nothing runs at its commits, and CI is the backstop.
 
 A cycle (with the npm install, run each `shipcraft` command through the project's install, from the repository root: `pnpm exec shipcraft red` or `npx -- shipcraft red`; `git` stays as is):
 
 ```bash
+# work on a branch: `shipcraft pr` refuses the default branch
+git switch -c invoice-rounding
+
 # RED: write the failing tests, then lock them
 shipcraft red
 git add -A && git commit -m "red: invoice rounding"
@@ -88,14 +100,18 @@ git add -A && git commit -m "red: invoice rounding"
 # GREEN: write the code; commit as often as you like
 git commit -am "fix rounding"      # the lock closes on the first fully green commit
 
-# open the PR: CI and review run, and their statuses are published
+# open the PR (needs a GitHub remote named origin and gh logged in): CI runs, then the review
+# when an agent is configured (init turns review off if it finds no codex, claude or gemini),
+# and their statuses are published
 shipcraft pr --title "Invoice rounding"
 
-# merge only when both are green
+# merge only when CI is green and the review approved (or is off)
 shipcraft merge 42
 ```
 
 `shipcraft status` shows the open locks and how protected the repository really is.
+
+Without a GitHub remote, the cycle still works up to the commits: `red`, the hook and `shipcraft ci --base <ref>` run locally; `pr` and `merge` need GitHub.
 
 Upgrading: with the npm install, `pnpm add -DE shipcraft@latest` (or `npm i -D --save-exact shipcraft@latest`) and commit `package.json` with the lockfile; every clone then gets the same version. To go back, pin the previous one exactly: `pnpm add -DE shipcraft@<version>`, and commit both files again. With `install.sh`, run it again, or `install.sh --version <version>`. A version older than the config's `shipcraft_min` refuses to run: going back past it also means lowering `shipcraft_min` in `.shipcraft.toml`, with no lock open. Release notes say which version to go back to when a release changes something you may want to undo.
 
