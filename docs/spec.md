@@ -380,19 +380,22 @@ POC-021 (2026-10-29, Shipcraft 2.14.0 from npm) asked Claude Code and Codex, in 
   - The new block is the text below `AGENTS_BLOCK` in `nucleo/src/init.rs`, from a start line to an end line, LF line endings. Besides today's rules it says, in this order:
     - the RED and the GREEN are done by different agent sessions: in Claude Code a subagent per phase, in Codex a new `codex exec` session per phase (never `resume`), both in the same checkout;
     - the RED session commits the tests, the stubs they need and the lock in one commit, and stops;
-    - the GREEN session starts from that commit, may change anything the open lock does not protect (product code, dependencies and their lockfiles, config), never a locked file, and commits; a test it finds wrong is reported back, and a RED session fixes it with `red --redo` (item 46).
-  - **The command it names.** When `init` runs from a project-local install (item 58's rule), every `shipcraft` command in the block is written `npx shipcraft`, which resolves that install; otherwise `shipcraft`. These are the block's two *current variants*.
+    - the GREEN session starts from that commit, may change anything the open lock does not protect (product code, dependencies and their lockfiles, config), never a locked file, and commits; a test it finds wrong is reported back, and a RED session fixes it with `red --redo` (item 46);
+    - a session told it is the RED or the GREEN does that phase only and starts no other session; the session the user talks to starts them;
+    - today's rule on locks reads: never edit or delete `.shipcraft/locks/*` by hand (`shipcraft red`, `red --redo` and the hook write them).
+  - **The command it names.** When `init` runs from a project-local install (item 58's rule), every `shipcraft` command in the block is written `npx -- shipcraft` (fixed point 39's `--`), and the block says to run Shipcraft commands from the repository root, where `npx` resolves the root install item 58 wires the hooks to; otherwise `shipcraft`. These are the block's two *current variants*.
   - **Known blocks.** The current variants, plus the 2.14.0 block: the exact bytes of `AGENTS_BLOCK` at tag `v2.14.0`, which has a start line and no end line. Each is kept in the binary.
   - **What `init` does with `AGENTS.md`.**
     - No start line: the new block is appended, with today's separator rule (or the file is created).
     - Exactly one start line, followed by exactly one end line and no other marker, and the block between them byte-equal to a known block: the block is replaced by the new one; every byte before and after is kept. Equal to the new block: kept, `already has the shipcraft block`, as today.
     - Exactly one start line, no end line, and the bytes from the start line equal to the 2.14.0 block followed by anything: those bytes are replaced by the new block; what follows is kept.
     - Anything else (more markers, a block that is not a known one, an edited 2.14.0 block): kept, with today's `already has the shipcraft block, kept` plus `; it differs from this version's: edit it by hand to match docs/spec.md`.
-    - Symlinks and read or write failures: as today (kept, notice, never failing the init). The file is written in place as today.
+    - A symlink or any entry that is not a regular file, and read or write failures: as today (kept, notice, never failing the init).
+    - **Writing.** A new file is created as today. An existing file is rewritten through a temporary file in the same folder, given the old file's permission bits, then renamed over it; any failure removes the temporary file and leaves the old bytes. A file whose permission bits forbid the owner to write is kept, with the write-failure notice.
 - **`CLAUDE.md` imports the block.** Claude Code reads `CLAUDE.md`, and reads another file through an `@path` import line.
-  - `init` handles `CLAUDE.md` at the repository root when an entry exists there (`lstat` succeeds: a symlink, dangling or not, counts and is then kept as `AGENTS.md`'s are), or when `claude` is on `PATH` (checked on its own, whatever `[roles] review` is).
+  - `init` handles `CLAUDE.md` at the repository root when an entry exists there (`lstat` succeeds: a symlink, dangling or not, counts and is then kept as `AGENTS.md`'s are), or when `claude` is found on `PATH` by the same lookup `init` uses to find review agents (checked on its own, whatever `[roles] review` is).
   - Its block is three lines: the start line, `Shipcraft workflow (required): @AGENTS.md`, the end line. The rules are `AGENTS.md`'s with this block as the only known block: created, appended, kept equal, kept different with the notice.
-  - `CLAUDE.md` is handled only when `AGENTS.md` holds the current block after `init` (written now or already equal). Otherwise `init` leaves `CLAUDE.md` untouched and prints `shipcraft: CLAUDE.md not written: AGENTS.md does not hold this version's shipcraft block`.
+  - `CLAUDE.md` is handled only when `AGENTS.md` is a regular file that holds the current block after `init` (written now or already equal); a symlinked `AGENTS.md` never qualifies. Otherwise `init` leaves `CLAUDE.md` untouched and prints `shipcraft: CLAUDE.md not written: AGENTS.md does not hold this version's shipcraft block`.
   - `init`'s closing line lists each of the two files it created, appended to or replaced, as it lists `AGENTS.md` today.
 - **`--version` and usage say when the config is missing.** After their usual output, `shipcraft --version` and the usage (no arguments, `help`, `-h`, `--help`) print one line to stderr when the current folder is inside a git work tree (`git rev-parse --show-toplevel` succeeds) and `lstat` of `.shipcraft.toml` at its root fails with not-found: `shipcraft: not set up in this repository: run shipcraft init (from a package install: pnpm exec shipcraft init, or npx shipcraft init)`. In every other case (outside a work tree, git fails, the entry exists in any form, `lstat` fails otherwise) nothing is added. They read no config and write no run-log row; their stdout and exit codes do not change.
 - **Docs.** The README's quick start and the npm package README say that installing is two steps: add the package, then run `init`.
@@ -412,7 +415,7 @@ POC-021 (2026-10-29, Shipcraft 2.14.0 from npm) asked Claude Code and Codex, in 
 - A `CLAUDE.md` in a subfolder, or a user-level `~/.claude/CLAUDE.md`, is not read or written.
 - A block edited by hand, or written with CRLF line endings, is never upgraded.
 - The hint covers a repository with no config. A fresh clone of a project that has one, but whose hooks are not installed yet, gets no hint; CI is the backstop, as today.
-- `npx shipcraft` needs Node at the agent's shell, as item 58's hooks do.
+- `npx -- shipcraft` needs Node at the agent's shell, as item 58's hooks do, and resolves the root install only from the repository root; an agent that runs it inside a workspace package with its own older install gets that one.
 
 ## 4. Configuration
 
