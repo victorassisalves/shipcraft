@@ -70,22 +70,24 @@ pub fn rows(repo: &Repo) -> Vec<Value> {
         .collect()
 }
 
-/// The row of a hook or CI run, from how the command ended; `docs_only` only on
+/// What a CI run says of itself in its row: whether the PR was docs only
+/// (item 40), and whether the suite was left to `suite_checks` (item 62).
+#[derive(Default, Clone, Copy)]
+pub struct CiRow {
+    pub docs_only: bool,
+    pub suite_in_checks: bool,
+}
+
+/// The row of a hook or CI run, from how the command ended; `ci` only on
 /// CI rows, `lock` on hook rows (the lock open before the hook ran).
-pub fn layer(
-    repo: &Repo,
-    camada: &str,
-    started: Instant,
-    result: &Result<()>,
-    docs_only: Option<bool>,
-    lock: Option<String>,
-) {
+pub fn layer(repo: &Repo, camada: &str, started: Instant, result: &Result<()>, ci: Option<CiRow>, lock: Option<String>) {
     let mut row = row(repo, camada, started, result);
     if let Some(lock) = lock {
         row["lock"] = json!(lock);
     }
-    if let Some(docs_only) = docs_only {
-        row["docs_only"] = json!(docs_only);
+    if let Some(ci) = ci {
+        row["docs_only"] = json!(ci.docs_only);
+        row["suite_in_checks"] = json!(ci.suite_in_checks);
     }
     record(repo, row);
 }

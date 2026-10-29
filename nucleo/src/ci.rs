@@ -20,7 +20,8 @@ use crate::refusal::{failed, refuse, Result};
 use crate::suite;
 use serde_json::json;
 
-pub fn run(repo: &Repo, base: &str, pr: bool, docs_only: &mut bool) -> Result<()> {
+pub fn run(repo: &Repo, base: &str, pr: bool, row: &mut medicao::CiRow) -> Result<()> {
+    let docs_only = &mut row.docs_only;
     let base =
         repo.resolve(base)?.ok_or_else(|| failed(format!("--base {base} is not a commit in this repository")))?;
     let head_sha = repo.head()?.ok_or_else(|| failed("the repository has no commits"))?;
@@ -70,6 +71,17 @@ pub fn run(repo: &Repo, base: &str, pr: bool, docs_only: &mut bool) -> Result<()
         head_changes = changes;
     }
     println!("shipcraft: {} commit(s) checked in {}..HEAD", commits.len(), short(&base));
+    // Item 62: with `suite_checks`, the suite runs in those GitHub checks; this
+    // run re-checks the commits only, so nothing that needs the suite's report
+    // at HEAD is judged here, and an open lock at HEAD is an open cycle.
+    if !config.execucao.suite_checks.is_empty() {
+        println!(
+            "shipcraft: suite not run here: it runs in the GitHub check(s) {} ([execution] suite_checks)",
+            config.execucao.suite_checks.join(", ")
+        );
+        row.suite_in_checks = true;
+        return passed(repo, &base, &config);
+    }
     if *docs_only {
         println!("docs only: the suites do not run");
         return passed(repo, &base, &config);

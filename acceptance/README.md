@@ -46,9 +46,13 @@ The following surface is part of the contract. Unsupported calls exit 1 with `ac
 | `gh pr edit [N] [--title T] [--body B \| --body-file F\|-]` | Updates PR text. |
 | `gh pr comment [N] (--body B \| --body-file F\|-) [--edit-last]` | Adds or edits a comment. |
 | `gh pr review [N] --comment (--body B \| --body-file F\|-)` | Counts as a comment. |
-| `gh pr merge [N] (--merge\|--squash\|--rebase) [--delete-branch] [--subject S] [--body B]` | Real merge in the bare repository; missing method fails as in noninteractive gh. |
+| `gh pr merge [N] (--merge\|--squash\|--rebase) [--delete-branch] [--subject S] [--body B] [--match-head-commit SHA]` | A mismatched live head fails without merging. Real merge in the bare repository; missing method fails as in noninteractive gh. |
 | `gh pr checkout N [-b NAME]`, `gh pr diff [N]` | Checkout and diff. |
 | `gh api PATH [-X M] [-f k=v] [-F k=v] [--input F\|-] [-q JQ] [--paginate]` | Repository, pull, commit, status, checks, protection and ruleset endpoints below. |
+| `gh api repos/O/R/commits/SHA/check-runs?check_name=NAME&filter=latest&per_page=100` | Check runs from case state, exact decoded name and latest run per producer. |
+| `gh api repos/O/R/commits/SHA/status?per_page=100` | Combined status, newest status per context. |
+
+Check runs come from `state/check-runs.json` (array with `head_sha`, `id`, `name`, `status`, `conclusion`, `app.id`, `check_suite.id`); `check_name` is decoded and `filter=latest` keeps the newest per name/app/check suite. `/commits/SHA/status` returns the combined state and newest status per context from `statuses.jsonl`. Optional `responses.json` supplies per-endpoint `{ "json": ... }`, `{ "raw": ... }` or `{ "error": true }` responses (an array advances one response per call); `merge-head` moves the live PR head just before merge to test the compare guard.
 
 API endpoints: `repos/O/R`, `/pulls[?head=O:B&state=S]`, `/pulls/N` (GET/PATCH), `/pulls/N/merge` (PUT), `/pulls/N/commits`, `/issues/N/comments` (GET/POST), `/pulls/N/reviews` (POST, comment), `/statuses/SHA` (POST), `/commits/SHA/statuses`, `/commits/SHA/status`, `/commits/SHA/check-runs`, `/commits/SHA/pulls`, `/commits/REF`, `/git/ref/heads/B`, `/branches/B`, `/branches/B/protection[/...]` (GET/PUT/POST/PATCH/DELETE), `/rulesets`, `user`. `{owner}`, `{repo}`, `{branch}` expand to `acme`, `proj`, `main`; `-q` uses the machine's jq.
 
