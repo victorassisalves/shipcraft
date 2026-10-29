@@ -157,31 +157,11 @@ pub fn covered(
         return Err(Fallback::FileWithoutCases);
     }
     let cases: Vec<&str> = ids.iter().map(String::as_str).collect();
-    let prefix = suite.prefix();
-    let root = dir.join(&suite.raiz);
-    let files = of_suite(suite, locked);
-    let map = if is_go(&suite.comando) {
-        let tests = files.iter().filter(|f| f.ends_with(".go")).map(|f| (f.clone(), go_tests(&root.join(f)))).collect();
-        go_module(dir, &root).map(|module| Map::Go { module, tests })
-    } else {
-        let present: Vec<String> =
-            present.iter().filter_map(|path| path.strip_prefix(&prefix)).map(str::to_string).collect();
-        let names = |python| Map::names(python, &prefix, &files, &present, &cases, true);
-        if ["pytest", "vitest", "jest"].iter().any(|r| suite.comando.contains(r)) {
-            names(suite.comando.contains("pytest"))
-        } else {
-            match (names(true), names(false)) {
-                (Some(map), None) | (None, Some(map)) => Some(map),
-                _ => None,
-            }
-        }
-    };
-    let Some(map) = map else { return Err(Fallback::CaseWithoutFile) };
+    let Some(map) = coverage_map(dir, suite, locked, present, &cases) else { return Err(Fallback::CaseWithoutFile) };
     let mut held = BTreeSet::new();
     let mut keep = BTreeSet::new();
     for case in &cases {
-        let mut holders = map.holders(case).into_iter().collect::<BTreeSet<_>>().into_iter();
-        let (Some(file), None) = (holders.next(), holders.next()) else { return Err(Fallback::CaseWithoutFile) };
+        let Some(file) = map.holder(case) else { return Err(Fallback::CaseWithoutFile) };
         if selected.contains(&file) {
             keep.insert(case.to_string());
         }
@@ -191,6 +171,45 @@ pub fn covered(
         return Err(Fallback::FileWithoutCases);
     }
     Ok(report.only(&keep))
+}
+
+/// Item 60: the files (from the suite's root) that hold `cases`, the suite's
+/// own lock cases without its prefix, mapped as `covered` maps over the
+/// `locked` files. Fails, `case without file`, when a case maps to no file
+/// or to more than one.
+pub fn holding(
+    dir: &Path,
+    suite: &Suite,
+    locked: &[String],
+    present: &[String],
+    cases: &[&str],
+) -> std::result::Result<BTreeSet<String>, Fallback> {
+    let map = coverage_map(dir, suite, locked, present, cases).ok_or(Fallback::CaseWithoutFile)?;
+    cases.iter().map(|case| map.holder(case).ok_or(Fallback::CaseWithoutFile)).collect()
+}
+
+/// Item 55: the hook's mapper for `cases` over the suite's `locked` files,
+/// reading the tree in `dir`; None when it finds no single map.
+fn coverage_map(dir: &Path, suite: &Suite, locked: &[String], present: &[String], cases: &[&str]) -> Option<Map> {
+    let prefix = suite.prefix();
+    let root = dir.join(&suite.raiz);
+    let files = of_suite(suite, locked);
+    if is_go(&suite.comando) {
+        let tests = files.iter().filter(|f| f.ends_with(".go")).map(|f| (f.clone(), go_tests(&root.join(f)))).collect();
+        go_module(dir, &root).map(|module| Map::Go { module, tests })
+    } else {
+        let present: Vec<String> =
+            present.iter().filter_map(|path| path.strip_prefix(&prefix)).map(str::to_string).collect();
+        let names = |python| Map::names(python, &prefix, &files, &present, cases, true);
+        if ["pytest", "vitest", "jest"].iter().any(|r| suite.comando.contains(r)) {
+            names(suite.comando.contains("pytest"))
+        } else {
+            match (names(true), names(false)) {
+                (Some(map), None) | (None, Some(map)) => Some(map),
+                _ => None,
+            }
+        }
+    }
 }
 
 /// Item 16a: the `[build] comando`, once, at the root of the tree being
@@ -235,7 +254,7 @@ fn run_suites(
         let mut selection = None;
         let mut lists = None;
         if let Some(locked) = locked {
-            let cases: Vec<&str> = locked.cases.iter().filter_map(|case| case.strip_prefix(&own)).collect();
+            let cases: Vec<&str> = locked.cases.iter().filter_map(|case| config.own(&suite, case)).collect();
             if cases.is_empty() {
                 continue;
             }
@@ -763,6 +782,15 @@ impl Map {
     /// Every case has a file.
     fn covers(&self, cases: &[&str]) -> bool {
         cases.iter().all(|case| !self.holders(case).is_empty())
+    }
+
+    /// The one file that holds `case`; None when none or more than one does.
+    fn holder(&self, case: &str) -> Option<String> {
+        let mut holders = self.holders(case).into_iter().collect::<BTreeSet<_>>().into_iter();
+        match (holders.next(), holders.next()) {
+            (Some(file), None) => Some(file),
+            _ => None,
+        }
     }
 
     /// The files that hold `case`, relative to the suite's root.

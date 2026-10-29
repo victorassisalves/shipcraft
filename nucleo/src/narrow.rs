@@ -1,9 +1,12 @@
 //! Item 55: `red` runs the RED's changed test files. The base, the paths
 //! changed since it, each suite's selected files, and why `red` runs every
-//! suite instead when it cannot narrow safely.
+//! suite instead when it cannot narrow safely. Item 60: `red --redo` adds
+//! the files that hold HEAD's lock cases.
 
-use crate::config::{Config, CONFIG_FILE};
+use crate::config::{self, Config, CONFIG_FILE};
 use crate::git::{git_in, Repo};
+use crate::lock::Lock;
+use crate::suite;
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::fs;
@@ -14,7 +17,6 @@ const DEFAULT_BASE: &str = "refs/remotes/origin/HEAD";
 /// Why `red` ran every suite, in the order the first that applies is reported.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Fallback {
-    Redo,
     All,
     NoBase,
     NoMergeBase,
@@ -31,7 +33,6 @@ pub enum Fallback {
 impl Fallback {
     pub fn text(self) -> &'static str {
         match self {
-            Fallback::Redo => "--redo",
             Fallback::All => "--all",
             Fallback::NoBase => "no base",
             Fallback::NoMergeBase => "no merge base",
@@ -107,16 +108,82 @@ pub fn changed(repo: &Repo, base: Option<&str>) -> std::result::Result<Vec<Chang
     changed_paths(repo, &base).ok_or(Fallback::GitFailed)
 }
 
-/// The plan for `red` (not `--redo`): `--all`, or the changed test files
-/// among `changed`.
-pub fn plan(repo: &Repo, config: &Config, changed: &std::result::Result<Vec<ChangedPath>, Fallback>, all: bool) -> Plan {
+/// The plan for `red`: `--all`, or the changed test files among `changed`;
+/// with `redo` (item 60, HEAD's lock), plus each suite's lock files. The
+/// emptiness test comes after the union.
+pub fn plan(
+    repo: &Repo,
+    config: &Config,
+    changed: &std::result::Result<Vec<ChangedPath>, Fallback>,
+    all: bool,
+    redo: Option<&Lock>,
+) -> Plan {
     if all {
         return Plan::All(Fallback::All);
     }
-    match changed {
-        Ok(changed) => select(repo, config, changed),
-        Err(why) => Plan::All(*why),
+    let chosen = changed.as_ref().map_err(|why| *why).and_then(|changed| select(repo, config, changed));
+    let (mut selected, mut files) = match chosen {
+        Ok(chosen) => chosen,
+        Err(why) => return Plan::All(why),
+    };
+    if let Some(lock) = redo {
+        if let Err(why) = add_lock_files(repo, config, lock, &mut selected, &mut files) {
+            return Plan::All(why);
+        }
     }
+    if files.is_empty() {
+        return Plan::All(Fallback::NothingSelected);
+    }
+    Plan::Changed { selected, files: files.len() }
+}
+
+/// Item 60: adds to each suite's selection its lock files, the files (from
+/// its root) that hold the lock's cases it owns (item 59's suite identity),
+/// mapped by item 55's mapper over the lock's `files`, on the working tree.
+/// A case of no suite, or of no single readable file, is `case without file`.
+fn add_lock_files(
+    repo: &Repo,
+    config: &Config,
+    lock: &Lock,
+    selected: &mut [BTreeSet<String>],
+    files: &mut BTreeSet<String>,
+) -> std::result::Result<(), Fallback> {
+    let suites = config.suites();
+    let named: Vec<String> = suites.iter().map(|suite| suite.nome.clone()).filter(|n| !n.is_empty()).collect();
+    let unnamed: Vec<usize> = (0..suites.len()).filter(|&i| suites[i].nome.is_empty()).collect();
+    let mut cases: Vec<Vec<&str>> = vec![Vec::new(); suites.len()];
+    for case in &lock.cases {
+        let (i, id) = match config::owner(case, &named) {
+            Some(name) => {
+                let i = suites.iter().position(|suite| &suite.nome == name).expect("an owner is a suite's name");
+                (i, &case[name.len() + 1..])
+            }
+            None => match unnamed[..] {
+                [one] => (one, case.as_str()),
+                _ => return Err(Fallback::CaseWithoutFile),
+            },
+        };
+        cases[i].push(id);
+    }
+    let present = repo.files().map_err(|_| Fallback::GitFailed)?;
+    let locked: Vec<String> = lock.files.keys().cloned().collect();
+    for ((suite, cases), selected) in suites.iter().zip(&cases).zip(selected) {
+        if cases.is_empty() {
+            continue;
+        }
+        let prefix = suite.prefix();
+        for rel in suite::holding(repo.root(), suite, &locked, &present, cases)? {
+            let path = format!("{prefix}{rel}");
+            // As item 55 checks a selected file: `lstat`, then opened for reading.
+            let regular = fs::symlink_metadata(repo.path(&path)).is_ok_and(|m| m.is_file());
+            if !regular || fs::File::open(repo.path(&path)).is_err() {
+                return Err(Fallback::CaseWithoutFile);
+            }
+            selected.insert(rel);
+            files.insert(path);
+        }
+    }
+    Ok(())
 }
 
 /// The one merge base of HEAD and `rev`.
@@ -149,9 +216,13 @@ fn changed_paths(repo: &Repo, base: &str) -> Option<Vec<ChangedPath>> {
     Some(changed)
 }
 
-/// Each suite's selected files among the changed paths, or the first reason
-/// to run every suite instead.
-fn select(repo: &Repo, config: &Config, changed: &[ChangedPath]) -> Plan {
+/// Each suite's selected files (from its root), and the distinct files by
+/// repository path.
+type Selection = (Vec<BTreeSet<String>>, BTreeSet<String>);
+
+/// The selection among the changed paths, or the first reason to run every
+/// suite instead; the emptiness test is the caller's.
+fn select(repo: &Repo, config: &Config, changed: &[ChangedPath]) -> std::result::Result<Selection, Fallback> {
     let suites = config.suites();
     let mut selected = vec![BTreeSet::new(); suites.len()];
     let mut files = BTreeSet::new();
@@ -185,11 +256,8 @@ fn select(repo: &Repo, config: &Config, changed: &[ChangedPath]) -> Plan {
         }
         files.insert(path);
     }
-    if files.is_empty() {
-        fall(Fallback::NothingSelected);
-    }
     match why {
-        Some(why) => Plan::All(why),
-        None => Plan::Changed { selected, files: files.len() },
+        Some(why) => Err(why),
+        None => Ok((selected, files)),
     }
 }
