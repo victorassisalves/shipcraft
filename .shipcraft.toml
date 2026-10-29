@@ -13,4 +13,14 @@ filter = "command"
 
 [execution]
 ci = "off"
-review = "off"
+# Dogfood step 2 (2026-10-29): the product's review replaces the hand-made Codex prompt.
+# The QA brief runs the full battery (~12 min here), hence the longer timeout.
+# Revert: review = "off" and drop [roles] and [review].
+review = "local"
+
+[roles]
+review = "codex"
+
+[review]
+spec = "docs/spec.md"
+timeout = 2400
