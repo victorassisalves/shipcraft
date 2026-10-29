@@ -226,25 +226,30 @@ A PR is judged by its base's config (section 4), so a `[[suite]]` added in the s
 
 ### `red --redo` runs the changed test files too (item 60)
 
-Before item 60, `red --redo` always ran every suite, since a redo must see every case of the lock it rewrites (item 46). On Shipcraft's own repository a redo of item 59's RED took 1,476 s (24.6 min) while its `red` took 148 s, and the rewritten lock grew from 40 cases to 1,824: every case of the battery became part of the cycle. A redo fixes a test the RED wrote, so the cases it must see are in the lock's own files.
+Before item 60, `red --redo` always ran every suite, since a redo must see every case of the lock it rewrites (item 46). On Shipcraft's own repository a redo of item 59's RED took 1,476 s (24.6 min) while its `red` took 148 s, and the rewritten lock grew from 40 cases to 1,824: every case of the battery became part of the cycle. A redo fixes a test the RED wrote, so the cases it must see are in the files that hold the lock's cases.
 
-- **The selection.** `red --redo` decides the selection as `red` does (item 55: the base, the changed paths, the fallbacks, `--base`, `--all`), with one addition: each suite's selected files also include the *lock's files* of that suite.
-  - The lock's files are the files that hold HEAD's lock `cases`, mapped with the hook's mapper (section 6) against the lock's own `files`, as the hook maps `failing_at_red` cases. A case of the lock that maps to no file, or to more than one, makes the redo fall back to the full run (`case without file`).
-  - A lock file that is no longer a readable regular file in the working tree makes it fall back too (`protected file removed`).
-  - So a redo whose changed paths select nothing still narrows to the lock's files: `nothing selected` no longer applies to a redo whose lock maps to at least one file.
-- **The narrowed run** is item 55's, on that selection: the same filters, lists and coverage judgement, and the same fallbacks to the full run after it started.
-- **What it requires and writes** is item 46's, on the cases the run keeps. `redo-drops-case` compares HEAD's lock `cases` with the kept cases, which include every case of the lock's files, so a case is dropped only when its own file no longer reports it. The new lock's `cases` are the kept cases: a redo of a narrowed lock stays narrow, and a redo of a lock written by a full run keeps every case of the files it ran (its lock's files: all of them, when every case maps).
-- **Reported** as item 55 reports: `red ran the changed test files: <n> of <m>` counts the selection with the lock's files; the reason `--redo` is gone from the fallback list; the run log row keeps `redo: true` and gets `selection`, `selected_files` and `fallback` as any `red` row.
+- **The selection.** `red --redo` decides the selection as `red` does (item 55: the base, the changed paths, the fallbacks and their order, `--base`, `--all`), with one addition per suite: the suite's *lock files*.
+  - **Which suite owns a lock case.** By the suite prefix of the case id, with item 59's suite identity (the longest name `n` of the working tree's config for which the id starts with `n:`; a case with no prefix belongs to the config's unnamed suite, when there is exactly one). A case that belongs to no suite of the config makes the redo fall back to the full run (`case without file`).
+  - **The lock files.** Each case of HEAD's lock `cases` is mapped to a file with the mapper item 55 uses to judge coverage (section 6's map from case ids to locked files, with the hook's rules for roots and leading parts), applied to the owning suite only, over the paths of HEAD's lock `files` under that suite, reading sources from the working tree. A case that maps to no file or to more than one, or to a path that is not a readable regular file in the working tree as item 55 checks selected files (`lstat`, then opened for reading), makes the whole redo fall back to the full run (`case without file`).
+  - A suite's selected files are its item 55 selected files plus its lock files, deduplicated by repository path within the suite. A file holding cases of two suites is selected in each of them, and each suite's command gets its own list.
+  - The emptiness test (`nothing selected`) is made after this union. The earlier fallbacks (`--all`, `no base`, `no merge base`, `git failed`, `config changed`, `protected file removed`, `unreadable path`) apply first and unchanged: without a base, a redo still runs every suite.
+- **The narrowed run** is item 55's, on that selection: the same filters, lists and coverage judgement, and the same fallbacks to the full run after it started. A suite with no selected file runs its `check` and skips its command, as in item 55; item 46's "every suite" now means this.
+- **What it requires and writes** is item 46's, on the cases the run keeps. `redo-drops-case` compares HEAD's lock `cases` with the kept cases: every old case must be reported, not skipped. Running a case's file does not guarantee it is reported (a `-t`, `-k` or `-m` in the command, or a project selection, can leave it out); the refusal is then the same as today. The new lock's `cases` are the kept cases, so the lock grows by the cases of every test file the branch changed since its base, not only the repaired one, and a later redo must keep them.
+- **Reported** as item 55 reports: `red ran the changed test files: <n> of <m>`, where `<n>` counts distinct repository paths selected across suites (lock files included) and `<m>` is item 55's. The reason `--redo` is gone from the fallback list. A redo refused before the selection is decided (`redo-without-lock`, `lock-open`, `lock-edited`, `lock-format`, a config error) writes its row without the three fields; any other redo row, an unchanged lock included, has `selection`, `selected_files` and `fallback`, and keeps `redo: true`.
+
+**Item 46 amended.** "What it runs" becomes: the suite as `red` runs it on the working tree, with item 60's selection; build and every suite's `check` still run, with the same refusals and precedence.
 
 **Unchanged.** The redo commit and how the hook and CI judge it (item 46), `redo-drops-case`, `redo-mixed`, item 53's second run, item 59's warnings, the lock format.
 
-**Battery.** Cases that assert a redo ran every suite, or its `fallback: "--redo"` row, change to the narrowed result: the RED lists them.
+**Battery.** `v1-55.redo` (asserts the full run, `("all", 0, "--redo")` and the legacy cases in the lock) changes to the narrowed result; `v1-55.redo-base` (`--base nonexisting55` ignored) now falls back with `no base`. `acceptance/pontos/55.md`'s two lines on redo change with them. Items 46, 52, 53 and 59's redo cases must hold.
 
 **Versions.** The item raises the binary to 2.16.0. No lock or config field changes.
 
 **Known limits.**
-- A case of another file that the repaired test's support code breaks is not run at redo; CI refuses it later as `suite-red`, as for item 55.
-- A redo of a lock written by a full run runs every file of that lock, so it is about as slow as before; only locks written by a narrowed `red` gain.
+- A case of another file that the repaired test or its support code breaks is not run at redo; CI refuses it later as `suite-red`, as for item 55.
+- The lock files are those holding the lock's cases. Support files (`conftest.py`, setup files, runner configs, `testdata/`) and test files whose cases were all skipped are not selected for that reason. A lock case that only worked because another file was collected with it (a pytest plugin registered by a sibling module, read through `SHIPCRAFT_FILES`) can then fail or vanish at redo and refuse `redo-drops-case`; `red --redo --all` runs every suite as before.
+- Without a base (`git init` with no remote, no `origin/HEAD`), a redo runs every suite, even when every lock case maps.
+- A case whose test moved to another file in the repair maps to no file of the old lock, and the redo runs in full.
 
 ### The lock closes by itself
 
