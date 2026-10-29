@@ -22,7 +22,7 @@ pub fn run(repo: &Repo, base: Option<&str>, all: bool, chosen: &mut Option<Chose
     refuse_if_a_lock_is_open(repo)?;
     let changed = narrow::changed(repo, base);
     warn_outside_globs(repo, &config, &changed);
-    let plan = narrow::plan(repo, &config, &changed, all);
+    let plan = narrow::plan(repo, &config, &changed, all, None);
     let report = red_report(repo, &config, "shipcraft red", plan, chosen)?;
     let failing = failing_at_red(&report, "shipcraft red")?;
 
@@ -56,17 +56,22 @@ pub fn run(repo: &Repo, base: Option<&str>, all: bool, chosen: &mut Option<Chose
 /// lock `red` would write for this tree; it keeps every case of the old one.
 /// `path` is HEAD's lock as soon as it is known, for the run log row;
 /// `rerun_dropped`, the cases the second run dropped, once the lock is written;
-/// `chosen`, the full run (item 55), once HEAD's lock is known.
+/// `chosen`, how the first run went, once HEAD's lock is known. Item 60: it
+/// runs `red`'s selection (`base`, `all`) plus the files of the lock's cases.
 pub fn redo(
     repo: &Repo,
+    base: Option<&str>,
+    all: bool,
     path: &mut Option<String>,
     rerun_dropped: &mut Option<usize>,
     chosen: &mut Option<Chosen>,
 ) -> Result<()> {
     let config = Config::load(repo)?;
     let (lock_path, old) = head_lock(repo, path)?;
-    warn_outside_globs(repo, &config, &narrow::changed(repo, None));
-    let report = red_report(repo, &config, "shipcraft red --redo", Plan::All(Fallback::Redo), chosen)?;
+    let changed = narrow::changed(repo, base);
+    warn_outside_globs(repo, &config, &changed);
+    let plan = narrow::plan(repo, &config, &changed, all, Some(&old));
+    let report = red_report(repo, &config, "shipcraft red --redo", plan, chosen)?;
     let run = report.cases_run();
     let dropped: Vec<&String> = old.cases.iter().filter(|case| !run.contains(case)).collect();
     if !dropped.is_empty() {
@@ -107,7 +112,7 @@ pub fn redo(
     println!("shipcraft: cases no longer failing at RED: {}", list(minus(&old.failing_at_red, &lock.failing_at_red)));
     println!("shipcraft: cases newly failing at RED: {}", list(minus(&lock.failing_at_red, &old.failing_at_red)));
     println!("shipcraft: commit the lock with the repaired tests, and nothing else; the hook checks the redo commit.");
-    warn_absent_suites(repo, &config, None, &lock);
+    warn_absent_suites(repo, &config, base, &lock);
     Ok(())
 }
 
@@ -312,8 +317,7 @@ fn confirm(
     let rerun = |tmp: &Path| -> Result<Vec<String>> {
         let mut dropped = Vec::new();
         for suite in config.suites() {
-            let own = if suite.nome.is_empty() { String::new() } else { format!("{}:", suite.nome) };
-            let cases: Vec<String> = failing.iter().filter(|case| case.starts_with(&own)).cloned().collect();
+            let cases: Vec<String> = failing.iter().filter(|case| config.own(&suite, case).is_some()).cloned().collect();
             if cases.is_empty() {
                 continue;
             }

@@ -124,8 +124,9 @@ SH55
       printf 'ignored55/\n' >> .gitignore; i55_commit 'chore: ignore'; git update-ref refs/remotes/origin/main HEAD
       i55_write "$new" fresh55 ;;
     redo|redo-base)
-      must_accept 'initial full RED' cmd shipcraft red
-      i55_commit 'test: open RED'; reason=--redo; selected=0 ;;
+      must_accept 'initial narrow RED' cmd shipcraft red
+      i55_commit 'test: open RED'
+      if [ "$c" = redo-base ]; then reason='no base'; selected=0; fi ;;
     error) if [ "$LP" = python ]; then printf 'raise RuntimeError("collection55")\n' >> "$new"; else printf 'throw new Error("collection55");\n' >> "$new"; fi ;;
     environment)
       if [ "$LP" = python ]; then i55_write tests/test_z55.py z55; else i55_write src/z55.test.ts z55; fi ;;

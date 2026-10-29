@@ -312,6 +312,18 @@ impl Config {
         }]
     }
 
+    /// A case's id within `suite`, without the suite's prefix, when the case
+    /// is the suite's: for a named suite, its owner by item 59's identity (so
+    /// `api` does not take `api:jobs:` cases); an unnamed suite takes every id.
+    pub fn own<'a>(&self, suite: &Suite, case: &'a str) -> Option<&'a str> {
+        if suite.nome.is_empty() {
+            return Some(case);
+        }
+        let named: Vec<String> = self.suites().into_iter().map(|s| s.nome).filter(|n| !n.is_empty()).collect();
+        let id = case.strip_prefix(suite.nome.as_str())?.strip_prefix(':')?;
+        (owner(case, &named) == Some(&suite.nome)).then_some(id)
+    }
+
     /// The project's test files (and support files), as paths from the root.
     pub fn test_files(&self, repo: &Repo) -> Result<Vec<String>> {
         let files = repo.files()?;

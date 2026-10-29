@@ -82,7 +82,7 @@ fn run(args: &[&str]) -> Result<()> {
             init::run(&init::open()?, lang, github)
         }
         ["red", rest @ ..] => {
-            // Item 55: each option once, in any order; `--redo` ignores the others.
+            // Item 55: each option once, in any order; item 60: `--redo` takes the others too.
             let (mut redo, mut all, mut base) = (false, false, None);
             let mut rest = rest.iter();
             while let Some(arg) = rest.next() {
@@ -100,7 +100,7 @@ fn run(args: &[&str]) -> Result<()> {
             if redo {
                 // Item 46: every redo is a `red` row with `redo: true` and HEAD's lock id.
                 let (mut path, mut dropped) = (None, None);
-                let result = red::redo(&repo, &mut path, &mut dropped, &mut chosen);
+                let result = red::redo(&repo, base, all, &mut path, &mut dropped, &mut chosen);
                 let mut row = medicao::row(&repo, "red", started, &result);
                 row["redo"] = true.into();
                 if let Some(path) = &path {
