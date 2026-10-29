@@ -78,7 +78,7 @@ shipcraft init          # detects the language, writes .shipcraft.toml, wires th
 git add .shipcraft.toml && git commit -m "add shipcraft"
 ```
 
-A cycle:
+A cycle (with the npm install, run each `shipcraft` command through the project's install, from the repository root: `pnpm exec shipcraft red` or `npx -- shipcraft red`; `git` stays as is):
 
 ```bash
 # RED: write the failing tests, then lock them
@@ -96,6 +96,8 @@ shipcraft merge 42
 ```
 
 `shipcraft status` shows the open locks and how protected the repository really is.
+
+Upgrading: with the npm install, `pnpm add -DE shipcraft@latest` (or `npm i -D --save-exact shipcraft@latest`) and commit `package.json` with the lockfile; every clone then gets the same version. To go back, pin the previous one exactly: `pnpm add -DE shipcraft@<version>`, and commit both files again. With `install.sh`, run it again, or `install.sh --version <version>`. A version older than the config's `shipcraft_min` refuses to run: going back past it also means lowering `shipcraft_min` in `.shipcraft.toml`, with no lock open. Release notes say which version to go back to when a release changes something you may want to undo.
 
 ## Commands
 
@@ -179,7 +181,9 @@ Every rule in Shipcraft has to pay for itself. It ships with the metric that jus
 Agents don't need a plugin, an MCP server or a skill. They find Shipcraft the same way they find every other project constraint:
 
 - `git commit` runs the hook, and refusals say exactly what to do next;
-- `shipcraft init` writes a short block in `AGENTS.md` that tells agents to run `shipcraft red` after writing tests. In our trials (four runs per arm, a small sample) this took agents from 0/4 to 4/4 running `shipcraft red` before the first commit.
+- `shipcraft init` writes a short block in `AGENTS.md` that tells agents the cycle: write the failing test and stub, run `shipcraft red`, commit the tests with the lock, then implement. In our trials (four runs per arm, a small sample) the earlier block took agents from 0/4 to 4/4 running `shipcraft red` before the first commit.
+- Since 2.17, the block also asks for the RED and the GREEN in separate sessions (a subagent per phase in Claude Code, a new `codex exec` per phase in Codex), and `init` adds an import of it to `CLAUDE.md` when Claude Code is installed or the file exists, since Claude Code reads `CLAUDE.md`. `init` upgrades a block it wrote earlier and keeps one you edited; while `AGENTS.md` holds an edited or older block, `CLAUDE.md` is left alone and `init` says so.
+- `shipcraft --version` and `shipcraft --help` say when the repository has no `.shipcraft.toml` yet, so an agent that checks the install is told to run `init`.
 
 Give the RED and the GREEN to different sessions. They can be the same model; separate context is what matters.
 
