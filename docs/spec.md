@@ -445,9 +445,10 @@ POC-021 (2026-10-29, Shipcraft 2.14.0 from npm) asked Claude Code and Codex, in 
 | `[[suite]] globs` | Test and support file globs. | `[]` |
 | `[[suite]] filter` | `"shipcraft"` or `"command"` (section 6). | `"shipcraft"` |
 | `[build] command` | Runs once at the root before the first suite (section 6). | none |
-| `[execution] ci` | `local`, `github` or `off`. | `local` |
+| `[execution] ci` | Where CI runs: `local` (this machine, through `shipcraft pr`), `github` (GitHub Actions) or `off` (not run, not required). | `local` |
 | `[execution] review` | `local` or `off`. `github` is reserved and refused (`review-github`). | `local` |
 | `[execution] ci_timeout` | Local CI time limit, in seconds. | `1800` |
+| `[execution] suite_checks` | Names of the project's own GitHub checks that run the suite; only with `ci = "github"` (item 62). | `[]` |
 | `[execution] merge` | How `shipcraft merge` merges: `merge` (a merge commit) or `squash` (item 42). | `merge` |
 | `[roles] review` | The review agent: `codex`, `claude` or `gemini`. | first one installed |
 | `[review] spec` | Path of a project spec given to the reviewer. | none |
@@ -484,7 +485,61 @@ Whenever a run reaches a suite's `check` (in `red`, and in `ci` on HEAD), the ch
 | `github` | Runs in the project's GitHub Actions, from the documented workflow. Nothing runs locally for that layer. |
 | `off` | Does not run. The status is `success` with the description "off in .shipcraft.toml", and the gate does not require it. |
 
-With `ci = "github"` and `review = "local"`, `shipcraft pr` waits for GitHub's `shipcraft/ci` on HEAD (up to `ci_timeout`) and reviews only on `success`.
+With `ci = "github"` and `review = "local"`, `shipcraft pr` waits until CI is green at HEAD (item 62: `shipcraft/ci`, plus every `suite_checks` name) (up to `ci_timeout`) and reviews only on `success`.
+
+### The suite in the project's own GitHub checks (item 62)
+
+Shipcraft's own repository runs its battery in GitHub Actions as 10 parallel shards behind one required check, `acceptance` (about 4 minutes). With `ci = "github"` before this item, `shipcraft/ci` had to come from a workflow that runs `shipcraft ci`, and `shipcraft ci` runs the whole suite in one process: it requires every locked case in one report, so it cannot be split into shards. Measured on 10-29: 1245 s for the battery in one run on this machine, against about 4 minutes sharded. The only way to keep the shards was `ci = "off"`, which reads as "no CI" while CI does run. Item 62 lets a project say that its suite runs in GitHub checks it already has, and makes `shipcraft/ci` the commit re-check alone.
+
+**What `ci` means.** `[execution] ci` says only where CI runs: `local` (this machine, through `shipcraft pr`), `github` (the project's GitHub Actions) or `off` (CI does not run, and the gate does not require it). It never says what runs; `suite_checks` does.
+
+**The key.** `[execution] suite_checks` is a TOML array of strings, the names of GitHub checks that run the project's suite. Absent means `[]`, today's behavior everywhere.
+- It is read and validated by the reader and at the point of item 47, after `ci`, `review` and `merge`, and refuses `execution-invalid` naming the key when: the value is not an array; an element is not a string, is empty, has leading or trailing whitespace, or repeats an earlier element (exact byte comparison); an element is `shipcraft/ci` or `shipcraft/review`; the array is not empty and `ci` is not `"github"`; or the array is not empty and the config's `shipcraft_min` is absent or below `2.18` (a binary older than 2.18 ignores the key, so the project must keep those binaries out).
+- The value judged is the one in the config the command already judges by: the PR base's for `pr`, `merge` and `ci`, the working tree's for `status`.
+
+**A check is green.** For a commit and a name, shipcraft reads two GitHub sources:
+- check runs: `gh api --paginate "repos/{owner}/{repo}/commits/<sha>/check-runs?filter=latest&per_page=100"`, the runs whose `name` equals the name exactly;
+- commit statuses: the newest status per context, as `shipcraft/ci` is read today, whose `context` equals the name exactly.
+
+The name is **green** when at least one run or status matches and every match is done and successful (a run with `status` `completed` and `conclusion` `success`; a status with `state` `success`). It is **failed** when any match is done and not successful (any other conclusion, a status `failure` or `error`). It is **pending** when nothing failed and some match is not done (a run not `completed`, a status `pending`). It is **missing** when nothing matches. A `gh` failure or a response that is not the expected JSON makes it **unreadable**.
+
+**CI is green at a head** when `shipcraft/ci` is `success` there and, if `suite_checks` is not empty, every name in it is green there. `pr` and `merge` use this one rule.
+
+**`shipcraft merge`.** With `ci = "github"` and `suite_checks` not empty, the gate checks `shipcraft/ci` first, as today, then each name in the order of the array; the first that is not green refuses `merge-without-ci` with the reason `PR #<n> has no green check <name> at its HEAD (<short sha>): <failed|pending|missing|unreadable>`. Why: merging requires the project's suite green on the latest PR commit. Next: wait for the check, or fix what failed, then run `shipcraft merge <n>` again. `--no-review` still waives the review only.
+
+**The merge is pinned to the head it checked.** `shipcraft merge` runs `gh pr merge <n> --merge|--squash --match-head-commit <head>`, where `<head>` is the `headRefOid` its gate read. If the PR moved, GitHub refuses and `gh` fails: shipcraft writes no `merge` row and stops as it does today on a `gh` failure, naming the head it checked. This holds whatever `ci`, `review` and `suite_checks` are, and it removes item 42's known limit "`shipcraft merge` does not pin the PR head it checked".
+
+**`shipcraft pr` with `ci = "github"`.** When it waits before the review (today: `review = "local"`), it waits until CI is green at HEAD by the rule above, polling as today, up to `ci_timeout`. A failed `shipcraft/ci` or a failed suite check stops the wait as `ci-github`, naming which; the time limit stops it as `ci-github-no-status`, naming what was still pending or missing. An unreadable check is retried at the next poll. Nothing else in `pr` changes.
+
+**`shipcraft ci` re-checks commits and leaves the suite to the checks.** When the config the run judges by has `suite_checks` not empty, `shipcraft ci`:
+- checks every commit of the range exactly as today (lock transitions, sealed file hashes, the config under an open lock, hook integration files), with every refusal that check has today;
+- then skips `[build]`, every suite `check` and every suite command, and prints exactly one line, `shipcraft: suite not run here: it runs in the GitHub check(s) <names, comma-separated, in config order> ([execution] suite_checks)`, in place of `docs only: the suites do not run` (a docs-only PR prints this line, not that one);
+- does not judge what needs the suite's report: `lock-not-closed`, `case-broke`, `lock-closed-red`, `red-already-passes`, `case-missing` and `suite-red` are not reached; a lock open at HEAD is accepted as an open cycle;
+- on the default branch still runs the escape check, unchanged;
+- then prints `shipcraft: CI ok.` and item 44's last line for `github`.
+
+Every `ci` row of the run log has `suite_in_checks`: `true` when the suite was left to `suite_checks`, else `false`.
+
+**`shipcraft status`.** The layers line reads `ci github (suite in GitHub checks: <names>)` when `suite_checks` is not empty; otherwise as today.
+
+**Docs and the config `init` writes.** `init` writes, above `[execution]`, three comment lines in place of today's one:
+```
+# where CI and review run: "local" = on this machine, through shipcraft pr; "github" = in this
+# project's GitHub Actions (docs/github-ci.md); "off" = it does not run and shipcraft merge does not
+# require it. shipcraft/ci always re-checks every commit of the PR; the suite runs with it unless suite_checks names GitHub checks that run it.
+```
+`init` writes no `suite_checks`. `docs/github-ci.md` gets a section for a project whose suite already runs in its own workflow: set `suite_checks`, raise `shipcraft_min`, add a job that runs `shipcraft ci --base <base> --pr` and publishes `shipcraft/ci` (the job of today's guide, without the language setup), and make the named checks and `shipcraft/ci` required where GitHub protects branches.
+
+**Unchanged.** `ci = "local"` and `ci = "off"`; `ci = "github"` without `suite_checks`; `review`; the escape check, which still judges merged PRs by `shipcraft/ci` and `shipcraft/review` only; `init --github`, which still marks `shipcraft/ci` and `shipcraft/review` as required (not the suite checks); docs-only judgment.
+
+**Known limits.**
+- With `suite_checks`, which tests ran is the named checks' business: a check that runs a subset (by impact, as Shipcraft's own `acceptance` does) or skips a locked case is trusted. `shipcraft/ci` proves the commits; the named checks prove the suite.
+- A commit made with `--no-verify` whose locked cases pass and whose lock stayed open is accepted as an open cycle, where a full `shipcraft ci` refuses `lock-not-closed`.
+- The escape check does not read the suite checks, so a merge through GitHub's button with a red suite check and a green `shipcraft/ci` is not recorded as an escape.
+
+**Versions.** The binary goes to 2.18.0. No lock field changes; `suite_checks` is a new optional config key.
+
+**Battery.** The spec review lists the cases that assert today's `pr merge` arguments, today's `init` comment line, the `status` layers line and the `ci` row fields; the RED adjusts each and names it.
 
 ### `shipcraft pr`
 
@@ -538,7 +593,7 @@ What squash gives up: the base's history keeps no RED commit. The PR's `shipcraf
 
 The escape check of `shipcraft ci` on the default branch reads every first-parent commit of `<base>..HEAD` (`git rev-list --first-parent`), not only merge commits, whatever the config says. A commit GitHub reports as a PR's `merge_commit_sha` is judged by the statuses and the `--no-review` comment exactly as before, whether it was merged by `shipcraft merge` or by GitHub's button; so a PR squashed through the button without the gate is now warned of and recorded as an `escape`. A commit no PR merged (a direct push) is not judged, as before. If `gh` fails, the check prints the warning it prints today and stops; a missing `<base>` (a shallow clone) skips the check, as today.
 
-Known limits kept by item 42: `shipcraft merge` does not pin the PR head it checked (a push between the check and the merge lands unchecked); a `--no-review` comment exempts the PR's later heads too; and the merged tree is not tested when the base moved after the PR's CI. Each applies to both methods.
+Known limits kept by item 42: a `--no-review` comment exempts the PR's later heads too; and the merged tree is not tested when the base moved after the PR's CI. Each applies to both methods.
 
 ### Fork PRs
 
@@ -601,7 +656,7 @@ Output from a project command that `shipcraft` passes through always ends before
 | `config-changed` | `.shipcraft.toml` changed with a lock open. |
 | `config-invalid` | `.shipcraft.toml` is not a valid config. |
 | `error-before-assertions` | At RED, the suite errored before any assertion (import, collection). |
-| `execution-invalid` | An `[execution] ci`, `review` or `merge` value `shipcraft` does not know (items 42 and 47). |
+| `execution-invalid` | An `[execution] ci`, `review` or `merge` value `shipcraft` does not know (items 42 and 47), or a `suite_checks` value item 62 refuses. |
 | `foreign-hook` | `init` cannot prove which hook runs, or another tool owns it. |
 | `group-failed` | At RED, a failing case is a vitest `describe` block whose `beforeAll` failed and whose tests were skipped, not a test (item 52). |
 | `lang-multiple` | `init` found more than one language. |
@@ -655,6 +710,7 @@ Each hook, CI, review and merge run appends one JSON line to `.git/shipcraft/run
 | `reason` | The first refusal line, or the `--no-review` reason. |
 | `product_lines`, `shape_warnings` | On rows from `shipcraft pr`: product lines, and files that got a shape warning (`null` when there is no threshold). |
 | `docs_only` | On `ci` rows: whether the PR was judged docs only (item 40). |
+| `suite_in_checks` | On `ci` rows: whether the suite was left to `[execution] suite_checks` (item 62). |
 | `queue_secs` | On `pr` rows: seconds the local CI waited for a slot, rounded down; `0` when it skipped the queue, `null` without local CI (item 41). |
 | `tokens`, `agent`, `pr`, `diff_sha256`, `text_sha256` | On `review` rows: tokens used (or `null`), the agent, the PR, and the two reuse keys (diff, and title and body; item 54). |
 | `method` | On `merge` rows written by `shipcraft merge`: `merge` or `squash` (item 42). |
@@ -713,4 +769,4 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.17.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.18.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
