@@ -1,4 +1,4 @@
-//! `shipcraft init`: writes `.shipcraft.toml`, `.shipcraft/locks/` and the `AGENTS.md` block,
+//! `shipcraft init`: writes `.shipcraft.toml`, `.shipcraft/locks/`, the `AGENTS.md` block and its `CLAUDE.md` import (item 61),
 //! and installs the pre-commit hook. Nothing else is written, in the project or in `.git`: the
 //! GitHub workflow is in `docs/github-ci.md`, for who turns it on (item 27). Review is on when an agent is installed (item 2) and, with `--github`, it marks
 //! the statuses as required where GitHub protects branches (item 5.3).
@@ -92,7 +92,7 @@ pub fn run(repo: &Repo, lang_flag: Option<&str>, github: bool) -> Result<()> {
         println!("shipcraft: undid what this run created");
         return Err(stop);
     }
-    let agents = agents_block(repo);
+    let agents = agents_block(repo, local);
     if let Some(command) = &build {
         println!("shipcraft: [build] in {CONFIG_FILE} runs `{command}` before suites");
     }
@@ -383,8 +383,28 @@ fn protect(repo: &Repo, review: bool) {
 }
 
 const AGENTS_FILE: &str = "AGENTS.md";
-const AGENTS_MARK: &str = "<!-- shipcraft -->";
+const CLAUDE_FILE: &str = "CLAUDE.md";
+const START_LINE: &str = "<!-- shipcraft -->";
+const END_LINE: &str = "<!-- /shipcraft -->";
+/// Item 61: the machine install's block; a project-local install gets it with
+/// `npx -- shipcraft` and the repository-root line (`agents_text`).
 const AGENTS_BLOCK: &str = "<!-- shipcraft -->
+## shipcraft: TDD with a lock (required in this repository)
+- Cycle: RED (a failing test) → `shipcraft red` → GREEN (code) → `git commit`. The git hook checks every commit.
+- A behavior change: write the failing test first (and a stub), run `shipcraft red` and commit the test together with the lock `.shipcraft/locks/*.json`; only then implement.
+- Locked tests (listed in the open lock) are the contract: never change them; change the code until they pass. If a test looks wrong, stop and say so.
+- The RED and the GREEN are done by different agent sessions, both in the same checkout: in Claude Code a subagent per phase; in Codex a new `codex exec` session per phase (never `resume`).
+- The RED session commits the tests, the stubs they need and the lock in one commit, and stops.
+- The GREEN session starts from that commit and may change anything the open lock does not protect (product code, dependencies and their lockfiles, config), never a locked file, then commits. A test it finds wrong is reported back, and a RED session fixes it with `shipcraft red --redo`.
+- A session told it is the RED or the GREEN does that phase only and starts no other session; the session the user talks to starts them.
+- Never use `--no-verify`, never edit or delete `.shipcraft/locks/*` by hand (`shipcraft red`, `shipcraft red --redo` and the hook write them), never touch the hook or `core.hooksPath`.
+- When in doubt, run `shipcraft status`.
+<!-- /shipcraft -->
+";
+const ROOT_LINE: &str =
+    "- Run Shipcraft commands from the repository root, where `npx -- shipcraft` runs this project's install.\n";
+/// The 2.14.0 block (`git show v2.14.0:nucleo/src/init.rs`): a start line, no end line.
+const AGENTS_BLOCK_2_14: &str = "<!-- shipcraft -->
 ## shipcraft: TDD with a lock (required in this repository)
 - Cycle: RED (a failing test) → `shipcraft red` → GREEN (code) → `git commit`. The git hook checks every commit.
 - A behavior change: write the failing test first (and a stub), run `shipcraft red` and commit the test together with the lock `.shipcraft/locks/*.json`; only then implement.
@@ -392,48 +412,166 @@ const AGENTS_BLOCK: &str = "<!-- shipcraft -->
 - Never use `--no-verify`, never edit or delete `.shipcraft/locks/*`, never touch the hook or `core.hooksPath`.
 - When in doubt, run `shipcraft status`.
 ";
+const CLAUDE_BLOCK: &str = "<!-- shipcraft -->\nShipcraft workflow (required): @AGENTS.md\n<!-- /shipcraft -->\n";
+const DIFFERS: &str = "; it differs from this version's: edit it by hand to match docs/spec.md";
 
-/// Tells agents the workflow where they already look: creates `AGENTS.md`, or
-/// appends the block once to an existing one. A symlink is left alone, and a
-/// failure here never undoes the init. Returns `, AGENTS.md` when it wrote.
-fn agents_block(repo: &Repo) -> String {
-    let path = repo.path(AGENTS_FILE);
+/// Item 61: the block's current variant; from a project-local install (item 58)
+/// every command is `npx -- shipcraft` (fixed point 39), run from the root.
+fn agents_text(local: bool) -> String {
+    if !local {
+        return AGENTS_BLOCK.to_string();
+    }
+    let text = AGENTS_BLOCK.replace("`shipcraft ", "`npx -- shipcraft ");
+    let (head, rest) = text.split_at(text.find("\n- ").unwrap() + 1);
+    format!("{head}{ROOT_LINE}{rest}")
+}
+
+/// Tells agents the workflow where they already look: `AGENTS.md` gets the
+/// block, and `CLAUDE.md` imports it where Claude Code reads it (item 61). A
+/// failure here never undoes the init. Returns the files it wrote, `, AGENTS.md`.
+fn agents_block(repo: &Repo, local: bool) -> String {
+    let new = agents_text(local);
+    let other = agents_text(!local);
+    let (wrote, current) = onboard(repo, AGENTS_FILE, &new, &[&other], Some(AGENTS_BLOCK_2_14));
+    let mut listed = if wrote { format!(", {AGENTS_FILE}") } else { String::new() };
+    let claude = match repo.path(CLAUDE_FILE).symlink_metadata() {
+        Ok(_) => true,
+        Err(e) => e.kind() != std::io::ErrorKind::NotFound,
+    };
+    if claude || on_path("claude") {
+        if !current {
+            println!(
+                "shipcraft: {CLAUDE_FILE} not written: {AGENTS_FILE} does not hold this version's shipcraft block"
+            );
+        } else if onboard(repo, CLAUDE_FILE, CLAUDE_BLOCK, &[], None).0 {
+            listed.push_str(&format!(", {CLAUDE_FILE}"));
+        }
+    }
+    listed
+}
+
+/// Writes `new` into `file`: created, appended once, or replacing a known block
+/// (`known`, or `legacy` and what follows it); anything else is kept. A symlink
+/// is left alone. Returns whether it wrote, and whether the file is a regular
+/// one that now holds `new`.
+fn onboard(repo: &Repo, file: &str, new: &str, known: &[&str], legacy: Option<&str>) -> (bool, bool) {
+    let path = repo.path(file);
     let written = match path.symlink_metadata() {
         Ok(meta) if !meta.is_file() => {
-            println!("shipcraft: {AGENTS_FILE} is not a regular file, kept; add the shipcraft block from docs/spec.md by hand");
-            return String::new();
+            println!(
+                "shipcraft: {file} is not a regular file, kept; add the shipcraft block from docs/spec.md by hand"
+            );
+            return (false, false);
         }
         Ok(_) => match fs::read_to_string(&path) {
-            Ok(text) if text.contains(AGENTS_MARK) => {
-                println!("shipcraft: {AGENTS_FILE} already has the shipcraft block, kept");
-                return String::new();
-            }
-            Ok(text) => {
-                let sep = if text.is_empty() || text.ends_with("\n\n") {
-                    ""
-                } else if text.ends_with('\n') {
-                    "\n"
-                } else {
-                    "\n\n"
-                };
-                fs::write(&path, format!("{text}{sep}{AGENTS_BLOCK}")).map(|()| "added the shipcraft block to")
-            }
+            Ok(text) => match find_block(&text, new, known, legacy) {
+                Found::None => {
+                    let sep = if text.is_empty() || text.ends_with("\n\n") {
+                        ""
+                    } else if text.ends_with('\n') {
+                        "\n"
+                    } else {
+                        "\n\n"
+                    };
+                    rewrite(&path, &format!("{text}{sep}{new}")).map(|()| "added the shipcraft block to")
+                }
+                Found::Equal => {
+                    println!("shipcraft: {file} already has the shipcraft block, kept");
+                    return (false, true);
+                }
+                Found::Known(range) => {
+                    let text = format!("{}{new}{}", &text[..range.start], &text[range.end..]);
+                    rewrite(&path, &text).map(|()| "replaced the shipcraft block in")
+                }
+                Found::Differs => {
+                    println!("shipcraft: {file} already has the shipcraft block, kept{DIFFERS}");
+                    return (false, false);
+                }
+            },
             Err(e) => Err(e),
         },
-        Err(_) => fs::write(&path, AGENTS_BLOCK).map(|()| "created"),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => fs::write(&path, new).map(|()| "created"),
+        Err(e) => Err(e),
     };
     match written {
         Ok(verb) => {
-            println!("shipcraft: {verb} {AGENTS_FILE}");
-            format!(", {AGENTS_FILE}")
+            println!("shipcraft: {verb} {file}");
+            (true, true)
         }
         Err(e) => {
-            println!(
-                "shipcraft: could not write {AGENTS_FILE} ({e}); add the shipcraft block from docs/spec.md by hand"
-            );
-            String::new()
+            println!("shipcraft: could not write {file} ({e}); add the shipcraft block from docs/spec.md by hand");
+            (false, false)
         }
     }
+}
+
+enum Found {
+    None,
+    Equal,
+    Known(std::ops::Range<usize>),
+    Differs,
+}
+
+/// Item 61: a marker is a whole line (`\n`-ended, a trailing `\r` ignored)
+/// equal to the start or end line; a block runs from a start line through the
+/// next end line. Only one start and one end, or the legacy start alone, are read.
+fn find_block(text: &str, new: &str, known: &[&str], legacy: Option<&str>) -> Found {
+    let mut markers = Vec::new();
+    let mut at = 0;
+    for line in text.split_inclusive('\n') {
+        let bare = line.strip_suffix('\n').unwrap_or(line);
+        let bare = bare.strip_suffix('\r').unwrap_or(bare);
+        if bare == START_LINE || bare == END_LINE {
+            markers.push((bare == START_LINE, at, at + line.len()));
+        }
+        at += line.len();
+    }
+    match markers.as_slice() {
+        m if !m.iter().any(|(start, ..)| *start) => Found::None,
+        [(true, from, _), (false, _, to)] => match &text[*from..*to] {
+            block if block == new => Found::Equal,
+            block if known.contains(&block) => Found::Known(*from..*to),
+            _ => Found::Differs,
+        },
+        [(true, from, _)] => match legacy {
+            Some(old) if text[*from..].starts_with(old) => Found::Known(*from..from + old.len()),
+            _ => Found::Differs,
+        },
+        _ => Found::Differs,
+    }
+}
+
+/// Rewrites an existing file through a temporary one in its folder, with the
+/// old permission bits, renamed over it; a failure leaves the old bytes. A file
+/// the owner may not write is not rewritten.
+fn rewrite(path: &Path, text: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    let mode = fs::metadata(path)?.permissions().mode() & 0o7777;
+    if mode & 0o200 == 0 {
+        return Err(std::io::ErrorKind::PermissionDenied.into());
+    }
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    // A name of its own, created exclusively: an existing entry is never touched.
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let mut attempt = 0u32;
+    let (temp, mut file) = loop {
+        let temp = path.with_file_name(format!(".{name}.shipcraft-{}-{nanos}-{attempt}.tmp", std::process::id()));
+        match fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temp) {
+            Ok(file) => break (temp, file),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && attempt < 100 => attempt += 1,
+            Err(e) => return Err(e),
+        }
+    };
+    let result = file
+        .write_all(text.as_bytes())
+        .and_then(|()| file.sync_all())
+        .and_then(|()| fs::set_permissions(&temp, fs::Permissions::from_mode(mode)))
+        .and_then(|()| fs::rename(&temp, path));
+    if result.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    result
 }
 
 /// Writes a project file unless it already exists (a link, even a broken one,
