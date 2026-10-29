@@ -144,7 +144,7 @@ Before item 55, `red` ran every suite in full to learn which cases fail, and mos
   - after a narrowed run: `shipcraft: red ran the changed test files: <n> of <m>`;
   - after a fallback: `shipcraft: red ran every suite: <reason>`.
 - `<n>` is the number of distinct selected files, by repository path. `<m>` is the number of distinct locked files across the suites, by repository path.
-- `<reason>` is the first that applies, in this order: `--redo`, `--all`, `no base`, `no merge base`, `git failed`, `config changed`, `protected file removed`, `unreadable path`, `nothing selected`, `no report`, `case without file`, `file without cases`.
+- `<reason>` is the first that applies, in this order: `--all`, `no base`, `no merge base`, `git failed`, `config changed`, `protected file removed`, `unreadable path`, `nothing selected`, `no report`, `case without file`, `file without cases`.
 - The `red` row of the run log gets three fields when the selection is decided:
   - `selection`: `"changed"` or `"all"`;
   - `selected_files`: `<n>` when a narrowed run started (kept after a later fallback), else 0;
@@ -154,7 +154,7 @@ Before item 55, `red` ran every suite in full to learn which cases fail, and mos
 **Options.**
 - `--all` forces the full run.
 - `--base <ref>` names the base.
-- `--redo` always runs the full run, as today, since a redo must see every case of the lock it rewrites. With `--redo`, `--base` is accepted and ignored, and so is `--all`.
+- `--redo` narrows too, with the lock's files added to the selection (item 60). `--base` and `--all` apply to it as to `red`.
 - A repeated option or a `--base` without a value is invalid arguments (exit `2`).
 
 **Section 6.** The exception that lets `red` pass `SHIPCRAFT_FILES` now covers two runs, under the same rules:
@@ -223,6 +223,28 @@ A PR is judged by its base's config (section 4), so a `[[suite]]` added in the s
 - The second warning reads the base ref as this clone last fetched it.
 - A suite renamed in the PR reads as absent from the base.
 - `ci` attributes cases with the suite names of the commit being checked. A lock closed earlier on the branch, whose suite a later commit renamed, gets today's text.
+
+### `red --redo` runs the changed test files too (item 60)
+
+Before item 60, `red --redo` always ran every suite, since a redo must see every case of the lock it rewrites (item 46). On Shipcraft's own repository a redo of item 59's RED took 1,476 s (24.6 min) while its `red` took 148 s, and the rewritten lock grew from 40 cases to 1,824: every case of the battery became part of the cycle. A redo fixes a test the RED wrote, so the cases it must see are in the lock's own files.
+
+- **The selection.** `red --redo` decides the selection as `red` does (item 55: the base, the changed paths, the fallbacks, `--base`, `--all`), with one addition: each suite's selected files also include the *lock's files* of that suite.
+  - The lock's files are the files that hold HEAD's lock `cases`, mapped with the hook's mapper (section 6) against the lock's own `files`, as the hook maps `failing_at_red` cases. A case of the lock that maps to no file, or to more than one, makes the redo fall back to the full run (`case without file`).
+  - A lock file that is no longer a readable regular file in the working tree makes it fall back too (`protected file removed`).
+  - So a redo whose changed paths select nothing still narrows to the lock's files: `nothing selected` no longer applies to a redo whose lock maps to at least one file.
+- **The narrowed run** is item 55's, on that selection: the same filters, lists and coverage judgement, and the same fallbacks to the full run after it started.
+- **What it requires and writes** is item 46's, on the cases the run keeps. `redo-drops-case` compares HEAD's lock `cases` with the kept cases, which include every case of the lock's files, so a case is dropped only when its own file no longer reports it. The new lock's `cases` are the kept cases: a redo of a narrowed lock stays narrow, and a redo of a lock written by a full run keeps every case of the files it ran (its lock's files: all of them, when every case maps).
+- **Reported** as item 55 reports: `red ran the changed test files: <n> of <m>` counts the selection with the lock's files; the reason `--redo` is gone from the fallback list; the run log row keeps `redo: true` and gets `selection`, `selected_files` and `fallback` as any `red` row.
+
+**Unchanged.** The redo commit and how the hook and CI judge it (item 46), `redo-drops-case`, `redo-mixed`, item 53's second run, item 59's warnings, the lock format.
+
+**Battery.** Cases that assert a redo ran every suite, or its `fallback: "--redo"` row, change to the narrowed result: the RED lists them.
+
+**Versions.** The item raises the binary to 2.16.0. No lock or config field changes.
+
+**Known limits.**
+- A case of another file that the repaired test's support code breaks is not run at redo; CI refuses it later as `suite-red`, as for item 55.
+- A redo of a lock written by a full run runs every file of that lock, so it is about as slow as before; only locks written by a narrowed `red` gain.
 
 ### The lock closes by itself
 
@@ -638,4 +660,4 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.15.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.16.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
