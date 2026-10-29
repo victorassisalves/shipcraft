@@ -59,7 +59,7 @@ Installing is two steps: add the package (or the binary), then run `shipcraft in
 ```bash
 # A Node/TypeScript project (macOS): pin Shipcraft in the project, like any dev dependency
 pnpm add -D shipcraft          # step 1, or: npm i -D shipcraft
-pnpm exec shipcraft init       # step 2: the hooks call this project's install
+pnpm exec shipcraft init       # step 2, or: npx -- shipcraft init; the hooks call this project's install
 
 # macOS (Apple silicon or Intel), any language: the latest release, checksum-verified, into ~/.local/bin
 gh repo clone victorassisalves/shipcraft && bash shipcraft/install.sh
@@ -69,13 +69,19 @@ git clone https://github.com/victorassisalves/shipcraft && cd shipcraft
 cargo install --path nucleo
 ```
 
-`install.sh --version <v>` pins a version and `install.sh --uninstall` removes the binary. It needs `gh` logged in.
+`install.sh --version <v>` pins a version and `install.sh --uninstall` removes the binary. It needs `gh` logged in. With the npm install, `shipcraft` is not on your `PATH`: run it through the project (`pnpm exec shipcraft …` or `npx -- shipcraft …`).
 
-Then, in your project (step 2):
+With `install.sh` or `cargo install`, step 2 is, in your project:
 
 ```bash
 shipcraft init          # detects the language, writes .shipcraft.toml, wires the hook
-git add .shipcraft.toml && git commit -m "add shipcraft"
+```
+
+Either way, `init` ends with the files to commit (`shipcraft: ready. Commit …`): `.shipcraft.toml`, `.shipcraft/`, and the hook manager's file and `AGENTS.md`/`CLAUDE.md` when it wrote them. Commit all of them, so every clone gets the hooks and the agents' instructions:
+
+```bash
+git add .shipcraft.toml .shipcraft    # plus every other file init listed (AGENTS.md, CLAUDE.md, the hook manager's file)
+git commit -m "add shipcraft"
 ```
 
 A cycle (with the npm install, run each `shipcraft` command through the project's install, from the repository root: `pnpm exec shipcraft red` or `npx -- shipcraft red`; `git` stays as is):
@@ -88,7 +94,7 @@ git add -A && git commit -m "red: invoice rounding"
 # GREEN: write the code; commit as often as you like
 git commit -am "fix rounding"      # the lock closes on the first fully green commit
 
-# open the PR: CI and review run, and their statuses are published
+# open the PR (needs a GitHub remote and gh logged in): CI and review run, and their statuses are published
 shipcraft pr --title "Invoice rounding"
 
 # merge only when both are green
@@ -96,6 +102,8 @@ shipcraft merge 42
 ```
 
 `shipcraft status` shows the open locks and how protected the repository really is.
+
+Without a GitHub remote, the cycle still works up to the commits: `red`, the hook and `shipcraft ci --base <ref>` run locally; `pr` and `merge` need GitHub.
 
 Upgrading: with the npm install, `pnpm add -DE shipcraft@latest` (or `npm i -D --save-exact shipcraft@latest`) and commit `package.json` with the lockfile; every clone then gets the same version. To go back, pin the previous one exactly: `pnpm add -DE shipcraft@<version>`, and commit both files again. With `install.sh`, run it again, or `install.sh --version <version>`. A version older than the config's `shipcraft_min` refuses to run: going back past it also means lowering `shipcraft_min` in `.shipcraft.toml`, with no lock open. Release notes say which version to go back to when a release changes something you may want to undo.
 
