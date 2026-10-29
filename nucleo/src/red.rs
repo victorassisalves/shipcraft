@@ -1,15 +1,17 @@
 //! `shipcraft red`: runs the suite, demands that it fail by assertion, and writes an
 //! open lock with the hash of every test file and of `.shipcraft.toml` (rule 1).
 
-use crate::config::{Config, CONFIG_FILE};
+use crate::config::{self, Config, CONFIG_FILE};
 use crate::git::{Repo, Snapshot};
+use crate::glob;
 use crate::junit::{Outcome, Report};
 use crate::lock::{lock_files, new_digest, new_lock_path, Lock, LOCK_DIR};
-use crate::narrow::{self, Chosen, Fallback, Plan};
+use crate::narrow::{self, ChangedPath, Chosen, Fallback, Plan};
 use crate::refusal::{failed, refuse, short_list, Result};
 use crate::suite::{self, Narrowed};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::{self, Write};
 use std::path::Path;
 
 /// The path of the lock written, and how many cases the second run dropped.
@@ -18,7 +20,9 @@ use std::path::Path;
 pub fn run(repo: &Repo, base: Option<&str>, all: bool, chosen: &mut Option<Chosen>) -> Result<(String, usize)> {
     let config = Config::load(repo)?;
     refuse_if_a_lock_is_open(repo)?;
-    let plan = narrow::plan(repo, &config, base, all);
+    let changed = narrow::changed(repo, base);
+    warn_outside_globs(repo, &config, &changed);
+    let plan = narrow::plan(repo, &config, &changed, all);
     let report = red_report(repo, &config, "shipcraft red", plan, chosen)?;
     let failing = failing_at_red(&report, "shipcraft red")?;
 
@@ -44,6 +48,7 @@ pub fn run(repo: &Repo, base: Option<&str>, all: bool, chosen: &mut Option<Chose
         short_list(&lock.failing_at_red)
     );
     println!("shipcraft: commit the lock with the tests; the hook checks the RED commit.");
+    warn_absent_suites(repo, &config, base, &lock);
     Ok((path, dropped.len()))
 }
 
@@ -60,6 +65,7 @@ pub fn redo(
 ) -> Result<()> {
     let config = Config::load(repo)?;
     let (lock_path, old) = head_lock(repo, path)?;
+    warn_outside_globs(repo, &config, &narrow::changed(repo, None));
     let report = red_report(repo, &config, "shipcraft red --redo", Plan::All(Fallback::Redo), chosen)?;
     let run = report.cases_run();
     let dropped: Vec<&String> = old.cases.iter().filter(|case| !run.contains(case)).collect();
@@ -101,6 +107,7 @@ pub fn redo(
     println!("shipcraft: cases no longer failing at RED: {}", list(minus(&old.failing_at_red, &lock.failing_at_red)));
     println!("shipcraft: cases newly failing at RED: {}", list(minus(&lock.failing_at_red, &old.failing_at_red)));
     println!("shipcraft: commit the lock with the repaired tests, and nothing else; the hook checks the redo commit.");
+    warn_absent_suites(repo, &config, None, &lock);
     Ok(())
 }
 
@@ -418,4 +425,65 @@ fn locked_files(repo: &Repo, config: &Config) -> Result<BTreeMap<String, String>
         files.insert(path.to_string(), new_digest(&bytes));
     }
     Ok(files)
+}
+
+/// Item 59: a warning, one line on stderr; a failed write is ignored.
+fn warning(text: String) {
+    let _ = writeln!(io::stderr(), "shipcraft: warning: {text}");
+}
+
+/// Item 59: a path's last component is named as a test: `test_*.py`,
+/// `*_test.py`, `*_test.go`, or `*.test.<ext>` and `*.spec.<ext>` for JS/TS.
+fn test_named(path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or_default();
+    let js = ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"];
+    ["test_*.py", "*_test.py", "*_test.go"].iter().any(|pattern| glob::matches(pattern, name))
+        || js.iter().any(|ext| [".test.", ".spec."].iter().any(|kind| glob::matches(&format!("*{kind}{ext}"), name)))
+}
+
+/// Item 59: the changed test-named regular files that match no suite's
+/// globs, before the build; nothing when the changed paths cannot be read.
+fn warn_outside_globs(repo: &Repo, config: &Config, changed: &std::result::Result<Vec<ChangedPath>, Fallback>) {
+    let Ok(changed) = changed else { return };
+    let outside: BTreeSet<&str> = changed
+        .iter()
+        .filter_map(|(_, path)| std::str::from_utf8(path).ok())
+        .filter(|path| test_named(path) && !config.is_test_file(path))
+        .filter(|path| fs::symlink_metadata(repo.path(path)).is_ok_and(|m| m.is_file()))
+        .collect();
+    if outside.is_empty() {
+        return;
+    }
+    let outside: Vec<&str> = outside.into_iter().collect();
+    warning(format!(
+        "{} changed test file(s) match no suite's globs and are not locked: {}; widen a suite's globs, or add a [[suite]] for them (when the base has a .shipcraft.toml, CI judges a PR by the base's, so a new suite goes in a PR of its own first)",
+        outside.len(),
+        short_list(&outside)
+    ));
+}
+
+/// Item 59: the named suites with a case in the lock that the base ref's
+/// `.shipcraft.toml` does not have; nothing when it cannot be read.
+fn warn_absent_suites(repo: &Repo, config: &Config, base: Option<&str>, lock: &Lock) {
+    let at_base = match repo.resolve(narrow::base_ref(base)) {
+        Ok(Some(commit)) => repo.read(&Snapshot::Commit(commit), CONFIG_FILE).ok().flatten(),
+        _ => None,
+    };
+    let Some(present) = at_base.as_deref().and_then(config::suite_names) else { return };
+    let named: Vec<String> = config.suites().into_iter().map(|suite| suite.nome).filter(|n| !n.is_empty()).collect();
+    let absent: BTreeSet<&String> = lock
+        .cases
+        .iter()
+        .filter_map(|case| config::owner(case, &named))
+        .filter(|name| !present.contains(*name))
+        .collect();
+    if absent.is_empty() {
+        return;
+    }
+    let absent: Vec<&String> = absent.into_iter().collect();
+    let shown = narrow::shown_ref(base);
+    warning(format!(
+        "the lock has cases in suite(s) absent from {shown}'s .shipcraft.toml: {}; CI judges a PR by its base's config and will refuse them as case-missing; bring the suite to {shown} in a PR of its own, then rebase this branch",
+        short_list(&absent)
+    ));
 }

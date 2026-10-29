@@ -1,7 +1,7 @@
 //! The rules a commit keeps while a lock is open (rules 2 to 4), shared by the
 //! hook (`shipcraft check`) and the CI (`shipcraft ci`).
 
-use crate::config::CONFIG_FILE;
+use crate::config::{self, CONFIG_FILE};
 use crate::git::{text, Repo, Snapshot};
 use crate::init::LEFTHOOK_FILES;
 use crate::init_tool::{HUSKY, PRE_COMMIT_CONFIG};
@@ -266,12 +266,22 @@ pub fn check_lefthook(repo: &Repo, parents: &[Snapshot], snapshot: &Snapshot, lo
 }
 
 /// Rule 4, report: every required case ran, and none was skipped. A missing
-/// case of a suite in `comando` (`filtra = "comando"`) recalls `SHIPCRAFT_CASES`.
-fn check_cases_ran(report: &Report, lock_path: &str, required: &[String], comando: &[String]) -> Result<()> {
+/// case of a suite in `comando` (`filtra = "comando"`) recalls `SHIPCRAFT_CASES`;
+/// one of a suite the judging config does not have names that cause (item 59).
+fn check_cases_ran(
+    report: &Report,
+    lock_path: &str,
+    required: &[String],
+    comando: &[String],
+    suites: Option<&Suites>,
+) -> Result<()> {
     let with = |wanted: Option<Outcome>| -> Vec<&String> {
         required.iter().filter(|case| report.outcome(case) == wanted).collect()
     };
     let missing = with(None);
+    if let Some(suites) = suites {
+        absent_suites(lock_path, &missing, suites)?;
+    }
     if !missing.is_empty() {
         return refuse(
             "case-missing",
@@ -296,6 +306,37 @@ fn check_cases_ran(report: &Report, lock_path: &str, required: &[String], comand
     Ok(())
 }
 
+/// Item 59: the suite names of the commit being checked (`lock`) and of the
+/// config the CI judges with (`judged`).
+pub struct Suites {
+    pub lock: BTreeSet<String>,
+    pub judged: BTreeSet<String>,
+}
+
+/// Item 59: missing cases of a suite of the commit's config that the judging
+/// config does not have refuse with that cause, before today's text.
+fn absent_suites(lock_path: &str, missing: &[&String], suites: &Suites) -> Result<()> {
+    let of_absent: Vec<(&String, &String)> = missing
+        .iter()
+        .filter_map(|case| config::owner(case, &suites.lock).map(|name| (*case, name)))
+        .filter(|(_, name)| !suites.judged.contains(*name))
+        .collect();
+    if of_absent.is_empty() {
+        return Ok(());
+    }
+    let names: Vec<&String> = of_absent.iter().map(|(_, name)| *name).collect::<BTreeSet<_>>().into_iter().collect();
+    let cases = of_absent.iter().map(|(case, _)| *case).collect::<BTreeSet<_>>().len();
+    refuse(
+        "case-missing",
+        format!(
+            "case(s) from lock {lock_path} belong to suite(s) that the .shipcraft.toml CI judges with does not have: {} ({cases} case(s))",
+            short_list(&names)
+        ),
+        "CI runs the suites of the config it judges with, the base's for a PR, so a suite that is only in this branch's config does not run",
+        "if the suite is new in this branch, bring the `[[suite]]` entry to the base in a PR of its own, with the package and at least one passing test (or a runner set to pass with no tests), so the base can run it; merge it, then rebase this branch and run `shipcraft ci` again",
+    )
+}
+
 /// What the suite says about a lock that binds the commit.
 pub enum Verdict {
     /// Some locked case still fails: a RED or an intermediate commit.
@@ -311,8 +352,9 @@ pub enum Scope<'a> {
     /// the failures in a file that holds a RED case (`suite::run_red`).
     /// `comando`, the prefixes (`nome:`) of the suites with `filtra = "comando"`.
     Hook { red: &'a [String], blocking: &'a BTreeSet<String>, comando: &'a [String] },
-    /// The CI: the whole suite.
-    Ci,
+    /// The CI: the whole suite, with the suite names that name the cause of
+    /// a missing case (item 59), when the commit's config gives any.
+    Ci { suites: Option<&'a Suites> },
 }
 
 /// Rules 2 to 4 on the report: the cases that must run ran (the RED's failing
@@ -328,11 +370,11 @@ pub fn judge_suite(report: &Report, lock_path: &str, change: &Change, lock: &Loc
     let hook = matches!(scope, Scope::Hook { .. });
     let broken: Vec<String> = match scope {
         Scope::Hook { red, blocking, comando } => {
-            check_cases_ran(report, lock_path, &lock.failing_at_red, comando)?;
+            check_cases_ran(report, lock_path, &lock.failing_at_red, comando, None)?;
             blocking.iter().filter(|case| !red.contains(case)).cloned().collect()
         }
-        Scope::Ci => {
-            check_cases_ran(report, lock_path, &lock.cases, &[])?;
+        Scope::Ci { suites } => {
+            check_cases_ran(report, lock_path, &lock.cases, &[], suites)?;
             lock.cases.iter().filter(|case| !lock.failing_at_red.contains(case) && failed(case)).cloned().collect()
         }
     };

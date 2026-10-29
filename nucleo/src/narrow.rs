@@ -87,21 +87,36 @@ impl Chosen {
     }
 }
 
+/// A changed path as git reports it: whether it was at the base, and its bytes.
+pub type ChangedPath = (bool, Vec<u8>);
+
+/// The ref `red` narrows against: `base`, or origin's HEAD when not given.
+pub fn base_ref(base: Option<&str>) -> &str {
+    base.unwrap_or(DEFAULT_BASE)
+}
+
+/// The base ref as messages name it (item 59).
+pub fn shown_ref(base: Option<&str>) -> &str {
+    base.unwrap_or("origin/HEAD")
+}
+
+/// The paths changed since the merge base of HEAD and the base ref, or why
+/// they cannot be read; item 59 reads them even when the plan is not narrowed.
+pub fn changed(repo: &Repo, base: Option<&str>) -> std::result::Result<Vec<ChangedPath>, Fallback> {
+    let base = base_commit(repo, base_ref(base))?;
+    changed_paths(repo, &base).ok_or(Fallback::GitFailed)
+}
+
 /// The plan for `red` (not `--redo`): `--all`, or the changed test files
-/// since the merge base of HEAD and `base` (origin's HEAD when not given).
-pub fn plan(repo: &Repo, config: &Config, base: Option<&str>, all: bool) -> Plan {
+/// among `changed`.
+pub fn plan(repo: &Repo, config: &Config, changed: &std::result::Result<Vec<ChangedPath>, Fallback>, all: bool) -> Plan {
     if all {
         return Plan::All(Fallback::All);
     }
-    let base = match base_commit(repo, base.unwrap_or(DEFAULT_BASE)) {
-        Ok(base) => base,
-        Err(why) => return Plan::All(why),
-    };
-    let changed = match changed_paths(repo, &base) {
-        Some(changed) => changed,
-        None => return Plan::All(Fallback::GitFailed),
-    };
-    select(repo, config, changed)
+    match changed {
+        Ok(changed) => select(repo, config, changed),
+        Err(why) => Plan::All(*why),
+    }
 }
 
 /// The one merge base of HEAD and `rev`.
@@ -120,9 +135,9 @@ fn base_commit(repo: &Repo, rev: &str) -> std::result::Result<String, Fallback> 
     }
 }
 
-/// A changed path as git reports it: whether it was at the base (the diff's
-/// entries that are not added), and its bytes. None when git fails.
-fn changed_paths(repo: &Repo, base: &str) -> Option<Vec<(bool, Vec<u8>)>> {
+/// The changed paths: at the base means the diff's entries that are not
+/// added. None when git fails.
+fn changed_paths(repo: &Repo, base: &str) -> Option<Vec<ChangedPath>> {
     let diff = repo.run(&["diff", "-z", "--name-status", "--no-renames", base, "--"]).ok()?;
     let mut fields = diff.split(|b| *b == 0).filter(|field| !field.is_empty());
     let mut changed = Vec::new();
@@ -136,14 +151,14 @@ fn changed_paths(repo: &Repo, base: &str) -> Option<Vec<(bool, Vec<u8>)>> {
 
 /// Each suite's selected files among the changed paths, or the first reason
 /// to run every suite instead.
-fn select(repo: &Repo, config: &Config, changed: Vec<(bool, Vec<u8>)>) -> Plan {
+fn select(repo: &Repo, config: &Config, changed: &[ChangedPath]) -> Plan {
     let suites = config.suites();
     let mut selected = vec![BTreeSet::new(); suites.len()];
     let mut files = BTreeSet::new();
     let mut why: Option<Fallback> = None;
     let mut fall = |reason: Fallback| why = Some(why.map_or(reason, |first| first.min(reason)));
     for (at_base, path) in changed {
-        let Ok(path) = String::from_utf8(path) else {
+        let Ok(path) = String::from_utf8(path.clone()) else {
             fall(Fallback::UnreadablePath);
             continue;
         };
@@ -157,7 +172,7 @@ fn select(repo: &Repo, config: &Config, changed: Vec<(bool, Vec<u8>)>) -> Plan {
         }
         // A link is not a regular file, as `lstat` sees it.
         let regular = fs::symlink_metadata(repo.path(&path)).is_ok_and(|m| m.is_file());
-        if at_base && !regular {
+        if *at_base && !regular {
             fall(Fallback::ProtectedRemoved);
         }
         if !regular || fs::File::open(repo.path(&path)).is_err() {
