@@ -372,31 +372,47 @@ Before item 58, `init` wired the hooks to the binary that ran it: plain git hook
 
 ### Onboarding the coding agents (item 61)
 
-POC-021 (2026-10-29, Shipcraft 2.14.0 from npm) asked Claude Code and Codex, in a fresh session each, to install Shipcraft in two sample projects and then add a small feature. No run closed a cycle. 3 of 4 runs stopped at `pnpm add -D shipcraft` and never ran `init`; each checked the install with `shipcraft --version` or `--help`. In the one run where `init` wrote the `AGENTS.md` block, Claude ran `red` unprompted, citing the block, but did RED and GREEN in one session and committed nothing. Item 61 changes what those two touch points say.
+POC-021 (2026-10-29, Shipcraft 2.14.0 from npm) asked Claude Code and Codex, in a fresh session each, to install Shipcraft in two sample projects and then add a small feature. No run closed a cycle. 3 of 4 runs stopped at `pnpm add -D shipcraft` and never ran `init`; each checked the install with `shipcraft --version` or `--help`. In the one run where `init` wrote the `AGENTS.md` block, Claude ran `red` unprompted, citing the block, but did RED and GREEN in one session and committed nothing. Item 61 changes what those touch points say.
+
+**Reading the two files.** `AGENTS.md` and `CLAUDE.md` at the repository root are read as UTF-8; a file that is not valid UTF-8 is a read failure (kept, with today's notice). A *line* ends at `\n`; a line *is a marker* when, without a trailing `\r`, it equals `<!-- shipcraft -->` (the start line) or `<!-- /shipcraft -->` (the end line) exactly, wherever it is (inside a fenced code block too). A *block* is the bytes from the first byte of a start line through the end of the next end line, its `\n` included when present.
 
 - **The block asks for separate sessions and commits.**
-  - The block becomes the text below `AGENTS_BLOCK` in `nucleo/src/init.rs`, between a start line `<!-- shipcraft -->` and an end line `<!-- /shipcraft -->`. Besides today's rules it says, in this order: the RED and the GREEN are done by different agent sessions (in Claude Code a subagent per phase; in Codex a new `codex exec` session per phase, never `resume`), the RED session commits the tests with the lock and stops, and the GREEN session starts from that commit, changes only product code and commits; a test the GREEN finds wrong is reported back, not edited (`shipcraft red --redo` in a RED session, item 46).
-  - **Where the block already is.** When the file holds exactly one start line and, after it, exactly one end line, `init` replaces the lines from the start line through the end line with the new block and keeps every other byte. When it holds the start line and, after it, the exact text of a block an earlier version wrote (the 2.14.0 block, kept in the binary as a known old block), with no end line, that text is replaced the same way. Any other file with the start line (two start lines, an end line before the start line, an edited old block) is kept, with today's notice that the block was kept plus `edit it by hand to match docs/spec.md`. A block equal to the new one is kept and says so, as today. No change when the file has no start line: the block is appended as today.
-  - Symlinks, read and write failures: as today (kept, with a notice, never failing the init). The write replaces the file atomically (a temporary file in the same folder renamed over it), so a failed write leaves the old bytes.
+  - The new block is the text below `AGENTS_BLOCK` in `nucleo/src/init.rs`, from a start line to an end line, LF line endings. Besides today's rules it says, in this order:
+    - the RED and the GREEN are done by different agent sessions: in Claude Code a subagent per phase, in Codex a new `codex exec` session per phase (never `resume`), both in the same checkout;
+    - the RED session commits the tests, the stubs they need and the lock in one commit, and stops;
+    - the GREEN session starts from that commit, may change anything the open lock does not protect (product code, dependencies and their lockfiles, config), never a locked file, and commits; a test it finds wrong is reported back, and a RED session fixes it with `red --redo` (item 46).
+  - **The command it names.** When `init` runs from a project-local install (item 58's rule), every `shipcraft` command in the block is written `npx shipcraft`, which resolves that install; otherwise `shipcraft`. These are the block's two *current variants*.
+  - **Known blocks.** The current variants, plus the 2.14.0 block: the exact bytes of `AGENTS_BLOCK` at tag `v2.14.0`, which has a start line and no end line. Each is kept in the binary.
+  - **What `init` does with `AGENTS.md`.**
+    - No start line: the new block is appended, with today's separator rule (or the file is created).
+    - Exactly one start line, followed by exactly one end line and no other marker, and the block between them byte-equal to a known block: the block is replaced by the new one; every byte before and after is kept. Equal to the new block: kept, `already has the shipcraft block`, as today.
+    - Exactly one start line, no end line, and the bytes from the start line equal to the 2.14.0 block followed by anything: those bytes are replaced by the new block; what follows is kept.
+    - Anything else (more markers, a block that is not a known one, an edited 2.14.0 block): kept, with today's `already has the shipcraft block, kept` plus `; it differs from this version's: edit it by hand to match docs/spec.md`.
+    - Symlinks and read or write failures: as today (kept, notice, never failing the init). The file is written in place as today.
 - **`CLAUDE.md` imports the block.** Claude Code reads `CLAUDE.md`, and reads another file through an `@path` import line.
-  - `init` handles `CLAUDE.md` at the repository root when it exists, or when `claude` is on `PATH` (the agent detection `init` already does for review). The Shipcraft part of `CLAUDE.md` is three lines: `<!-- shipcraft -->`, `Shipcraft workflow (required): @AGENTS.md`, `<!-- /shipcraft -->`.
-  - With no file, `init` creates it with those lines. With a file that has no start line, it appends them as it appends to `AGENTS.md` (same separator rule). With a start line, the same rules as `AGENTS.md` apply, with those three lines as the block and no known old block.
-  - When `AGENTS.md` was not written and has no block after `init` (a symlink, or a failed write), `CLAUDE.md` is not touched either, with the notice `shipcraft: CLAUDE.md not written: AGENTS.md has no shipcraft block`.
-  - `init`'s closing line lists `CLAUDE.md` among the files to commit when it wrote it, as it lists `AGENTS.md`.
-- **`--version` and usage say when `init` is missing.** After their usual output, `shipcraft --version` and the usage (no arguments, `help`, `-h`, `--help`) print one line to stderr when the current folder is inside a git work tree (`git rev-parse --show-toplevel` succeeds) whose root has no `.shipcraft.toml` (a regular file as `lstat` sees it): `shipcraft: not set up in this repository: run shipcraft init (from a package install: pnpm exec shipcraft init, or npx shipcraft init)`. Outside a git work tree, when git fails, or when the file exists, nothing is added. Their stdout and exit codes do not change.
+  - `init` handles `CLAUDE.md` at the repository root when an entry exists there (`lstat` succeeds: a symlink, dangling or not, counts and is then kept as `AGENTS.md`'s are), or when `claude` is on `PATH` (checked on its own, whatever `[roles] review` is).
+  - Its block is three lines: the start line, `Shipcraft workflow (required): @AGENTS.md`, the end line. The rules are `AGENTS.md`'s with this block as the only known block: created, appended, kept equal, kept different with the notice.
+  - `CLAUDE.md` is handled only when `AGENTS.md` holds the current block after `init` (written now or already equal). Otherwise `init` leaves `CLAUDE.md` untouched and prints `shipcraft: CLAUDE.md not written: AGENTS.md does not hold this version's shipcraft block`.
+  - `init`'s closing line lists each of the two files it created, appended to or replaced, as it lists `AGENTS.md` today.
+- **`--version` and usage say when the config is missing.** After their usual output, `shipcraft --version` and the usage (no arguments, `help`, `-h`, `--help`) print one line to stderr when the current folder is inside a git work tree (`git rev-parse --show-toplevel` succeeds) and `lstat` of `.shipcraft.toml` at its root fails with not-found: `shipcraft: not set up in this repository: run shipcraft init (from a package install: pnpm exec shipcraft init, or npx shipcraft init)`. In every other case (outside a work tree, git fails, the entry exists in any form, `lstat` fails otherwise) nothing is added. They read no config and write no run-log row; their stdout and exit codes do not change.
 - **Docs.** The README's quick start and the npm package README say that installing is two steps: add the package, then run `init`.
 
-**Unchanged.** The block's existing rules, the hook, `red`, every refusal, the config `init` writes, and `init`'s refusals: a refused `init` still writes neither file.
+**Unchanged.** The block's existing rules, the hook, `red`, every refusal, the config `init` writes, and `init`'s refusals: a refused `init` writes neither file.
 
-**Battery.** The item 8 cases on `AGENTS.md` (`v1` lines on "AGENTS.md has the block", "exactly one block", "already has the shipcraft block", the symlink) must hold: the start line is unchanged and the old-block upgrade only applies to the exact 2.14.0 text. Cases that compare `--version` or usage output byte for byte read stdout only, or run outside a repository without config.
+**Battery.**
+- `v1-2.5-agents-novo`, `v1-2.5-agents-acrescenta`, `v1-2.5-agents-uma-vez` and `v1-2.5-agents-link` must hold.
+- `python::init-files`, `node::init-files` and `go::init-files` (`acceptance/run.sh`) reject any file `init` writes besides `.shipcraft.toml`, the locks folder and `AGENTS.md`, and keep the caller's `PATH`: on a machine with `claude` on `PATH`, `init` now writes `CLAUDE.md`. The RED makes them independent of the machine (a `PATH` without `claude`, or `CLAUDE.md` allowed when it is on `PATH`), without weakening the rest.
+- `v1-21.versao-fora` and `v1-21.versao-min-numerica` run `--version` outside a repository and must hold.
 
 **Versions.** The item raises the binary to 2.17.0. No lock or config field changes.
 
 **Known limits.**
 - Whether an agent follows the block is measured by POC-021's after runs, not by the battery.
-- Codex and other agents read `AGENTS.md` directly; agents that read neither file are not covered.
+- Codex and other agents read `AGENTS.md` directly; an agent that reads neither file is not covered.
 - A `CLAUDE.md` in a subfolder, or a user-level `~/.claude/CLAUDE.md`, is not read or written.
-- An `AGENTS.md` block edited by hand is never upgraded.
+- A block edited by hand, or written with CRLF line endings, is never upgraded.
+- The hint covers a repository with no config. A fresh clone of a project that has one, but whose hooks are not installed yet, gets no hint; CI is the backstop, as today.
+- `npx shipcraft` needs Node at the agent's shell, as item 58's hooks do.
 
 ## 4. Configuration
 
