@@ -123,3 +123,101 @@ pub fn edit_pr(repo: &Repo, pr: u64, title: Option<&str>, body: Option<&str>) ->
     }
     must(repo, &args).map(drop)
 }
+
+/// Item 62: how one named check stands at a commit, from its check runs and
+/// its commit statuses together.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Check {
+    Green,
+    Failed,
+    Pending,
+    Missing,
+    Unreadable,
+}
+
+impl Check {
+    pub fn word(self) -> &'static str {
+        match self {
+            Check::Green => "green",
+            Check::Failed => "failed",
+            Check::Pending => "pending",
+            Check::Missing => "missing",
+            Check::Unreadable => "unreadable",
+        }
+    }
+}
+
+/// Item 62: `name` at `sha`, read from both sources GitHub has: the latest
+/// check runs of that name and the combined status. Every match counts, so two
+/// producers of one name must both be green; a failed call or a response out
+/// of shape makes it unreadable.
+pub fn check(repo: &Repo, sha: &str, name: &str) -> Check {
+    let read = |path: String| -> Option<Value> { serde_json::from_str(&run(repo, &["api", &path]).ok()?).ok() };
+    // Each element (runs or statuses) as (done, successful), for the matches only.
+    let matches = |doc: Option<Value>, list: &str, key: &str| -> Option<Vec<(bool, bool)>> {
+        let doc = doc?;
+        let count = doc.get("total_count").filter(|c| c.is_i64() || c.is_u64())?.as_u64()?;
+        let items = doc.get(list)?.as_array()?;
+        if items.len() as u64 != count {
+            return None;
+        }
+        let mut found = Vec::new();
+        for item in items {
+            let item = item.as_object()?;
+            let named = item.get(key)?.as_str()?;
+            let seen = if list == "check_runs" {
+                let status = item.get("status")?.as_str()?;
+                let conclusion = item.get("conclusion")?;
+                if !conclusion.is_null() && !conclusion.is_string() {
+                    return None;
+                }
+                (status == "completed", conclusion.as_str() == Some("success"))
+            } else {
+                let state = item.get("state")?.as_str()?;
+                (matches!(state, "success" | "failure" | "error"), state == "success")
+            };
+            if named == name {
+                found.push(seen);
+            }
+        }
+        Some(found)
+    };
+    let runs = read(format!(
+        "repos/{{owner}}/{{repo}}/commits/{sha}/check-runs?check_name={}&filter=latest&per_page=100",
+        percent_encode(name)
+    ));
+    let statuses = read(format!("repos/{{owner}}/{{repo}}/commits/{sha}/status?per_page=100"));
+    let (Some(runs), Some(statuses)) = (matches(runs, "check_runs", "name"), matches(statuses, "statuses", "context"))
+    else {
+        return Check::Unreadable;
+    };
+    let all: Vec<(bool, bool)> = runs.into_iter().chain(statuses).collect();
+    if all.iter().any(|(done, ok)| *done && !ok) {
+        Check::Failed
+    } else if all.iter().any(|(done, _)| !done) {
+        Check::Pending
+    } else if all.is_empty() {
+        Check::Missing
+    } else {
+        Check::Green
+    }
+}
+
+/// Every byte but the unreserved ones (RFC 3986) as `%XX`.
+fn percent_encode(text: &str) -> String {
+    text.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn names_are_percent_encoded_byte_by_byte() {
+        assert_eq!(super::percent_encode("zeta suite"), "zeta%20suite");
+        assert_eq!(super::percent_encode("alpha/β"), "alpha%2F%CE%B2");
+    }
+}

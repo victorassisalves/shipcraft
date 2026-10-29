@@ -174,6 +174,13 @@ pub struct Execucao {
     /// Item 42: how `shipcraft merge` merges, `merge` or `squash`.
     #[serde(deserialize_with = "any_value")]
     pub merge: String,
+    /// Item 62: the project's own GitHub checks that run the suite; read as
+    /// any TOML value so that `check_execution` names a wrong one, then kept
+    /// in `suite_checks`.
+    #[serde(rename = "suite_checks")]
+    suite_checks_raw: Option<toml::Value>,
+    #[serde(skip)]
+    pub suite_checks: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -216,7 +223,14 @@ pub struct Maquina {
 
 impl Default for Execucao {
     fn default() -> Self {
-        Execucao { ci: "local".into(), revisao: "local".into(), tempo_max_ci: 1800, merge: "merge".into() }
+        Execucao {
+            ci: "local".into(),
+            revisao: "local".into(),
+            tempo_max_ci: 1800,
+            merge: "merge".into(),
+            suite_checks_raw: None,
+            suite_checks: Vec::new(),
+        }
     }
 }
 
@@ -281,6 +295,12 @@ impl Config {
             Err(e) => return not_toml(text, &e),
         };
         check_execution(text)?;
+        config.execucao.suite_checks = config
+            .execucao
+            .suite_checks_raw
+            .take()
+            .and_then(|v| v.as_array().map(|a| a.iter().filter_map(|e| e.as_str().map(str::to_string)).collect()))
+            .unwrap_or_default();
         config.normalize()?;
         Ok(config)
     }
@@ -488,16 +508,69 @@ fn check_execution(text: &str) -> Result<()> {
             );
         }
     }
-    let Some(value) = execution.get("merge") else { return Ok(()) };
-    if matches!(value.as_str(), Some("merge" | "squash")) {
+    if let Some(value) = execution.get("merge") {
+        if !matches!(value.as_str(), Some("merge" | "squash")) {
+            return refuse(
+                "execution-invalid",
+                format!("[execution] merge = {value} is not a value shipcraft knows"),
+                "shipcraft merge makes a merge commit or squashes the PR, and shipcraft does not guess which",
+                "use merge = \"merge\" or \"squash\" in .shipcraft.toml on main",
+            );
+        }
+    }
+    check_suite_checks(&table, execution)
+}
+
+/// Item 62: `[execution] suite_checks` is an array of distinct, trimmed,
+/// non-empty names without control characters, never Shipcraft's own
+/// contexts; a non-empty one needs `ci = "github"` and `shipcraft_min` at
+/// 2.18 or above, so no older binary judges the project without it.
+fn check_suite_checks(table: &toml::Table, execution: &toml::Value) -> Result<()> {
+    let Some(value) = execution.get("suite_checks") else { return Ok(()) };
+    let wrong = |problem: String| {
+        refuse(
+            "execution-invalid",
+            format!("[execution] suite_checks = {value} {problem}"),
+            "shipcraft merges only when every named GitHub check that runs the suite is green, and does not guess which",
+            "use suite_checks = [\"<check name>\", ...] with ci = \"github\" and shipcraft_min = \"2.18\" in .shipcraft.toml on main",
+        )
+    };
+    let Some(names) = value.as_array() else { return wrong("is not an array of strings".into()) };
+    let mut seen: Vec<&str> = Vec::new();
+    for element in names {
+        let Some(name) = element.as_str() else { return wrong(format!("has {element}, which is not a string")) };
+        if name.is_empty() {
+            return wrong("has an empty name".into());
+        }
+        if name.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}') {
+            return wrong(format!("has {element}, which holds a control character"));
+        }
+        if name.starts_with(char::is_whitespace) || name.ends_with(char::is_whitespace) {
+            return wrong(format!("has {element}, which starts or ends with whitespace"));
+        }
+        if seen.contains(&name) {
+            return wrong(format!("names {element} twice"));
+        }
+        if name == "shipcraft/ci" || name == "shipcraft/review" {
+            return wrong(format!("names {element}, which is shipcraft's own status"));
+        }
+        seen.push(name);
+    }
+    if names.is_empty() {
         return Ok(());
     }
-    refuse(
-        "execution-invalid",
-        format!("[execution] merge = {value} is not a value shipcraft knows"),
-        "shipcraft merge makes a merge commit or squashes the PR, and shipcraft does not guess which",
-        "use merge = \"merge\" or \"squash\" in .shipcraft.toml on main",
-    )
+    if execution.get("ci").and_then(|v| v.as_str()) != Some("github") {
+        return wrong("is not empty, and needs ci = \"github\"".into());
+    }
+    let min = table.get("shipcraft_min").and_then(|v| v.as_str());
+    let well_formed = min.is_some_and(|m| {
+        let runs: Vec<&str> = m.split('.').collect();
+        (2..=3).contains(&runs.len()) && runs.iter().all(|r| !r.is_empty() && r.bytes().all(|b| b.is_ascii_digit()))
+    });
+    if !well_formed || min.is_some_and(|m| version_parts(m) < version_parts("2.18")) {
+        return wrong("is not empty, and needs shipcraft_min = \"2.18\" or above".into());
+    }
+    Ok(())
 }
 
 pub fn no_config<T>() -> Result<T> {
@@ -669,6 +742,26 @@ globs = ["tests/**"]
                 Err(crate::refusal::Stop::Refused(r)) => assert_eq!(r.code, "config-invalid", "{text}"),
                 _ => panic!("{text}"),
             }
+        }
+    }
+
+    #[test]
+    fn suite_checks_need_github_ci_and_a_2_18_minimum() {
+        let ok = "shipcraft_min = \"2.18\"\n[execution]\nci = \"github\"\nsuite_checks = [\"a b\", \"c/\u{3b2}\"]";
+        assert_eq!(Config::parse(ok).unwrap().execucao.suite_checks, ["a b", "c/\u{3b2}"]);
+        assert!(Config::parse("[execution]\nsuite_checks = []").unwrap().execucao.suite_checks.is_empty());
+        for bad in [
+            "shipcraft_min = \"2.18\"\n[execution]\nci = \"github\"\nsuite_checks = \"a\"",
+            "shipcraft_min = \"2.18\"\n[execution]\nci = \"github\"\nsuite_checks = [\"a\", \"a\"]",
+            "shipcraft_min = \"2.18\"\n[execution]\nci = \"github\"\nsuite_checks = [\"\\u00a0a\"]",
+            "shipcraft_min = \"2.18\"\n[execution]\nci = \"github\"\nsuite_checks = [\"shipcraft/ci\"]",
+            "shipcraft_min = \"2.18\"\n[execution]\nci = \"local\"\nsuite_checks = [\"a\"]",
+            "shipcraft_min = \"2.17\"\n[execution]\nci = \"github\"\nsuite_checks = [\"a\"]",
+            "shipcraft_min = \"2.18a\"\n[execution]\nci = \"github\"\nsuite_checks = [\"a\"]",
+            "[execution]\nci = \"github\"\nsuite_checks = [\"a\"]",
+        ] {
+            let refused = Config::parse(bad);
+            assert!(matches!(refused, Err(crate::refusal::Stop::Refused(r)) if r.code == "execution-invalid"), "{bad}");
         }
     }
 }

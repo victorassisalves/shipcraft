@@ -51,6 +51,18 @@ pub fn merge(repo: &Repo, number: &str, sem_revisao: Option<&str>) -> Result<()>
             "run shipcraft pr on the PR branch to run CI and publish the status, then try again",
         );
     }
+    // Item 62: then each suite check, in config order; `--no-review` never waives one.
+    for name in &config.execucao.suite_checks {
+        let check = gh::check(repo, &head, name);
+        if check != gh::Check::Green {
+            return refuse(
+                "merge-without-ci",
+                format!("PR #{number} has no green check {name} at its HEAD ({}): {}", short(&head), check.word()),
+                "merging requires the project's suite green on the latest PR commit",
+                format!("wait for the check or fix what failed, then run `shipcraft merge {number}` again"),
+            );
+        }
+    }
     if revisao != Camada::Desligado && sem_revisao.is_none() && state("shipcraft/review") != "success" {
         return refuse(
             "merge-without-review",
@@ -80,8 +92,9 @@ pub fn merge(repo: &Repo, number: &str, sem_revisao: Option<&str>) -> Result<()>
     }
     let locks = medicao::locks_changed(repo, &format!("origin/{base}"), &head);
     // Item 42: the base's config says how; a squash takes GitHub's own title and body.
+    // Item 62: pinned to the head the gate read, so a PR that moved is not merged.
     let method = if config.execucao.merge == "squash" { "squash" } else { "merge" };
-    gh::must(repo, &["pr", "merge", number, &format!("--{method}")])?;
+    gh::must(repo, &["pr", "merge", number, &format!("--{method}"), "--match-head-commit", &head])?;
     medicao::record(
         repo,
         json!({"layer": "merge", "secs": medicao::seconds(started), "result": "passed",
@@ -104,9 +117,14 @@ pub fn status(repo: &Repo) -> Result<()> {
         "local" => "local (on this machine)".to_string(),
         other => other.to_string(),
     };
+    // Item 62: the suite checks, when CI leaves the suite to them.
+    let ci = match config.execucao.suite_checks.as_slice() {
+        [] => layer(&config.execucao.ci),
+        names => format!("{} (suite in GitHub checks: {})", layer(&config.execucao.ci), names.join(", ")),
+    };
     println!(
         "shipcraft: layers: ci {}; review {} (agent {})",
-        layer(&config.execucao.ci),
+        ci,
         layer(&config.execucao.revisao),
         config.papeis.revisao
     );

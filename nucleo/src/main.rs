@@ -137,8 +137,8 @@ fn run(args: &[&str]) -> Result<()> {
             Ok(())
         }
         // Item 40: only `--pr` allows the docs-only path.
-        ["ci", "--base", base] => measured("ci", |repo, docs_only| ci::run(repo, base, false, docs_only)),
-        ["ci", "--base", base, "--pr"] => measured("ci", |repo, docs_only| ci::run(repo, base, true, docs_only)),
+        ["ci", "--base", base] => measured("ci", |repo, row| ci::run(repo, base, false, row)),
+        ["ci", "--base", base, "--pr"] => measured("ci", |repo, row| ci::run(repo, base, true, row)),
         ["pr", rest @ ..] => {
             let (mut title, mut body) = (None, None);
             let mut rest = rest.iter();
@@ -204,14 +204,15 @@ fn invalid(args: &[&str]) -> Stop {
 }
 
 /// Runs a hook or CI command and records it in the measurement (item 10);
-/// a CI row says whether the PR was docs only (item 40).
-fn measured(camada: &str, command: impl FnOnce(&Repo, &mut bool) -> Result<()>) -> Result<()> {
+/// a CI row says whether the PR was docs only (item 40) and whether the suite
+/// was left to the GitHub checks (item 62).
+fn measured(camada: &str, command: impl FnOnce(&Repo, &mut medicao::CiRow) -> Result<()>) -> Result<()> {
     let started = Instant::now();
     let repo = Repo::open()?;
     let lock = (camada == "hook").then(|| medicao::open_lock(&repo));
-    let mut docs_only = false;
-    let result = command(&repo, &mut docs_only);
-    medicao::layer(&repo, camada, started, &result, (camada == "ci").then_some(docs_only), lock);
+    let mut ci = medicao::CiRow::default();
+    let result = command(&repo, &mut ci);
+    medicao::layer(&repo, camada, started, &result, (camada == "ci").then_some(ci), lock);
     result
 }
 

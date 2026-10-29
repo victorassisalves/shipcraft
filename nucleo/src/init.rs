@@ -332,9 +332,14 @@ fn config_text(
         }
     }
     let review = if reviewer.is_some() { "local" } else { "off" };
-    text += &format!(
-        "\n[execution]\n# where each layer runs: local (on this machine), github or off\nci = \"local\"\nreview = \"{review}\"\nci_timeout = 1800\n"
-    );
+    // Item 62: what each value means, and that suite_checks moves the suite
+    // out of shipcraft/ci; above the table, and no suite_checks written.
+    text += "\n# where each layer runs: \"local\" = on this machine, started by shipcraft pr; \"github\" = in this
+# project's GitHub Actions (docs/github-ci.md); \"off\" = it does not run and shipcraft merge does not
+# require it. shipcraft/ci re-checks every commit of the PR and runs the suite at its HEAD,
+# unless suite_checks names GitHub checks that run the suite (docs/github-ci.md).
+";
+    text += &format!("[execution]\nci = \"local\"\nreview = \"{review}\"\nci_timeout = 1800\n");
     text += &format!(
         "\n[roles]\n# the review agent: codex, claude or gemini\nreview = {}\n",
         quoted(reviewer.as_deref().unwrap_or("codex"))

@@ -198,7 +198,7 @@ fn local_ci(
                 repo,
                 json!({"layer": "ci", "secs": medicao::seconds(started), "result": "error",
                        "code": "timed-out", "branch": branch, "commit": head,
-                       "docs_only": docs_only}),
+                       "docs_only": docs_only, "suite_in_checks": false}),
             );
             let why = format!("timed out ({limit} s, [execution] ci_timeout)");
             ("error", format!("on this machine: {why}"), Gate::Stopped("ci-timed-out", format!("CI stopped: {why}")))
@@ -222,26 +222,53 @@ fn refused_why(repo: &Repo, head: &str) -> String {
 
 /// Item 3, rule 4: with `ci = "github"`, the workflow publishes `shipcraft/ci`;
 /// the local review waits for it (up to `tempo_max_ci`) and runs only on success.
+/// Item 62: CI is green at HEAD when `shipcraft/ci` is and so is every suite
+/// check; any failed one stops the wait, and an unreadable one is read again.
 fn wait_github_ci(repo: &Repo, config: &Config, head: &str) -> Result<Gate> {
     let limit = Duration::from_secs(config.execucao.tempo_max_ci);
-    println!("shipcraft: waiting for GitHub shipcraft/ci at {} (up to {} s)", short(head), limit.as_secs());
+    let names = &config.execucao.suite_checks;
+    let waited = if names.is_empty() {
+        "GitHub shipcraft/ci".to_string()
+    } else {
+        format!("GitHub shipcraft/ci and {}", names.join(", "))
+    };
+    println!("shipcraft: waiting for {waited} at {} (up to {} s)", short(head), limit.as_secs());
     let started = Instant::now();
     loop {
-        match gh::statuses(repo, head)?.get("shipcraft/ci").map(|(s, _)| s.as_str()) {
-            Some("success") => return Ok(Gate::Passed),
-            Some(state @ ("failure" | "error")) => {
-                return Ok(Gate::Stopped(
-                    "ci-github",
-                    format!("GitHub shipcraft/ci returned {state}; review did not run"),
-                ));
-            }
-            _ => {}
+        let ci = gh::statuses(repo, head)?.get("shipcraft/ci").map(|(s, _)| s.clone());
+        if let Some(state @ ("failure" | "error")) = ci.as_deref() {
+            return Ok(Gate::Stopped("ci-github", format!("GitHub shipcraft/ci returned {state}; review did not run")));
+        }
+        let checks: Vec<(&String, gh::Check)> = names.iter().map(|name| (name, gh::check(repo, head, name))).collect();
+        if let Some((name, _)) = checks.iter().find(|(_, check)| *check == gh::Check::Failed) {
+            return Ok(Gate::Stopped("ci-github", format!("GitHub check {name} failed; review did not run")));
+        }
+        let ci_green = ci.as_deref() == Some("success");
+        if ci_green && checks.iter().all(|(_, check)| *check == gh::Check::Green) {
+            return Ok(Gate::Passed);
         }
         let elapsed = started.elapsed();
         if elapsed >= limit {
+            if names.is_empty() {
+                return Ok(Gate::Stopped(
+                    "ci-github-no-status",
+                    format!("GitHub shipcraft/ci did not arrive within {} s; review did not run", limit.as_secs()),
+                ));
+            }
+            let mut not_green: Vec<String> = Vec::new();
+            if !ci_green {
+                not_green.push(format!("shipcraft/ci {}", ci.as_deref().unwrap_or("no status")));
+            }
+            not_green.extend(
+                checks.iter().filter(|(_, check)| *check != gh::Check::Green).map(|(n, c)| format!("{n} {}", c.word())),
+            );
             return Ok(Gate::Stopped(
                 "ci-github-no-status",
-                format!("GitHub shipcraft/ci did not arrive within {} s; review did not run", limit.as_secs()),
+                format!(
+                    "CI was not green within {} s ({}); review did not run",
+                    limit.as_secs(),
+                    not_green.join(", ")
+                ),
             ));
         }
         sleep((limit - elapsed).min(Duration::from_secs(2)));
