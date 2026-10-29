@@ -552,14 +552,20 @@ fn rewrite(path: &Path, text: &str) -> std::io::Result<()> {
         return Err(std::io::ErrorKind::PermissionDenied.into());
     }
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let temp = path.with_file_name(format!(".{name}.shipcraft-tmp"));
-    let _ = fs::remove_file(&temp);
-    let result = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&temp)
-        .and_then(|mut f| f.write_all(text.as_bytes()).and_then(|()| f.sync_all()))
+    // A name of its own, created exclusively: an existing entry is never touched.
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let mut attempt = 0u32;
+    let (temp, mut file) = loop {
+        let temp = path.with_file_name(format!(".{name}.shipcraft-{}-{nanos}-{attempt}.tmp", std::process::id()));
+        match fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temp) {
+            Ok(file) => break (temp, file),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && attempt < 100 => attempt += 1,
+            Err(e) => return Err(e),
+        }
+    };
+    let result = file
+        .write_all(text.as_bytes())
+        .and_then(|()| file.sync_all())
         .and_then(|()| fs::set_permissions(&temp, fs::Permissions::from_mode(mode)))
         .and_then(|()| fs::rename(&temp, path));
     if result.is_err() {

@@ -184,11 +184,12 @@ fn version_line() -> String {
 fn setup_hint() {
     let Ok(cwd) = std::env::current_dir() else { return };
     let Ok(out) = git::git_in(&cwd, &["rev-parse", "--show-toplevel"]) else { return };
-    let root = git::text(&out.stdout);
-    let root = root.trim_end_matches('\n');
+    // The root's own bytes, less the one newline git ends it with.
+    let root = out.stdout.strip_suffix(b"\n").unwrap_or(&out.stdout);
     if !out.status.success() || root.is_empty() {
         return;
     }
+    let root = <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(root);
     if std::path::Path::new(root)
         .join(config::CONFIG_FILE)
         .symlink_metadata()
