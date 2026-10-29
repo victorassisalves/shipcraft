@@ -4,7 +4,7 @@ This is the public contract of `shipcraft`: what it guarantees and what each com
 
 ## 1. Guarantee and threat model
 
-**The guarantee.** A test written at RED stays the judge until it passes. The agent that writes the code (the GREEN) cannot make the suite pass by changing, deleting or skipping a locked test, its support files, or the config that says how the suite runs. The git hook checks this on every commit. CI repeats every check, so a commit made with `--no-verify` or an edited hook is caught there.
+**The guarantee.** A test written at RED stays the judge until it passes. The agent that writes the code (the GREEN) cannot make the suite pass by changing, deleting or skipping a locked test, its support files, or the config that says how the suite runs. The git hook checks this on every commit. CI repeats every check, so a commit made with `--no-verify` or an edited hook is caught there. With `[execution] suite_checks` (item 62), CI is `shipcraft/ci`, which re-checks every commit, plus the named GitHub checks, which run the suite; what that leaves uncaught is listed there.
 
 On top of that, every PR goes through two layers before merge: `shipcraft` CI and an executed review by an agent that did not write the code. Each project chooses where each layer runs. A layer that is off says so in its status description on every PR.
 
@@ -493,53 +493,71 @@ Shipcraft's own repository runs its battery in GitHub Actions as 10 parallel sha
 
 **What `ci` means.** `[execution] ci` says only where CI runs: `local` (this machine, through `shipcraft pr`), `github` (the project's GitHub Actions) or `off` (CI does not run, and the gate does not require it). It never says what runs; `suite_checks` does.
 
-**The key.** `[execution] suite_checks` is a TOML array of strings, the names of GitHub checks that run the project's suite. Absent means `[]`, today's behavior everywhere.
-- It is read and validated by the reader and at the point of item 47, after `ci`, `review` and `merge`, and refuses `execution-invalid` naming the key when: the value is not an array; an element is not a string, is empty, has leading or trailing whitespace, or repeats an earlier element (exact byte comparison); an element is `shipcraft/ci` or `shipcraft/review`; the array is not empty and `ci` is not `"github"`; or the array is not empty and the config's `shipcraft_min` is absent or below `2.18` (a binary older than 2.18 ignores the key, so the project must keep those binaries out).
-- The value judged is the one in the config the command already judges by: the PR base's for `pr`, `merge` and `ci`, the working tree's for `status`.
+**The key.** `[execution] suite_checks` is a TOML array of strings, the names of GitHub checks that run the project's suite, its `[build]` and its suite `check`s. Absent means `[]`, today's behavior everywhere.
+- It is read and validated by the reader and at the point of item 47, after `ci`, `review` and `merge`, and refuses `execution-invalid` naming the key when:
+  - the value is not an array, or an element is not a string;
+  - an element is empty, holds a control character (U+0000 to U+001F or U+007F), starts or ends with a character Rust's `char::is_whitespace` accepts, or equals an earlier element byte for byte;
+  - an element is `shipcraft/ci` or `shipcraft/review`;
+  - the array is not empty and `ci` is not `"github"`;
+  - the array is not empty and `shipcraft_min` is not a TOML string of two or three dot-separated runs of ASCII digits that compares at or above `2.18` by today's `shipcraft_min` comparison (a binary older than 2.18 ignores the key, so the project must keep those binaries out).
+- The value judged is the one in the config the command already judges by: for `pr` and `merge` the PR base's; for `ci` the config of `--base` with today's fallback; for `status` the working tree's.
 
-**A check is green.** For a commit and a name, shipcraft reads two GitHub sources:
-- check runs: `gh api --paginate "repos/{owner}/{repo}/commits/<sha>/check-runs?filter=latest&per_page=100"`, the runs whose `name` equals the name exactly;
-- commit statuses: the newest status per context, as `shipcraft/ci` is read today, whose `context` equals the name exactly.
+**Reading a check at a commit.** For a commit `<sha>` and a name, shipcraft makes two `gh` calls and decodes each stdout as one JSON document:
+- check runs: `gh api "repos/{owner}/{repo}/commits/<sha>/check-runs?check_name=<name, percent-encoded>&filter=latest&per_page=100"`. The response must be an object with an integer `total_count` and an array `check_runs` whose length equals `total_count`; each element must be an object with a string `name`, a string `status` and a `conclusion` that is a string or null. The runs whose `name` equals the name byte for byte are its matches.
+- commit statuses: `gh api "repos/{owner}/{repo}/commits/<sha>/status?per_page=100"` (GitHub's combined status, one newest status per context). The response must be an object with an integer `total_count` and an array `statuses` whose length equals `total_count`; each element must be an object with a string `context` and a string `state`. The statuses whose `context` equals the name byte for byte are its matches.
 
-The name is **green** when at least one run or status matches and every match is done and successful (a run with `status` `completed` and `conclusion` `success`; a status with `state` `success`). It is **failed** when any match is done and not successful (any other conclusion, a status `failure` or `error`). It is **pending** when nothing failed and some match is not done (a run not `completed`, a status `pending`). It is **missing** when nothing matches. A `gh` failure or a response that is not the expected JSON makes it **unreadable**.
+The name is **unreadable** when either call fails or either response breaks its shape above. Otherwise it is **failed** when a match is done and not successful (a run with `status` `completed` and a `conclusion` other than `success`, null included; a status `failure` or `error`); else **pending** when a match is not done (a run whose `status` is not `completed`; a status `pending` or any other state); else **green** when at least one match exists; else **missing**. Every match counts: two producers that report the same name must both be green.
 
-**CI is green at a head** when `shipcraft/ci` is `success` there and, if `suite_checks` is not empty, every name in it is green there. `pr` and `merge` use this one rule.
+**CI is green at a head** when `shipcraft/ci` is `success` there, read as today, and, when `suite_checks` is not empty, every name in it is green there. `pr` and `merge` use this one rule.
 
-**`shipcraft merge`.** With `ci = "github"` and `suite_checks` not empty, the gate checks `shipcraft/ci` first, as today, then each name in the order of the array; the first that is not green refuses `merge-without-ci` with the reason `PR #<n> has no green check <name> at its HEAD (<short sha>): <failed|pending|missing|unreadable>`. Why: merging requires the project's suite green on the latest PR commit. Next: wait for the check, or fix what failed, then run `shipcraft merge <n>` again. `--no-review` still waives the review only.
+**`shipcraft merge`.** With `suite_checks` not empty, the gate checks `shipcraft/ci` first, as today, then each name in config order, then the review as today. The first name that is not green refuses `merge-without-ci` with the reason `PR #<n> has no green check <name> at its HEAD (<short sha>): <failed|pending|missing|unreadable>`; Why: merging requires the project's suite green on the latest PR commit; Next: wait for the check or fix what failed, then run `shipcraft merge <n>` again. `--no-review` still waives the review only.
 
-**The merge is pinned to the head it checked.** `shipcraft merge` runs `gh pr merge <n> --merge|--squash --match-head-commit <head>`, where `<head>` is the `headRefOid` its gate read. If the PR moved, GitHub refuses and `gh` fails: shipcraft writes no `merge` row and stops as it does today on a `gh` failure, naming the head it checked. This holds whatever `ci`, `review` and `suite_checks` are, and it removes item 42's known limit "`shipcraft merge` does not pin the PR head it checked".
+**The merge is pinned to the head it checked.** `shipcraft merge` runs `gh pr merge <n> --merge` (or `--squash`) `--match-head-commit <head>`, where `<head>` is the `headRefOid` its gate read. If the PR moved, GitHub refuses and `gh` fails: shipcraft writes no `merge` row for that run and exits as it does today on a `gh` failure, with a message that names `<head>` (a `--no-review` comment already posted stays). This holds whatever `ci`, `review` and `suite_checks` are, and removes item 42's known limit that `shipcraft merge` does not pin the PR head it checked.
 
-**`shipcraft pr` with `ci = "github"`.** When it waits before the review (today: `review = "local"`), it waits until CI is green at HEAD by the rule above, polling as today, up to `ci_timeout`. A failed `shipcraft/ci` or a failed suite check stops the wait as `ci-github`, naming which; the time limit stops it as `ci-github-no-status`, naming what was still pending or missing. An unreadable check is retried at the next poll. Nothing else in `pr` changes.
+**`shipcraft pr` with `ci = "github"`.** When it waits before the review (today: `review = "local"`), each poll reads `shipcraft/ci` and every suite check, and it waits until CI is green at HEAD, up to `ci_timeout`, polling as today. At each poll, a failed `shipcraft/ci` or any failed suite check stops the wait as `ci-github`, naming `shipcraft/ci` or the first failed name in config order. An unreadable name is read again at the next poll. When the limit passes, the wait stops as `ci-github-no-status`, naming every context still not green with its state (`pending`, `missing` or `unreadable`), `shipcraft/ci` first, then config order. The limit is checked between polls, so one poll's calls can run past it. Both stops keep today's exit code, statuses and rows.
 
 **`shipcraft ci` re-checks commits and leaves the suite to the checks.** When the config the run judges by has `suite_checks` not empty, `shipcraft ci`:
-- checks every commit of the range exactly as today (lock transitions, sealed file hashes, the config under an open lock, hook integration files), with every refusal that check has today;
-- then skips `[build]`, every suite `check` and every suite command, and prints exactly one line, `shipcraft: suite not run here: it runs in the GitHub check(s) <names, comma-separated, in config order> ([execution] suite_checks)`, in place of `docs only: the suites do not run` (a docs-only PR prints this line, not that one);
-- does not judge what needs the suite's report: `lock-not-closed`, `case-broke`, `lock-closed-red`, `red-already-passes`, `case-missing` and `suite-red` are not reached; a lock open at HEAD is accepted as an open cycle;
+- checks every commit of the range exactly as today (lock transitions, sealed file hashes, the config under an open lock, hook integration files, the default-branch squash rule), with every refusal that part has today;
+- judges docs only as today (`docs_only` keeps its value);
+- then prints exactly one line, `shipcraft: suite not run here: it runs in the GitHub check(s) <names joined with ", ", in config order> ([execution] suite_checks)`, in place of `docs only: the suites do not run`, and runs no `[build]`, no suite `check` and no suite command; `build-dirty-tree` is not reached and no copy of HEAD is made;
+- does not judge what needs the suite's report at HEAD: `lock-not-closed`, `case-broke`, `lock-closed-red`, `red-already-passes`, `case-missing` and `suite-red` are not reached, and a lock open at HEAD is accepted as an open cycle;
 - on the default branch still runs the escape check, unchanged;
-- then prints `shipcraft: CI ok.` and item 44's last line for `github`.
+- then prints `shipcraft: CI ok.` and item 44's last line for the config's `ci`.
 
-Every `ci` row of the run log has `suite_in_checks`: `true` when the suite was left to `suite_checks`, else `false`.
+Every `ci` row of the run log has `suite_in_checks`, a JSON boolean: `true` when the run printed the line above, else `false` (refusals and errors before that point included).
 
-**`shipcraft status`.** The layers line reads `ci github (suite in GitHub checks: <names>)` when `suite_checks` is not empty; otherwise as today.
+**`shipcraft status`.** With `suite_checks` not empty, the layers line reads `ci github (suite in GitHub checks: <names joined with ", ">)` where it reads `ci github` today; otherwise unchanged.
 
-**Docs and the config `init` writes.** `init` writes, above `[execution]`, three comment lines in place of today's one:
+**What `shipcraft/ci` proves, with `suite_checks`.** That every commit of the PR passed the commit checks the hook makes that need no test run: locks opened and closed only as `red` and the hook write them, sealed files unchanged under an open lock, the config unchanged under an open lock, hook integration files unchanged. What the suite proves at HEAD (locked cases pass, nothing else broke) comes from the named checks. Section 1's "CI repeats every check" holds for `ci` without `suite_checks`; with it, CI is `shipcraft/ci` plus the named checks.
+
+**Docs and the config `init` writes.** `init` writes, above `[execution]`, these comment lines in place of today's one:
 ```
-# where CI and review run: "local" = on this machine, through shipcraft pr; "github" = in this
+# where each layer runs: "local" = on this machine, started by shipcraft pr; "github" = in this
 # project's GitHub Actions (docs/github-ci.md); "off" = it does not run and shipcraft merge does not
-# require it. shipcraft/ci always re-checks every commit of the PR; the suite runs with it unless suite_checks names GitHub checks that run it.
+# require it. shipcraft/ci re-checks every commit of the PR and runs the suite at its HEAD,
+# unless suite_checks names GitHub checks that run the suite (docs/github-ci.md).
 ```
-`init` writes no `suite_checks`. `docs/github-ci.md` gets a section for a project whose suite already runs in its own workflow: set `suite_checks`, raise `shipcraft_min`, add a job that runs `shipcraft ci --base <base> --pr` and publishes `shipcraft/ci` (the job of today's guide, without the language setup), and make the named checks and `shipcraft/ci` required where GitHub protects branches.
+`init` writes no `suite_checks`, and a second `init` that keeps an existing config does not rewrite its comments. `docs/github-ci.md` gets a section for a project whose suite already runs in its own workflow:
+- the named checks must run on `pull_request` and report on the PR head commit (GitHub Actions does), always run (no path filter that can skip them), run the project's `[build]` and `check`s too, and fail when any job they stand for fails or is cancelled: the section gives an aggregate job (`needs:` the suite jobs, `if: always()`, failing unless each needed job's result is `success`, or `skipped` only where the workflow chose to skip it), the shape of Shipcraft's own `acceptance` gate;
+- each name must be unique across the project's workflows and integrations;
+- the re-check job: the guide's workflow without the language setup, checking out `pull_request.head.sha` with `fetch-depth: 0`, `--base` the PR's base SHA, with `GH_TOKEN` and the guide's permissions kept (the default-branch squash rule and the escape check read GitHub);
+- the order: first a PR that adds the re-check job (it runs nothing while the base's `ci` is not `"github"`), then a PR that sets `ci = "github"`, `suite_checks` and `shipcraft_min = "2.18"` (it is still judged by its base's config); after it merges, PRs are judged the new way; then make the named checks and `shipcraft/ci` required where GitHub protects branches.
 
-**Unchanged.** `ci = "local"` and `ci = "off"`; `ci = "github"` without `suite_checks`; `review`; the escape check, which still judges merged PRs by `shipcraft/ci` and `shipcraft/review` only; `init --github`, which still marks `shipcraft/ci` and `shipcraft/review` as required (not the suite checks); docs-only judgment.
+**Unchanged.** `ci = "local"` and `ci = "off"`; `ci = "github"` without `suite_checks`; how `shipcraft/ci` and `shipcraft/review` are read; `review`; the escape check, which still judges merged PRs by `shipcraft/ci` and `shipcraft/review` only; `init --github`, which still marks `shipcraft/ci` and `shipcraft/review` as required (not the suite checks).
 
 **Known limits.**
-- With `suite_checks`, which tests ran is the named checks' business: a check that runs a subset (by impact, as Shipcraft's own `acceptance` does) or skips a locked case is trusted. `shipcraft/ci` proves the commits; the named checks prove the suite.
-- A commit made with `--no-verify` whose locked cases pass and whose lock stayed open is accepted as an open cycle, where a full `shipcraft ci` refuses `lock-not-closed`.
+- Which tests ran is the named checks' business: a check that runs a subset (by impact, as Shipcraft's own `acceptance` does) or skips a locked case is trusted, and so is whether it ran `[build]` and `check`.
+- At HEAD, a lock left open while its cases pass (`lock-not-closed`, a sign of `--no-verify`) and a locked case missing from the run (`case-missing`) are not caught.
+- A provider that reports its check on GitHub's test-merge commit rather than the PR head never makes the name green: it waits or refuses.
 - The escape check does not read the suite checks, so a merge through GitHub's button with a red suite check and a green `shipcraft/ci` is not recorded as an escape.
+- A name with more than 100 matching check runs, or a commit with more than 100 status contexts, is unreadable.
 
 **Versions.** The binary goes to 2.18.0. No lock field changes; `suite_checks` is a new optional config key.
 
-**Battery.** The spec review lists the cases that assert today's `pr merge` arguments, today's `init` comment line, the `status` layers line and the `ci` row fields; the RED adjusts each and names it.
+**Battery.**
+- `v1-59.ci`, `v1-59.ci-mixed`, `v1-59.ci-present`, `v1-59.ci-unreadable`, `v1-59.ci-bad-config`, `v1-59.ci-longest`, `v1-59.ci-remedy` and `v1-59.files-many` assert the exact key set of the `ci` row: the RED adds `suite_in_checks` to it, and nothing else.
+- `v1-42.squash` asserts `--squash` and no title or body, not the whole argument list: it must hold.
+- The `gh` stub (`acceptance/stubs/gh`) enforces `--match-head-commit` against the PR's live head as GitHub does, and serves check runs (with `check_name` and `filter=latest`) and the combined status from state a case sets; `acceptance/README.md` lists both.
 
 ### `shipcraft pr`
 
