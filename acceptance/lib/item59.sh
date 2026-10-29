@@ -267,7 +267,8 @@ if ci or mode=='files-many':
   # These are Git's public blob-reading interfaces, not a substitute report or lock.
   wrapper="#!"+sys.executable+"\nimport os,sys,subprocess\nfrom pathlib import Path\na=sys.argv[1:]\nreal="+repr(realgit)+"\n"
   wrapper+="target=os.environ.get('ITEM59_CHECKED','')\nready=Path(os.environ['ITEM59_READY'])\n"
-  wrapper+="if ready.exists() and a and a[0] in ('show','cat-file'):\n    for arg in a[1:]:\n        if arg.endswith(':.shipcraft.toml'):\n            ref=arg.rsplit(':',1)[0]\n            p=subprocess.run([real,'rev-parse','-q','--verify',ref],capture_output=True,text=True)\n            if p.returncode==0 and p.stdout.strip() in set(target.split(',')):\n"
+  wrapper+="b=list(a)\nwhile b and b[0].startswith('-'):\n    b=b[2:] if b[0] in ('-C','-c') else b[1:]\n"
+  wrapper+="if ready.exists() and b and b[0] in ('show','cat-file'):\n    for arg in b[1:]:\n        if arg.endswith(':.shipcraft.toml'):\n            ref=arg.rsplit(':',1)[0]\n            p=subprocess.run([real,'rev-parse','-q','--verify',ref],capture_output=True,text=True)\n            if p.returncode==0 and p.stdout.strip() in set(target.split(',')):\n"
   if mode=='ci-unreadable': wrapper+="                sys.stderr.write('fatal: item59 config object unreadable\\n'); sys.exit(128)\n"
   else: wrapper+="                sys.stdout.write('suite = [\\n'); sys.exit(0)\n"
   wrapper+="os.execv(real,[real,*a])\n"
