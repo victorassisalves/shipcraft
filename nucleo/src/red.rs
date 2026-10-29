@@ -449,7 +449,9 @@ fn warn_outside_globs(repo: &Repo, config: &Config, changed: &std::result::Resul
         .iter()
         .filter_map(|(_, path)| std::str::from_utf8(path).ok())
         .filter(|path| test_named(path) && !config.is_test_file(path))
+        // A regular file as `lstat` sees it, and readable (as item 55's selection asks).
         .filter(|path| fs::symlink_metadata(repo.path(path)).is_ok_and(|m| m.is_file()))
+        .filter(|path| fs::File::open(repo.path(path)).is_ok())
         .collect();
     if outside.is_empty() {
         return;
