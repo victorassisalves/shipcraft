@@ -1,0 +1,101 @@
+# Dogfood step 3 (2026-10-29), from docs/github-ci.md "The suite in your own checks".
+# Runs nothing until main's .shipcraft.toml has ci = "github" and a non-empty
+# suite_checks; then it publishes shipcraft/ci, the commit re-check, in about
+# 2 minutes, while the `acceptance` workflow runs the battery in 10 shards.
+# Revert: delete this file (and set ci back in .shipcraft.toml).
+# Shipcraft: with [execution] suite_checks, shipcraft/ci re-checks every commit
+# of the PR; the named checks run the suite.
+name: shipcraft-recheck
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+
+jobs:
+  recheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      # The same reader as the full-suite job, for the other publisher.
+      - name: Does this job publish shipcraft/ci?
+        id: layer
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          PUBLISHER: recheck
+        run: |
+          # A base without the file falls back to HEAD's; a file the base has
+          # but that cannot be read or parsed fails the step.
+          CFG=.shipcraft.toml
+          if [ -n "$BASE_SHA" ] && git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            ENTRY=$(git ls-tree "$BASE_SHA" -- .shipcraft.toml) \
+              || { echo "::error::cannot read the tree of $BASE_SHA"; exit 1; }
+            if [ -n "$ENTRY" ]; then
+              git show "$BASE_SHA:.shipcraft.toml" > "$RUNNER_TEMP/base.shipcraft.toml" \
+                || { echo "::error::cannot read .shipcraft.toml at $BASE_SHA"; exit 1; }
+              CFG="$RUNNER_TEMP/base.shipcraft.toml"
+            fi
+          fi
+          python3 - "$CFG" >> "$GITHUB_OUTPUT" <<'PY'
+          import os, sys, tomllib
+          path = sys.argv[1]
+          config = {}
+          if os.path.exists(path):
+              with open(path, "rb") as f:
+                  config = tomllib.load(f)  # a file that cannot be parsed fails the step
+          execution = config.get("execution", {})
+          checks = execution.get("suite_checks", [])
+          mode = "none"
+          if execution.get("ci") == "github":
+              if checks == []:
+                  mode = "full"
+              elif isinstance(checks, list):
+                  mode = "recheck"
+          print("mode=" + mode)
+          print("run=" + ("true" if mode == os.environ["PUBLISHER"] else "false"))
+          PY
+
+      # No Linux release asset: build shipcraft from the base commit's nucleo/,
+      # so a PR is never judged by its own code.
+      - name: Build Shipcraft at the base
+        if: steps.layer.outputs.run == 'true'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then BASE=HEAD; fi
+          git worktree add -q --detach "$RUNNER_TEMP/judge" "$BASE"
+          cargo build --release -q -j 4 --manifest-path "$RUNNER_TEMP/judge/nucleo/Cargo.toml"
+          echo "$RUNNER_TEMP/judge/nucleo/target/release" >> "$GITHUB_PATH"
+
+      - name: Re-check commits
+        id: ci
+        if: steps.layer.outputs.run == 'true'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            BASE=$(git rev-list --max-parents=0 HEAD | tail -n 1)
+          fi
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            shipcraft ci --base "$BASE" --pr
+          else
+            shipcraft ci --base "$BASE"
+          fi
+
+      - name: Publish shipcraft/ci
+        if: always() && steps.layer.outputs.run == 'true' && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATE: ${{ steps.ci.outcome == 'success' && 'success' || 'failure' }}
+        run: |
+          gh api -X POST "repos/${{ github.repository }}/statuses/${{ github.event.pull_request.head.sha }}" \
+            -f context=shipcraft/ci -f state="$STATE" -f description="GitHub Actions (re-check)"
