@@ -370,6 +370,34 @@ Before item 58, `init` wired the hooks to the binary that ran it: plain git hook
   - **The launcher and the binary can differ.** `.bin/shipcraft` is whatever the package manager linked there. If a nested dependency carries a different version, the hooks call the root one, not necessarily the one that ran `init`.
   - **Hook managers that run from another folder.** A manager that does not run hooks from the repository root does not find the relative path; lefthook's `root:` option is one case.
 
+### Onboarding the coding agents (item 61)
+
+POC-021 (2026-10-29, Shipcraft 2.14.0 from npm) asked Claude Code and Codex, in a fresh session each, to install Shipcraft in two sample projects and then add a small feature. No run closed a cycle. 3 of 4 runs stopped at `pnpm add -D shipcraft` and never ran `init`; each checked the install with `shipcraft --version` or `--help`. In the one run where `init` wrote the `AGENTS.md` block, Claude ran `red` unprompted, citing the block, but did RED and GREEN in one session and committed nothing. Item 61 changes what those two touch points say.
+
+- **The block asks for separate sessions and commits.**
+  - The block becomes the text below `AGENTS_BLOCK` in `nucleo/src/init.rs`, between a start line `<!-- shipcraft -->` and an end line `<!-- /shipcraft -->`. Besides today's rules it says, in this order: the RED and the GREEN are done by different agent sessions (in Claude Code a subagent per phase; in Codex a new `codex exec` session per phase, never `resume`), the RED session commits the tests with the lock and stops, and the GREEN session starts from that commit, changes only product code and commits; a test the GREEN finds wrong is reported back, not edited (`shipcraft red --redo` in a RED session, item 46).
+  - **Where the block already is.** When the file holds exactly one start line and, after it, exactly one end line, `init` replaces the lines from the start line through the end line with the new block and keeps every other byte. When it holds the start line and, after it, the exact text of a block an earlier version wrote (the 2.14.0 block, kept in the binary as a known old block), with no end line, that text is replaced the same way. Any other file with the start line (two start lines, an end line before the start line, an edited old block) is kept, with today's notice that the block was kept plus `edit it by hand to match docs/spec.md`. A block equal to the new one is kept and says so, as today. No change when the file has no start line: the block is appended as today.
+  - Symlinks, read and write failures: as today (kept, with a notice, never failing the init). The write replaces the file atomically (a temporary file in the same folder renamed over it), so a failed write leaves the old bytes.
+- **`CLAUDE.md` imports the block.** Claude Code reads `CLAUDE.md`, and reads another file through an `@path` import line.
+  - `init` handles `CLAUDE.md` at the repository root when it exists, or when `claude` is on `PATH` (the agent detection `init` already does for review). The Shipcraft part of `CLAUDE.md` is three lines: `<!-- shipcraft -->`, `Shipcraft workflow (required): @AGENTS.md`, `<!-- /shipcraft -->`.
+  - With no file, `init` creates it with those lines. With a file that has no start line, it appends them as it appends to `AGENTS.md` (same separator rule). With a start line, the same rules as `AGENTS.md` apply, with those three lines as the block and no known old block.
+  - When `AGENTS.md` was not written and has no block after `init` (a symlink, a failed write, a kept edited block that lacks the start line is impossible), `CLAUDE.md` is not touched either, with the notice `shipcraft: CLAUDE.md not written: AGENTS.md has no shipcraft block`.
+  - `init`'s closing line lists `CLAUDE.md` among the files to commit when it wrote it, as it lists `AGENTS.md`.
+- **`--version` and usage say when `init` is missing.** After their usual output, `shipcraft --version` and the usage (no arguments, `help`, `-h`, `--help`) print one line to stderr when the current folder is inside a git work tree (`git rev-parse --show-toplevel` succeeds) whose root has no `.shipcraft.toml` (a regular file as `lstat` sees it): `shipcraft: not set up in this repository: run shipcraft init (from a package install: pnpm exec shipcraft init, or npx shipcraft init)`. Outside a git work tree, when git fails, or when the file exists, nothing is added. Their stdout and exit codes do not change.
+- **Docs.** The README's quick start and the npm package README say that installing is two steps: add the package, then run `init`.
+
+**Unchanged.** The block's existing rules, the hook, `red`, every refusal, the config `init` writes, and `init`'s refusals: a refused `init` still writes neither file.
+
+**Battery.** The item 8 cases on `AGENTS.md` (`v1` lines on "AGENTS.md has the block", "exactly one block", "already has the shipcraft block", the symlink) must hold: the start line is unchanged and the old-block upgrade only applies to the exact 2.14.0 text. Cases that compare `--version` or usage output byte for byte read stdout only, or run outside a repository without config.
+
+**Versions.** The item raises the binary to 2.17.0. No lock or config field changes.
+
+**Known limits.**
+- Whether an agent follows the block is measured by POC-021's after runs, not by the battery.
+- Codex and other agents read `AGENTS.md` directly; agents that read neither file are not covered.
+- A `CLAUDE.md` in a subfolder, or a user-level `~/.claude/CLAUDE.md`, is not read or written.
+- An `AGENTS.md` block edited by hand is never upgraded.
+
 ## 4. Configuration
 
 `.shipcraft.toml` lives at the project root.
@@ -665,4 +693,4 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.16.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.17.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
