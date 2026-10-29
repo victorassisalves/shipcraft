@@ -71,22 +71,28 @@ cargo install --path nucleo
 
 `install.sh --version <v>` pins a version and `install.sh --uninstall` removes the binary. It needs `gh` logged in. With the npm install, `shipcraft` is not on your `PATH`: run it through the project (`pnpm exec shipcraft …` or `npx -- shipcraft …`).
 
-With `install.sh` or `cargo install`, step 2 is, in your project:
+With `install.sh` or `cargo install`, step 2 is, in your project (`install.sh` puts the binary in `~/.local/bin`; if that folder is not on your `PATH`, run `export PATH="$HOME/.local/bin:$PATH"` first, or add it to your shell profile):
 
 ```bash
 shipcraft init          # detects the language, writes .shipcraft.toml, wires the hook
 ```
 
-Either way, `init` ends with the files to commit (`shipcraft: ready. Commit …`): `.shipcraft.toml`, `.shipcraft/`, and the hook manager's file and `AGENTS.md`/`CLAUDE.md` when it wrote them. Commit all of them, so every clone gets the hooks and the agents' instructions:
+Either way, `init` ends with the files to commit (`shipcraft: ready. Commit …`): `.shipcraft.toml`, `.shipcraft/`, and the hook manager's file and `AGENTS.md`/`CLAUDE.md` when it wrote them. Commit all of them, plus `package.json` and its lockfile with the npm install:
 
 ```bash
-git add .shipcraft.toml .shipcraft    # plus every other file init listed (AGENTS.md, CLAUDE.md, the hook manager's file)
+git add .shipcraft.toml .shipcraft    # plus every other file init listed (AGENTS.md, CLAUDE.md, the hook manager's file),
+                                      # and package.json with pnpm-lock.yaml or package-lock.json
 git commit -m "add shipcraft"
 ```
+
+Git does not commit hooks: every other clone installs the dependencies and runs `init` once (or the hook manager's install). Until then nothing runs at its commits, and CI is the backstop.
 
 A cycle (with the npm install, run each `shipcraft` command through the project's install, from the repository root: `pnpm exec shipcraft red` or `npx -- shipcraft red`; `git` stays as is):
 
 ```bash
+# work on a branch: `shipcraft pr` refuses the default branch
+git switch -c invoice-rounding
+
 # RED: write the failing tests, then lock them
 shipcraft red
 git add -A && git commit -m "red: invoice rounding"
@@ -94,10 +100,12 @@ git add -A && git commit -m "red: invoice rounding"
 # GREEN: write the code; commit as often as you like
 git commit -am "fix rounding"      # the lock closes on the first fully green commit
 
-# open the PR (needs a GitHub remote and gh logged in): CI and review run, and their statuses are published
+# open the PR (needs a GitHub remote named origin and gh logged in): CI runs, then the review
+# when an agent is configured (init turns review off if it finds no codex, claude or gemini),
+# and their statuses are published
 shipcraft pr --title "Invoice rounding"
 
-# merge only when both are green
+# merge only when CI is green and the review approved (or is off)
 shipcraft merge 42
 ```
 
