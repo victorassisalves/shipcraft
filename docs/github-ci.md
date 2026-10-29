@@ -47,9 +47,17 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           PUBLISHER: full
         run: |
+          # A base without the file falls back to HEAD's; a file the base has
+          # but that cannot be read or parsed fails the step.
           CFG=.shipcraft.toml
-          if [ -n "$BASE_SHA" ] && git show "$BASE_SHA:.shipcraft.toml" > "$RUNNER_TEMP/base.shipcraft.toml" 2>/dev/null; then
-            CFG="$RUNNER_TEMP/base.shipcraft.toml"
+          if [ -n "$BASE_SHA" ] && git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            ENTRY=$(git ls-tree "$BASE_SHA" -- .shipcraft.toml) \
+              || { echo "::error::cannot read the tree of $BASE_SHA"; exit 1; }
+            if [ -n "$ENTRY" ]; then
+              git show "$BASE_SHA:.shipcraft.toml" > "$RUNNER_TEMP/base.shipcraft.toml" \
+                || { echo "::error::cannot read .shipcraft.toml at $BASE_SHA"; exit 1; }
+              CFG="$RUNNER_TEMP/base.shipcraft.toml"
+            fi
           fi
           python3 - "$CFG" >> "$GITHUB_OUTPUT" <<'PY'
           import os, sys, tomllib
@@ -200,8 +208,8 @@ judges it. Both jobs start with the same reader: a step that reads
 `.shipcraft.toml` at the commit the job passes as `--base` (the PR's base SHA
 on `pull_request`, the `before` SHA on `push`; `git show <that sha>:.shipcraft.toml`)
 with Python's `tomllib` (present on GitHub's Ubuntu runners), not `grep`. A
-base without the file falls back to HEAD's; a file that exists but cannot be
-parsed fails the step.
+base without the file falls back to HEAD's; a file the base has but that cannot
+be read or parsed fails the step.
 
 - The full-suite job (the workflow above) runs only when `execution.ci` is
   `"github"` and `execution.suite_checks` is absent or empty.
@@ -243,9 +251,17 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           PUBLISHER: recheck
         run: |
+          # A base without the file falls back to HEAD's; a file the base has
+          # but that cannot be read or parsed fails the step.
           CFG=.shipcraft.toml
-          if [ -n "$BASE_SHA" ] && git show "$BASE_SHA:.shipcraft.toml" > "$RUNNER_TEMP/base.shipcraft.toml" 2>/dev/null; then
-            CFG="$RUNNER_TEMP/base.shipcraft.toml"
+          if [ -n "$BASE_SHA" ] && git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            ENTRY=$(git ls-tree "$BASE_SHA" -- .shipcraft.toml) \
+              || { echo "::error::cannot read the tree of $BASE_SHA"; exit 1; }
+            if [ -n "$ENTRY" ]; then
+              git show "$BASE_SHA:.shipcraft.toml" > "$RUNNER_TEMP/base.shipcraft.toml" \
+                || { echo "::error::cannot read .shipcraft.toml at $BASE_SHA"; exit 1; }
+              CFG="$RUNNER_TEMP/base.shipcraft.toml"
+            fi
           fi
           python3 - "$CFG" >> "$GITHUB_OUTPUT" <<'PY'
           import os, sys, tomllib
