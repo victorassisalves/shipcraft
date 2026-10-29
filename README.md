@@ -97,7 +97,7 @@ shipcraft merge 42
 
 `shipcraft status` shows the open locks and how protected the repository really is.
 
-Upgrading: with the npm install, `pnpm add -D shipcraft@latest` (or `npm i -D shipcraft@latest`) and commit `package.json` with the lockfile; every clone then gets the same version. To go back, pin the previous one exactly: `pnpm add -DE shipcraft@<version>`, and commit both files again. With `install.sh`, run it again, or `install.sh --version <version>`. A version older than the config's `shipcraft_min` refuses to run: going back past it also means lowering `shipcraft_min` in `.shipcraft.toml`, with no lock open. Release notes say which version to go back to when a release changes something you may want to undo.
+Upgrading: with the npm install, `pnpm add -DE shipcraft@latest` (or `npm i -D --save-exact shipcraft@latest`) and commit `package.json` with the lockfile; every clone then gets the same version. To go back, pin the previous one exactly: `pnpm add -DE shipcraft@<version>`, and commit both files again. With `install.sh`, run it again, or `install.sh --version <version>`. A version older than the config's `shipcraft_min` refuses to run: going back past it also means lowering `shipcraft_min` in `.shipcraft.toml`, with no lock open. Release notes say which version to go back to when a release changes something you may want to undo.
 
 ## Commands
 
