@@ -445,6 +445,8 @@ run_case() {
     pass ;;
   init-files)
     EXPECT="config, locks, hook and the AGENTS.md block only"
+    # Use the battery's agent-free PATH, regardless of the caller's Claude install.
+    v1_start
     find .git -type f ! -path '.git/objects/*' ! -path '.git/logs/*' | sort > "$CW/git.before"
     must_accept "shipcraft init" cmd shipcraft init
     find .git -type f ! -path '.git/objects/*' ! -path '.git/logs/*' | sort > "$CW/git.after"
