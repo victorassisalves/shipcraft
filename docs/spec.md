@@ -183,6 +183,34 @@ Before item 55, `red` ran every suite in full to learn which cases fail, and mos
 - Go's case-to-file map reads test declarations line by line, as the hook does. A test it does not recognize maps to no file, so it falls back to the full run.
 - A fallback after a narrowed run costs both runs. The log's `fallback` field measures how often that happens.
 
+### A new suite reaches the base first (item 59)
+
+A PR is judged by its base's config (section 4), so a `[[suite]]` added in the same PR as its first tests does not run in CI yet. Before item 59 nothing said so. In draken-platform PR #42 (2.13.1, 2026-10-28) the RED added the package `packages/jobs` with its tests and no suite: `red` locked 2 cases from the suites already configured and ran none of the 80 new tests, silently. The RED then added the suite and locked again, and `ci` refused `case(s) from lock … are missing from the report`, which reads as a filter problem. The way out was a separate PR that brought the empty package and its suite to main first. Item 59 changes no verdict: `red` warns, and `ci` names the cause.
+
+- **`red` warns about test files in no suite.**
+  - A *test-named file* is a path whose file name matches one of `test_*.py`, `*_test.py`, `*_test.go`, or `*.test.<ext>` / `*.spec.<ext>` with `<ext>` one of `js`, `jsx`, `mjs`, `cjs`, `ts`, `tsx`, `mts`, `cts`.
+  - `red` (with or without `--redo`) takes item 55's changed paths, with item 55's base and commands. When either cannot be read (item 55's fallbacks for the base and for a failing git command), there is no warning. Paths deleted from the working tree are not candidates.
+  - It warns about every changed test-named path that matches the globs of no suite of the working tree's config, matched as protection matches them (relative to each suite's `root`). Item 55's fallbacks to the full run (a changed `.shipcraft.toml`, an unreadable path) do not suppress it.
+  - The warning goes to stderr before any suite runs, as one line: `shipcraft: warning: <n> changed test file(s) belong to no suite and will not run: <paths>; add a [[suite]] for them, in a PR of its own first (CI judges a PR by its base's .shipcraft.toml)`. `<paths>` are repository-relative, in byte order, with the list formatting of refusals that name cases.
+- **`red` warns about locked suites the base does not have.**
+  - The *base config* is the `.shipcraft.toml` at the commit that item 55's base ref resolves to (the ref itself, not the merge base), as `ci` reads `origin/<base>` as it is now. When the ref does not resolve, or that commit has no `.shipcraft.toml` or one that does not parse, there is no warning.
+  - After `red` writes its lock (never on a refusal), it warns about every suite that has a case in the lock's `failing_at_red` and whose name is not a suite name of the base config (the top-level form's name included): `shipcraft: warning: the lock has RED cases in suite(s) absent from <ref>'s .shipcraft.toml: <names>; CI judges a PR by its base's config and will refuse them as case-missing; bring the suite to <ref> in a PR of its own, then rebase this branch`. `<names>` are in byte order.
+  - A suite whose name is in the base config counts as present, even if its command, root or globs differ.
+- **`ci` names the cause of `case-missing`.**
+  - When a missing locked case's suite prefix names no suite of the config `ci` judges with, the refusal keeps the code `case-missing` and says so: `case(s) from lock <path> belong to suite(s) absent from the base's .shipcraft.toml: <names> (<n> case(s))`. `Why:` a PR is judged by its base's config, so a suite added in the same PR does not run yet. `Next:` bring the `[[suite]]` entry (with its package and test setup, without its RED tests) to the base in a PR of its own, merge it, then rebase this branch and run `shipcraft ci` again.
+  - When missing cases come from present and absent suites alike, this text wins; the present suites' cases show on the next run, after the rebase.
+  - Missing cases whose suites are all present refuse as today, with today's text.
+- **Docs.** The README's configuration section says how to add a package with a new suite: the suite first, in its own PR, then the RED.
+
+**Unchanged.** Every verdict and exit code: the warnings never refuse and never change the lock, the run log or the narrowed selection. The hook (which judges with the commit's own config) and every other refusal.
+
+**Versions.** The item raises the binary to 2.15.0. No lock or config field changes.
+
+**Known limits.**
+- A test file named by none of the patterns (a vitest `include` with other names, a Go helper) gets no warning.
+- The second warning reads the base ref as this clone last fetched it; a suite merged to the base since then still warns until the next fetch.
+- A suite renamed in the PR reads as absent from the base.
+
 ### The lock closes by itself
 
 The first commit after RED in which every case in `failing_at_red` passes, none skipped or missing, closes the lock. The `commit-msg` hook judges the commit and the `post-commit` hook writes `closed` in a separate closing commit right after it (see `init`). The closing commit that `close` creates (post-commit or a manual retry; not a user's own commit judged by `check`) has the subject `chore(shipcraft): close lock <ids>`: the lock ids (file names without `.json`) in bytewise ascending order joined by `, `, one line ending in LF, no body or trailers (item 49; this fixes the order item 17 left free). Before item 49 the subject was `shipcraft: close lock <ids>`, outside the Conventional Commits form draken-platform's checks use. The guarantee is this literal subject, not acceptance by every project policy: a commitlint scope list without `shipcraft`, or a subject-length limit with many locks, can still refuse it, and closing commits already in history keep their old subject. No hook runs on the closing commit, as before; nothing in Shipcraft reads the subject, and a lock closed under either subject is judged by its state. A merge is judged against both parents, as in CI. A closed lock no longer restricts the tests.
