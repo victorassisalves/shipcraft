@@ -334,7 +334,6 @@ impl Config {
             Err(e) => return not_toml(text, &e),
         };
         check_execution(text)?;
-        config.papeis = check_roles(text, std::mem::take(&mut config.papeis_raw))?;
         config.execucao.suite_checks = config
             .execucao
             .suite_checks_raw
@@ -342,6 +341,8 @@ impl Config {
             .and_then(|v| v.as_array().map(|a| a.iter().filter_map(|e| e.as_str().map(str::to_string)).collect()))
             .unwrap_or_default();
         config.normalize()?;
+        // Item 64: after every check that refused before it.
+        config.papeis = check_roles(text, std::mem::take(&mut config.papeis_raw))?;
         Ok(config)
     }
 
@@ -928,6 +929,15 @@ globs = ["tests/**"]
                 Err(crate::refusal::Stop::Refused(r)) => assert_eq!(r.code, "config-invalid", "{text}"),
                 _ => panic!("{text}"),
             }
+        }
+    }
+
+    #[test]
+    fn role_checks_come_after_the_existing_refusals() {
+        let text = "shipcraft_min = \"2.20\"\n[[suite]]\nroot = \"/outside\"\ncommand = \"true\"\n[roles]\nred = \"invalid-agent\"\n";
+        match Config::parse(text) {
+            Err(crate::refusal::Stop::Refused(r)) => assert!(r.what().contains("root = \"/outside\""), "{}", r.what()),
+            _ => panic!("accepted"),
         }
     }
 
