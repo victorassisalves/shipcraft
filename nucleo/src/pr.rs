@@ -111,6 +111,8 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>) -> Result<(
                     body: body.clone().unwrap_or_default(),
                     pr: Some(number),
                     branch: branch.clone(),
+                    // Item 63: the CI gate passed at this head with local or GitHub CI.
+                    after_green_ci: matches!(ci, Camada::Local | Camada::Github),
                 };
                 review_and_publish(&req)?
             }
@@ -392,6 +394,7 @@ pub fn local(repo: &Repo) -> Result<()> {
         base_sha,
         pr: None,
         branch: repo.branch(),
+        after_green_ci: false,
     };
     let review = revisao::run(&req)?;
     println!("{}", review.text);
@@ -441,6 +444,7 @@ pub fn of_pr(repo: &Repo, number: &str) -> Result<()> {
         body: field("body"),
         pr: pr["number"].as_u64(),
         branch: field("headRefName"),
+        after_green_ci: false,
     };
     match review_and_publish(&req)? {
         Gate::Passed => Ok(()),
