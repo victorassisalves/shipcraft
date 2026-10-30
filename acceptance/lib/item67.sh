@@ -27,7 +27,7 @@ def write(path,data,mode=None):
 def snapshot(stable_git=False):
  def entry(p):
   return (stat.S_IMODE(p.lstat().st_mode), 'link',os.readlink(p)) if p.is_symlink() else (stat.S_IMODE(p.stat().st_mode),'file',p.read_bytes()) if p.is_file() else (stat.S_IMODE(p.stat().st_mode),'dir')
- # Refusals preserve working-tree bytes and Git state, not Git's cache bytes.
+ # Unchanged-state checks preserve working-tree bytes and Git state, not Git's cache bytes.
  result={str(p):entry(p) for p in Path('.').rglob('*') if not stable_git or p.parts[0]!='.git'}
  if stable_git:
   # Keep byte-level coverage for hooks and Shipcraft's own Git-local writes.
@@ -43,6 +43,11 @@ def snapshot(stable_git=False):
    assert p.returncode==0 or (args[0]=='symbolic-ref' and p.returncode==1),('snapshot Git reader failed',args,p.returncode,text(p))
    result[('git',*args)]=(p.returncode,p.stdout)
  return result
+def assert_snapshot(before,message):
+ after=snapshot(stable_git=True)
+ missing=object()
+ differing=sorted((k for k in before.keys()|after.keys() if before.get(k,missing)!=after.get(k,missing)),key=repr)
+ assert not differing,message+'; differing keys (up to 10): '+repr(differing[:10])
 def text(p):return (p.stdout+p.stderr).decode()
 FULL="shipcraft init --lang other --command '<test command writing JUnit to {junit}>' --glob '<test files>'"
 CMD='sh tests/run.sh {junit}'
@@ -70,8 +75,8 @@ if case.startswith('detection'):
   # Creation order cannot decide the language.
   for name,data in ([('requirements.txt','pytest'),('go.mod','module example.com/m\n\ngo 1.21\n')] if not case.endswith('reverse') else [('go.mod','module example.com/m\n\ngo 1.21\n'),('requirements.txt','pytest')]):write(name,data)
  if case=='detection-kept':write('.shipcraft.toml','test_command = "sh tests/run.sh {junit}"\ntest_globs = ["tests/**"]\nfilter = "command"\n')
- before=snapshot();p=init([],False);refusal(p)
- assert snapshot()==before,'refused init changed files'
+ before=snapshot(stable_git=True);p=init([],False);refusal(p)
+ assert_snapshot(before,'refused init changed files')
  if 'multiple' not in case:
   assert 'could not recognize' in text(p).lower(),text(p)
   assert 'JUnit' in text(p).split('Why:',1)[1].split('Next:',1)[0],text(p)
@@ -122,7 +127,7 @@ if case.startswith('refuse-'):
   lines=refusal(p,full,needle)
   if c=='foreign-hook':assert 'shipcraft check' in lines[-1],lines
   if c in ('glob-order','glob-order-reverse'):assert b not in '\n'.join(lines[:2]),lines
- assert snapshot(stable_git=True)==before,'refused init changed tree or git state'
+ assert_snapshot(before,'refused init changed tree or git state')
  sys.exit()
 # Successful custom init must neither execute the command nor infer a language runner.
 args=GOOD[:];expected_globs=['tests/**'];command=CMD
@@ -157,10 +162,10 @@ if case in ('github','github-free','kept-github'):
  run('git','push','-q','origin','main');run('git','fetch','-q','origin');run('git','remote','set-head','origin','main')
  write(st/'protection','403\n' if case=='github-free' else 'none\n');args+=['--github']
 if case.startswith('rollback'):
- write('.shipcraft','blocked67\r\n');before=snapshot();p=init(args,False)
+ write('.shipcraft','blocked67\r\n');before=snapshot(stable_git=True);p=init(args,False)
  assert p.returncode==2,('late write failure must be exit 2',p.returncode,text(p))
  assert '.shipcraft' in text(p).split('shipcraft: error:',1)[-1],('did not reach late write failure',text(p))
- assert snapshot()==before,'late failure failed to restore bytes/modes'
+ assert_snapshot(before,'late failure failed to restore bytes/modes')
  assert 'ready. Commit' not in text(p),text(p)
  sys.exit()
 # Runner exists but must never be executed by init.
