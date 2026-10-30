@@ -2,7 +2,7 @@
 # metrics/dogfood-red-2026-10-28.md: red 99 s, hook p90 22.9 s). Metric: RED->main
 # time against the 11 min median, false hook refusals, hook and red times.
 # Revert: delete this file and .shipcraft/locks/.
-shipcraft_min = "2.13"
+shipcraft_min = "2.18"
 
 [[suite]]
 name = "acceptance"
@@ -12,9 +12,18 @@ globs = ["acceptance/lib/**", "acceptance/tools/**", "acceptance/fixtures/**", "
 filter = "command"
 
 [execution]
-ci = "off"
+# Dogfood step 3b (2026-10-30): CI runs on GitHub. The suite runs in the `acceptance`
+# check (10 Linux shards, ~4 min, .github/workflows/acceptance.yml); `shipcraft/ci`
+# (.github/workflows/shipcraft.yml) re-checks every commit's locks, hashes and config
+# without rerunning the suite (item 62). `shipcraft pr` waits for both, and
+# `shipcraft merge` requires both at the PR head.
+# Metric: RED->main median <= 14 min over the next 5 items, 0 false refusals.
+# Revert: ci = "off", drop suite_checks, shipcraft_min back to "2.13".
+ci = "github"
+suite_checks = ["acceptance"]
 # Dogfood step 2 (2026-10-29): the product's review replaces the hand-made Codex prompt.
-# The QA brief runs the full battery (~12 min here), hence the longer timeout.
+# After green CI the reviewer does not rerun the battery (item 63, 2.19.0); until that
+# binary is installed it still does (~20 min here), hence the longer timeout.
 # Revert: review = "off" and drop [roles] and [review].
 review = "local"
 
