@@ -108,21 +108,85 @@ impl Chosen {
 /// A changed path as git reports it: whether it was at the base, and its bytes.
 pub type ChangedPath = (bool, Vec<u8>);
 
-/// The ref `red` narrows against: `base`, or origin's HEAD when not given.
-pub fn base_ref(base: Option<&str>) -> &str {
-    base.unwrap_or(DEFAULT_BASE)
+/// The commit `red` compares with (item 66): `--base`, or the first of the
+/// candidates that resolves to a commit, and how messages name it.
+#[derive(Clone, Debug)]
+pub struct Compared {
+    pub commit: String,
+    pub shown: String,
+    /// The base came from a candidate after `origin/HEAD` (item 66, point 4).
+    missing_origin_head: bool,
 }
 
-/// The base ref as messages name it (item 59).
-pub fn shown_ref(base: Option<&str>) -> &str {
-    base.unwrap_or("origin/HEAD")
+impl Compared {
+    /// Item 66: the line right before the selection line, when the base came
+    /// from a candidate after `origin/HEAD`.
+    pub fn notice(&self) -> Option<String> {
+        self.missing_origin_head
+            .then(|| format!("shipcraft: red compared with {} (origin/HEAD is missing)", self.shown))
+    }
 }
 
-/// The paths changed since the merge base of HEAD and the base ref, or why
-/// they cannot be read; item 59 reads them even when the plan is not narrowed.
-pub fn changed(repo: &Repo, base: Option<&str>) -> std::result::Result<Vec<ChangedPath>, Fallback> {
-    let base = base_commit(repo, base_ref(base))?;
-    changed_paths(repo, &base).ok_or(Fallback::GitFailed)
+/// The base or why there is none: the commit and the fallback merge-base
+/// failures give still name it (item 66, points 2 and 4).
+pub type Base = std::result::Result<Compared, Fallback>;
+
+/// Item 66: the candidates without `--base`, in order, with their short
+/// names; `HEAD` is the last.
+const CANDIDATES: [(&str, &str); 5] = [
+    (DEFAULT_BASE, "origin/HEAD"),
+    ("refs/remotes/origin/main", "origin/main"),
+    ("refs/remotes/origin/master", "origin/master"),
+    ("refs/heads/main", "main"),
+    ("refs/heads/master", "master"),
+];
+
+/// The base `red` compares with. With `--base`, that ref as item 55 reads it.
+/// Without, item 66: `HEAD` first (unborn is `no base`), then the first
+/// candidate that resolves to a commit, each resolved once.
+pub fn base(repo: &Repo, base: Option<&str>) -> Base {
+    if let Some(rev) = base {
+        let commit = repo.resolve(rev).map_err(|_| Fallback::GitFailed)?.ok_or(Fallback::NoBase)?;
+        return Ok(Compared { commit, shown: rev.to_string(), missing_origin_head: false });
+    }
+    let head = commit_of(repo, "HEAD")?.ok_or(Fallback::NoBase)?;
+    for (i, (rev, shown)) in CANDIDATES.iter().enumerate() {
+        if let Some(commit) = commit_of(repo, rev)? {
+            return Ok(Compared { commit, shown: shown.to_string(), missing_origin_head: i > 0 });
+        }
+    }
+    // The last candidate is `HEAD`, already resolved above.
+    Ok(Compared { commit: head, shown: "HEAD".to_string(), missing_origin_head: true })
+}
+
+/// `git rev-parse --verify -q <rev>^{commit}`: exit 1 is None; any other exit,
+/// a signal, a failure to start git, or output that is not one commit id is
+/// `git failed`.
+fn commit_of(repo: &Repo, rev: &str) -> std::result::Result<Option<String>, Fallback> {
+    let spec = format!("{rev}^{{commit}}");
+    let out = git_in(repo.root(), &["rev-parse", "--verify", "-q", &spec]).map_err(|_| Fallback::GitFailed)?;
+    match out.status.code() {
+        Some(0) => {
+            let text = String::from_utf8(out.stdout).map_err(|_| Fallback::GitFailed)?;
+            let id = text.strip_suffix('\n').unwrap_or(&text);
+            let hex = id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+            if hex && matches!(id.len(), 40 | 64) {
+                Ok(Some(id.to_string()))
+            } else {
+                Err(Fallback::GitFailed)
+            }
+        }
+        Some(1) => Ok(None),
+        _ => Err(Fallback::GitFailed),
+    }
+}
+
+/// The paths changed since the merge base of HEAD and the base, or why they
+/// cannot be read; item 59 reads them even when the plan is not narrowed.
+pub fn changed(repo: &Repo, base: &Base) -> std::result::Result<Vec<ChangedPath>, Fallback> {
+    let compared = base.as_ref().map_err(|why| *why)?;
+    let merge_base = merge_base(repo, &compared.commit)?;
+    changed_paths(repo, &merge_base).ok_or(Fallback::GitFailed)
 }
 
 /// The plan for `red`: `--all`, or the changed test files among `changed`;
@@ -203,13 +267,13 @@ fn add_lock_files(
     Ok(())
 }
 
-/// The one merge base of HEAD and `rev`.
-fn base_commit(repo: &Repo, rev: &str) -> std::result::Result<String, Fallback> {
-    let Some(base) = repo.resolve(rev).map_err(|_| Fallback::GitFailed)? else { return Err(Fallback::NoBase) };
+/// The one merge base of HEAD and the base commit; zero or several is
+/// `no merge base`, and no other candidate is tried (item 66).
+fn merge_base(repo: &Repo, base: &str) -> std::result::Result<String, Fallback> {
     if repo.head().map_err(|_| Fallback::GitFailed)?.is_none() {
         return Err(Fallback::NoMergeBase);
     }
-    let out = git_in(repo.root(), &["merge-base", "--all", "HEAD", &base]).map_err(|_| Fallback::GitFailed)?;
+    let out = git_in(repo.root(), &["merge-base", "--all", "HEAD", base]).map_err(|_| Fallback::GitFailed)?;
     let bases: Vec<&[u8]> = out.stdout.split(|b| *b == b'\n').filter(|line| !line.is_empty()).collect();
     match (out.status.code(), &bases[..]) {
         (Some(0), [one]) => Ok(String::from_utf8_lossy(one).into_owned()),

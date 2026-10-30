@@ -20,10 +20,11 @@ use std::path::Path;
 pub fn run(repo: &Repo, base: Option<&str>, all: bool, chosen: &mut Option<Chosen>) -> Result<(String, usize)> {
     let config = Config::load(repo)?;
     refuse_if_a_lock_is_open(repo)?;
-    let changed = narrow::changed(repo, base);
+    let base = narrow::base(repo, base);
+    let changed = narrow::changed(repo, &base);
     warn_outside_globs(repo, &config, &changed);
     let plan = narrow::plan(repo, &config, &changed, all, None);
-    let report = red_report(repo, &config, "shipcraft red", plan, chosen)?;
+    let report = red_report(repo, &config, "shipcraft red", &base, plan, chosen)?;
     let failing = failing_at_red(&report, "shipcraft red")?;
 
     let files = locked_files(repo, &config)?;
@@ -48,7 +49,7 @@ pub fn run(repo: &Repo, base: Option<&str>, all: bool, chosen: &mut Option<Chose
         short_list(&lock.failing_at_red)
     );
     println!("shipcraft: commit the lock with the tests; the hook checks the RED commit.");
-    warn_absent_suites(repo, &config, base, &lock);
+    warn_absent_suites(repo, &config, &base, &lock);
     next_green(&config);
     Ok((path, dropped.len()))
 }
@@ -69,10 +70,12 @@ pub fn redo(
 ) -> Result<()> {
     let config = Config::load(repo)?;
     let (lock_path, old) = head_lock(repo, path)?;
-    let changed = narrow::changed(repo, base);
+    // Item 66: the redo resolves its base as `red` does.
+    let base = narrow::base(repo, base);
+    let changed = narrow::changed(repo, &base);
     warn_outside_globs(repo, &config, &changed);
     let plan = narrow::plan(repo, &config, &changed, all, Some(&old));
-    let report = red_report(repo, &config, "shipcraft red --redo", plan, chosen)?;
+    let report = red_report(repo, &config, "shipcraft red --redo", &base, plan, chosen)?;
     let run = report.cases_run();
     let dropped: Vec<&String> = old.cases.iter().filter(|case| !run.contains(case)).collect();
     if !dropped.is_empty() {
@@ -113,7 +116,7 @@ pub fn redo(
     println!("shipcraft: cases no longer failing at RED: {}", list(minus(&old.failing_at_red, &lock.failing_at_red)));
     println!("shipcraft: cases newly failing at RED: {}", list(minus(&lock.failing_at_red, &old.failing_at_red)));
     println!("shipcraft: commit the lock with the repaired tests, and nothing else; the hook checks the redo commit.");
-    warn_absent_suites(repo, &config, base, &lock);
+    warn_absent_suites(repo, &config, &base, &lock);
     next_green(&config);
     Ok(())
 }
@@ -199,11 +202,22 @@ fn replace(full_path: &Path, lock_path: &str, json: &str) -> Result<()> {
 /// The suite's report at RED: the build, every suite's check, every suite
 /// (item 55: or the changed test files, as `plan` says); refuses no report and
 /// errors before assertions. `again` is the command to rerun. The notice of
-/// how it ran comes first, refusals included.
-fn red_report(repo: &Repo, config: &Config, again: &str, plan: Plan, chosen: &mut Option<Chosen>) -> Result<Report> {
+/// how it ran comes first, refusals included; item 66's line on the base the
+/// candidates gave comes right before it.
+fn red_report(
+    repo: &Repo,
+    config: &Config,
+    again: &str,
+    base: &narrow::Base,
+    plan: Plan,
+    chosen: &mut Option<Chosen>,
+) -> Result<Report> {
     let locked: BTreeSet<String> = config.test_files(repo)?.into_iter().chain([CONFIG_FILE.to_string()]).collect();
     let first = chosen.insert(Chosen::new(&plan, locked.len()));
     let ran = first_run(repo, config, plan, first);
+    if let Some(compared) = base.as_ref().ok().and_then(narrow::Compared::notice) {
+        println!("{compared}");
+    }
     println!("{}", first.notice());
     if let Some(support) = first.support_notice() {
         println!("{support}");
@@ -490,13 +504,12 @@ fn warn_outside_globs(repo: &Repo, config: &Config, changed: &std::result::Resul
     ));
 }
 
-/// Item 59: the named suites with a case in the lock that the base ref's
-/// `.shipcraft.toml` does not have; nothing when it cannot be read.
-fn warn_absent_suites(repo: &Repo, config: &Config, base: Option<&str>, lock: &Lock) {
-    let at_base = match repo.resolve(narrow::base_ref(base)) {
-        Ok(Some(commit)) => repo.read(&Snapshot::Commit(commit), CONFIG_FILE).ok().flatten(),
-        _ => None,
-    };
+/// Item 59: the named suites with a case in the lock that the base's
+/// `.shipcraft.toml` does not have; nothing when it cannot be read. Item 66:
+/// the base is the commit `red` compared with, named as point 4 names it.
+fn warn_absent_suites(repo: &Repo, config: &Config, base: &narrow::Base, lock: &Lock) {
+    let Ok(compared) = base else { return };
+    let at_base = repo.read(&Snapshot::Commit(compared.commit.clone()), CONFIG_FILE).ok().flatten();
     let Some(present) = at_base.as_deref().and_then(config::suite_names) else { return };
     let named: Vec<String> = config.suites().into_iter().map(|suite| suite.nome).filter(|n| !n.is_empty()).collect();
     let absent: BTreeSet<&String> = lock
@@ -509,7 +522,7 @@ fn warn_absent_suites(repo: &Repo, config: &Config, base: Option<&str>, lock: &L
         return;
     }
     let absent: Vec<&String> = absent.into_iter().collect();
-    let shown = narrow::shown_ref(base);
+    let shown = &compared.shown;
     warning(format!(
         "the lock has cases in suite(s) absent from {shown}'s .shipcraft.toml: {}; CI judges a PR by its base's config and will refuse them as case-missing; bring the suite to {shown} in a PR of its own, then rebase this branch",
         short_list(&absent)
