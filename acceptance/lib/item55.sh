@@ -165,7 +165,7 @@ PY
 import json,sys
 from pathlib import Path
 s=Path(sys.argv[1]).read_text(); lines=s.splitlines()
-protected={'.shipcraft.toml'}|{str(p) for p in Path('tests' if Path('tests').exists() else 'src').glob('*') if p.is_file() and (p.suffix=='.py' or p.name.endswith('.test.ts') or p.name=='setup55.ts')}
+protected={'.shipcraft.toml'}|{str(p) for p in Path('tests' if Path('tests').exists() else 'src').glob('*') if p.is_file() and ((p.suffix=='.py' and p.name!='__init__.py') or p.name.endswith('.test.ts') or p.name=='setup55.ts')}
 notice=f'shipcraft: red ran the changed test files: 2 of {len(protected)}'
 i=lines.index(notice)
 assert lines[i+1]=='shipcraft: red did not run the tests that may use the changed support file(s): '+sys.argv[2]+'; CI runs them',lines

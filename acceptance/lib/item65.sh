@@ -246,10 +246,12 @@ else:
     path=str(f)
     if not fallback and path not in selected: continue
     import re
-    for function in re.findall(r'^def (test_\w+)\(',f.read_text(),re.M):
+    text=f.read_text()
+    # judged per function: a redo appends a passing test next to the failing one
+    for function,body in re.findall(r'^def (test_\w+)\(.*?\n((?:[ \t]+.*\n?)*)',text,re.M):
      ident=name+':tests.'+f.stem+'::'+function
-     if '@pytest.mark.skip' not in f.read_text(): expected.add(ident)
-     if '@pytest.mark.skip' not in f.read_text() and 'assert True' not in f.read_text(): failing.add(ident)
+     if '@pytest.mark.skip' not in text: expected.add(ident)
+     if '@pytest.mark.skip' not in text and 'assert True' not in body: failing.add(ident)
   want(set(d['cases'])==expected,'kept cases: '+repr(d['cases'])+' expected '+repr(expected))
   want(set(d['failing_at_red'])==failing,'kept failures: '+repr(d['failing_at_red']))
 entries=json.loads(record.read_text())

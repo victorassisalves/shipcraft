@@ -43,7 +43,7 @@
     "acceptance/lib/item52.sh": "sha256:61cb5cb3ff7735b7d345919c36777661280167fcdfd4dd0e052affdfbd77b801",
     "acceptance/lib/item53.sh": "sha256:f964dbf620058e337084ab0d7b6775d926ffbd02fc0eba5adc718710fa6fb819",
     "acceptance/lib/item54.sh": "sha256:3d4906fbd2a962a8d2a2308a91f1b04cea9c0da371fb75d6ae0a2a916cf1ed29",
-    "acceptance/lib/item55.sh": "sha256:6d4c7abecc09bbf5eeb4019e6aecead1cd2acd542c6b1a0d78ba790384807c98",
+    "acceptance/lib/item55.sh": "sha256:fcf2ca6dcca29bb24f164765ed6b9a79be0f24462bc26b5be10d86e9639453d0",
     "acceptance/lib/item56.sh": "sha256:c854165452c95c5d22c9371f25efd49d6e121ef52190cbad6f9efde0bff9cf8c",
     "acceptance/lib/item57.sh": "sha256:56392df9042c9da5edaf60800e68b8f02e80afed97a7f345298960091adf031d",
     "acceptance/lib/item58.sh": "sha256:13d8b294493ad586c4880e17ecb861f6c9cd13973ffcc3d039ef38d8eb703d8f",
@@ -53,7 +53,7 @@
     "acceptance/lib/item62.sh": "sha256:46437a5b044f1db13a7084ef5b5ae246620d40499021fb21d04aec6bf5f92eef",
     "acceptance/lib/item63.sh": "sha256:bd39e2c030cc454a3a6e18000da26e70d2ee18ca73e0c546954d9c496613bdd3",
     "acceptance/lib/item64.sh": "sha256:528e6dc6f9abcf88d0e75d128a1d2826a304c10f8c6a3152c5afac386431ee42",
-    "acceptance/lib/item65.sh": "sha256:cdcfb0e5e69fb66e3f1a437a30cecf278c13c619c0dc43ccc0ae5198c885a52e",
+    "acceptance/lib/item65.sh": "sha256:d737101d4ec1a0dd15ba54bd5f906fb34f9fc9453ec5105ac552ee8312135a0a",
     "acceptance/lib/rename.sh": "sha256:a6ac8f0def7da9c3bd4f55793c12d19067e66841179cfa47fdb78bd6bdc6860a",
     "acceptance/lib/v1.sh": "sha256:0ce6e96ef2975138128b3ee3a922912d30dffdbc3c663fb1a280555e89a953aa",
     "acceptance/reuso.sh": "sha256:6a2bc0851b3170c442400bb0d0246c237380f392041448b4943afc76fd50d4c3",
@@ -178,5 +178,5 @@
     "acceptance:acceptance/lib/item65.sh::python::v1-65.skipped",
     "acceptance:acceptance/lib/item65.sh::python::v1-65.skipped-only"
   ],
-  "seal": "c750f072eb49d243a25339e5fb09015d60e2c58e18a95aad7c875817aa6eb08b"
+  "seal": "caf0d73e9039326522617cd908efde1fc3131d30e870bed6b39e734d19cdd028"
 }
