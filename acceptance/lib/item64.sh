@@ -169,16 +169,17 @@ PY
 i64_red_cmd() { shipcraft red "$@" 2> "$CW/red64-stderr"; }
 i64_publish_fail() {
   mv "$CB/gh" "$CB/gh64-real"
-  "$PY" - "$CB/gh" "$PY" <<'PY'
+  "$PY" - "$CB/gh" "$PY" "${1:-False}" <<'PY'
 from pathlib import Path
 import sys
 p=Path(sys.argv[1]);p.write_text('#!'+sys.argv[2]+'\n'+'''import os,sys
 from pathlib import Path
 a=sys.argv[1:]
-if a[:2] in (['pr','comment'],['pr','review']) or (a[:1]==['api'] and any('/comments' in s or s.endswith('/reviews') for s in a)):
+st=STATUSES
+if a[:2] in (['pr','comment'],['pr','review']) or (a[:1]==['api'] and any('/comments' in s or s.endswith('/reviews') or (st and '/statuses/' in s) for s in a)):
  Path(__file__).with_name('publish64-failed').touch();sys.exit(1)
 p=Path(__file__).with_name('gh64-real');os.execv(str(p),[str(p),*a])
-''');p.chmod(0o755)
+'''.replace('STATUSES',sys.argv[3]));p.chmod(0o755)
 PY
 }
 item64_case() {
@@ -384,7 +385,7 @@ PY
       case "$c" in reuse-same|reuse-null|reuse-legacy|row-reused-publish-fails) n=1;want=reused ;; *) n=2;want=fresh ;; esac
       # Different provider output proves reuse preserves source verdict; nonreuse must see changes.
       rev_cfg changes
-      [ "$c" != row-reused-publish-fails ] || i64_publish_fail
+      [ "$c" != row-reused-publish-fails ] || i64_publish_fail True
       run_cmd TMO 180 shipcraft review --pr "$PRN"
       chk 'reuse matches agent AND model AND effort, with typed source fields' eq "$(rev_n)" "$n"
       if [ "$c" = row-reused-publish-fails ];then chk 'reused publication attempted' test -f "$CB/publish64-failed";chk 'publication refused' rc_nonzero
