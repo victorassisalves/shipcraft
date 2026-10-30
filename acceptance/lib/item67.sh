@@ -24,8 +24,25 @@ def run(*args,ok=True):
 def write(path,data,mode=None):
  p=Path(path);p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(data if isinstance(data,bytes) else data.encode())
  if mode is not None:p.chmod(mode)
-def snapshot():
- return {str(p):(stat.S_IMODE(p.lstat().st_mode), 'link',os.readlink(p)) if p.is_symlink() else (stat.S_IMODE(p.stat().st_mode),'file',p.read_bytes()) if p.is_file() else (stat.S_IMODE(p.stat().st_mode),'dir') for p in Path('.').rglob('*')}
+def snapshot(stable_git=False):
+ def entry(p):
+  return (stat.S_IMODE(p.lstat().st_mode), 'link',os.readlink(p)) if p.is_symlink() else (stat.S_IMODE(p.stat().st_mode),'file',p.read_bytes()) if p.is_file() else (stat.S_IMODE(p.stat().st_mode),'dir')
+ # Refusals preserve working-tree bytes and Git state, not Git's cache bytes.
+ result={str(p):entry(p) for p in Path('.').rglob('*') if not stable_git or p.parts[0]!='.git'}
+ if stable_git:
+  # Keep byte-level coverage for hooks and Shipcraft's own Git-local writes.
+  for name in ('.git/hooks','.git/shipcraft'):
+   p=Path(name)
+   if p.exists() or p.is_symlink():
+    result[str(p)]=entry(p)
+    if p.is_dir() and not p.is_symlink():
+     result.update((str(child),entry(child)) for child in p.rglob('*'))
+  readers=[('rev-parse','HEAD'),('symbolic-ref','-q','HEAD'),('for-each-ref',),('ls-files','-s'),('status','--porcelain=v1','-z','--untracked-files=all'),('config','--local','--list')]
+  for args in readers:
+   p=run('git','--no-optional-locks',*args,ok=False)
+   assert p.returncode==0 or (args[0]=='symbolic-ref' and p.returncode==1),('snapshot Git reader failed',args,p.returncode,text(p))
+   result[('git',*args)]=(p.returncode,p.stdout)
+ return result
 def text(p):return (p.stdout+p.stderr).decode()
 FULL="shipcraft init --lang other --command '<test command writing JUnit to {junit}>' --glob '<test files>'"
 CMD='sh tests/run.sh {junit}'
@@ -97,7 +114,7 @@ if case.startswith('refuse-'):
   if c=='glob-before-hook':args=GOOD+['--glob','../bad67'];needle='../bad67'
   else:full=False
  if c=='kept-invalid':write('.shipcraft.toml','# kept67\n');args=['--lang','other','--command','bad','--glob','tests/**'];needle='command'
- before=snapshot();p=init(args,False)
+ before=snapshot(stable_git=True);p=init(args,False)
  if syntax:
   assert p.returncode==2,(p.returncode,text(p));assert text(p).startswith('shipcraft: error:'),text(p)
   assert not any(l.startswith('Next:') and FULL in l for l in text(p).splitlines()),text(p)
@@ -105,7 +122,7 @@ if case.startswith('refuse-'):
   lines=refusal(p,full,needle)
   if c=='foreign-hook':assert 'shipcraft check' in lines[-1],lines
   if c in ('glob-order','glob-order-reverse'):assert b not in '\n'.join(lines[:2]),lines
- assert snapshot()==before,'refused init changed tree or git state'
+ assert snapshot(stable_git=True)==before,'refused init changed tree or git state'
  sys.exit()
 # Successful custom init must neither execute the command nor infer a language runner.
 args=GOOD[:];expected_globs=['tests/**'];command=CMD
