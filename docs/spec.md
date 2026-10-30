@@ -450,7 +450,8 @@ POC-021 (2026-10-29, Shipcraft 2.14.0 from npm) asked Claude Code and Codex, in 
 | `[execution] ci_timeout` | Local CI time limit, in seconds. | `1800` |
 | `[execution] suite_checks` | Names of the project's own GitHub checks that run the suite; only with `ci = "github"` (item 62). | `[]` |
 | `[execution] merge` | How `shipcraft merge` merges: `merge` (a merge commit) or `squash` (item 42). | `merge` |
-| `[roles] review` | The review agent: `codex`, `claude` or `gemini`. | first one installed |
+| `[roles] review` | The review agent: `codex`, `claude` or `gemini`, or a table with `agent`, `model` and `effort` (item 64). | first one installed |
+| `[roles] red`, `[roles] green` | The agent (string or table, as `review`) the orchestrator uses for each phase; shown, never run (item 64). | not set |
 | `[review] spec` | Path of a project spec given to the reviewer. | none |
 | `[review] timeout` | Review time limit, in seconds. | `1200` |
 | `[machine] slots` | Concurrent local CI and review runs on this machine. | `1` |
@@ -464,6 +465,31 @@ POC-021 (2026-10-29, Shipcraft 2.14.0 from npm) asked Claude Code and Codex, in 
 - **A layer that is off is labeled:** its status is published as `success` with the description "off in .shipcraft.toml" on every PR, so the choice is visible, and the merge gate does not require it.
 - **`shipcraft_min`:** an older binary refuses, in the hook and in CI, as it does a lock in an unknown format. Two machines never judge one commit differently without warning.
 - **Validation:** unknown values, an absolute `root`, or a path or glob with `..` are refused. `.` and empty path components are normalized away.
+
+### Roles per phase (item 64)
+
+Shipcraft runs the review agent itself (`[roles] review`). The RED and the GREEN are written by sessions that the orchestrator starts, and the lock is what makes them honest. Item 64 lets a project write down which agent, model and effort each phase uses, so the choice lives in the versioned config and not in someone's memory. It also lets the review pick a model and an effort. Shipcraft still starts no RED or GREEN session. Why: on this repository the choice (RED by Codex `gpt-6.1-sol` at medium effort, GREEN by Claude, review by Codex) lived only in private notes, which blocked dogfood step 4.
+
+1. **The keys.** `[roles] review`, `[roles] red` and `[roles] green`. Each is either a string, the agent alone (`"codex"`, `"claude"` or `"gemini"`, as `review` is today), or a TOML table with the keys `agent` (required), `model` and `effort` (both optional). Any TOML spelling of a table is the same value: inline `review = { agent = "codex" }`, a `[roles.review]` section, or dotted keys. The string `"codex"` and the table `{ agent = "codex" }` mean the same thing everywhere. `red` and `green` have no default: absent means the orchestrator chooses. `review` keeps its defaults: `init` writes the first agent installed, as a string, and when the key is absent at run time the reviewer is `codex`, as today.
+2. **Validation.** It applies wherever the config is read: the hook, `red`, `ci`, `pr`, `review`, `merge` and `status`, each reading the same snapshot it reads today (staged, base or working tree). A refusal is `config-invalid`, and its reason names the exact key path, for example `roles.green.agent` for a table without `agent`, or `roles.red.flavor` for an unknown member. The order: everything that refuses today keeps its place and comes first (parse and structure errors, legacy keys, `shipcraft-min`, item 47's `[execution]` checks). Then come the `shipcraft_min` rule below, and `red`, `green` and `review`, in that order. Within one role: the value's type, then `agent` (missing or unknown), then unknown members in key order, then `model`, then `effort`. Each of these is refused:
+   - a value that is neither a string nor a table;
+   - an agent that is not `codex`, `claude` or `gemini`;
+   - a table without `agent`, or with any key other than `agent`, `model` and `effort`;
+   - a `model` or `effort` that is not a string, is empty, or starts with `-`, or that has a whitespace or control character anywhere. These are checked on the decoded TOML string, with Unicode's definitions (Rust's `char::is_whitespace` and `char::is_control`), so U+00A0 and U+0085 are refused;
+   - an `effort` not in its agent's list. For `codex`: `minimal`, `low`, `medium`, `high`, `xhigh`. For `claude`: `low`, `medium`, `high`, `xhigh`, `max`, as `claude --help` lists them. `gemini` takes no effort.
+   A table form, or `red` or `green` in any form, also needs `shipcraft_min` of `2.20` or more, compared as `shipcraft_min` is compared today. A config that uses none of these is unaffected. Otherwise the config is refused `config-invalid`, and the reason names `shipcraft_min`: older binaries do not know these keys and would judge the project differently. Validation checks the shape only. Whether the model exists, and whether it accepts that effort, is the agent CLI's business: a reviewer that rejects them fails to start, which is a review `error`, as today, and is not retried.
+3. **The review uses its model and effort.** With `[roles] review` as a table (read from the base config, as today), the reviewer starts with the model and effort given, and with neither when they are absent (as today):
+   - `codex`: `-m <model>` and `-c model_reasoning_effort=<effort>`;
+   - `claude`: `--model <model>` and `--effort <effort>`;
+   - `gemini`: `-m <model>` (the flag of the gemini CLI's `--model`; it is not installed on the machine where this was written, so the battery checks it with its stub).
+   Each one goes before the prompt, as separate arguments. The agent name in the review status, its comment and the row's `agent` stays the agent alone.
+   - **Rows.** Every review row that is not reused (the same rows that item 63's `after_green_ci` goes on) gains `model` and `effort`: the strings the config asked for, or `null` when absent. They are not the provider's effective defaults.
+   - **Reuse.** An earlier row is a source only when its `agent`, `model` and `effort` also equal this run's. A row without `model` or `effort` (every row from before this item), or with `null`, counts as `null` for each. A row whose `agent`, `model` or `effort` is present but is not a string (or `null` for `model` and `effort`) is never a source. Unreadable logs and lines are handled as today. So when the string form is unchanged, earlier verdicts are still reused, but a change of model or effort reviews again. A reused row records the `model` and `effort` of the row it reused.
+4. **The RED and GREEN roles are shown, not run.**
+   - `shipcraft status` prints one more line after the layers line, whether review is on or off: `shipcraft: roles: red <role>; green <role>; review <role>`. A `<role>` is the agent, followed by ` (<model>, effort <effort>)`, ` (<model>)` or ` (effort <effort>)` when they are given. An absent `red` or `green` reads `not set (the orchestrator's choice)`. `review` is the configured value, or `codex` when the key is absent, as today. The layers line is unchanged.
+   - After `shipcraft red` or `shipcraft red --redo` writes a lock, it prints on stdout, after its last line today: `shipcraft: next: the GREEN, in a new session (<green role>, [roles] green)`, or `shipcraft: next: the GREEN, in a new session ([roles] green not set)`. A refusal prints neither line.
+5. **What uses the roles.** The lock, the hook, CI and the gate validate `red` and `green` (point 2) but never use them to choose or check who wrote a commit. A session that is not the declared agent is not detected or refused; the lock stays the mechanical guarantee. The orchestrator reads the roles from `shipcraft status`, which the `AGENTS.md` block already tells agents to run. The block itself does not change in this item: telling the orchestrator to start each phase with its role belongs to a later item that changes the block, together with its upgrade path.
+6. **Measure and revert.** The metric is false refusals of a valid `[roles]` config across the next 5 items (target 0), plus whether dogfood step 4 is written in `.shipcraft.toml`. The revert is to remove the new keys, or to go back to the string form. Product rollback: the previous release.
 
 ### A failing `check` (item 45)
 
@@ -746,6 +772,7 @@ Each hook, CI, review and merge run appends one JSON line to `.git/shipcraft/run
 | `queue_secs` | On `pr` rows: seconds the local CI waited for a slot, rounded down; `0` when it skipped the queue, `null` without local CI (item 41). |
 | `tokens`, `agent`, `pr`, `diff_sha256`, `text_sha256` | On `review` rows: tokens used (or `null`), the agent, the PR, and the two reuse keys (diff, and title and body; item 54). |
 | `after_green_ci` | On `review` rows that are not reused: whether the review came after green CI at the same head, with the brief that does not rerun the suite (item 63). |
+| `model`, `effort` | On `review` rows: the `[roles] review` model and effort asked for, or `null`; a reused row copies its source's (item 64). |
 | `method` | On `merge` rows written by `shipcraft merge`: `merge` or `squash` (item 42). |
 | `escape` | `true` on a merge that skipped the gate. |
 
@@ -796,10 +823,10 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 - Windows.
 - Running the build on the hook's copy.
 - Token limits for the review.
-- Agent identity per role: who writes RED or GREEN is the orchestrator's choice. The lock is the mechanical guarantee.
+- Starting the RED or GREEN sessions, or detecting which agent wrote a commit: the orchestrator starts them, `[roles] red` and `green` only record its choice (item 64). The lock is the mechanical guarantee.
 - A separate intent file: the PR body is the intent.
 - Shadow review, and running the review in parallel with CI.
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.19.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.20.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.

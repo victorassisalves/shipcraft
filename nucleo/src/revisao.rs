@@ -1,5 +1,5 @@
 //! Item 4: the executed review. A new agent session (codex, claude or gemini,
-//! from `[papeis] revisao`) reviews a commit in an isolated checkout, from a
+//! from `[roles] review`) reviews a commit in an isolated checkout, from a
 //! brief built into the binary. It fails closed: anything but a well-formed
 //! verdict on its first line is an error, never an approval, and there is no
 //! retry (rule 12).
@@ -77,7 +77,8 @@ impl Review {
 }
 
 pub fn run(req: &Request) -> Result<Review> {
-    let agent = req.config.papeis.revisao.clone();
+    let papel = &req.config.papeis.revisao;
+    let agent = papel.agent.clone();
     let started = Instant::now();
     let review = if AGENTS.contains(&agent.as_str()) {
         let _slot = fila::enter(fila::slots(req.config), &format!("{} ({}, review)", req.repo.name(), req.branch))?;
@@ -98,7 +99,7 @@ pub fn run(req: &Request) -> Result<Review> {
     let mut row = json!({
         "layer": "review", "secs": medicao::seconds(started), "result": resultado, "code": codigo,
         "branch": req.branch, "commit": req.sha, "tokens": tokens(&review.text), "agent": agent, "pr": req.pr,
-        "after_green_ci": req.after_green_ci,
+        "after_green_ci": req.after_green_ci, "model": papel.model, "effort": papel.effort,
     });
     if !req.diff_sha256.is_empty() {
         row["diff_sha256"] = json!(req.diff_sha256);
@@ -127,16 +128,40 @@ fn execute(req: &Request, agent: &str) -> Result<Review> {
         brief_path.display()
     );
     let mut cmd = Command::new(agent);
+    // Item 64: the model and effort asked for, as separate arguments before
+    // the prompt; neither when absent.
+    let papel = &req.config.papeis.revisao;
+    let mut chosen: Vec<String> = Vec::new();
     match agent {
-        "codex" => cmd.args(["exec", "--skip-git-repo-check", "-C", &tree_s, "-s", "workspace-write"]).args([
-            "-c",
-            "sandbox_workspace_write.network_access=true",
-            "-o",
-            &last.to_string_lossy(),
-            &prompt,
-        ]),
-        "claude" => cmd.args(["-p", "--permission-mode", "bypassPermissions", &prompt]),
-        _ => cmd.args(["--yolo", "-p", &prompt]),
+        "codex" => {
+            if let Some(model) = &papel.model {
+                chosen.extend(["-m".to_string(), model.clone()]);
+            }
+            if let Some(effort) = &papel.effort {
+                chosen.extend(["-c".to_string(), format!("model_reasoning_effort={effort}")]);
+            }
+        }
+        "claude" => {
+            if let Some(model) = &papel.model {
+                chosen.extend(["--model".to_string(), model.clone()]);
+            }
+            if let Some(effort) = &papel.effort {
+                chosen.extend(["--effort".to_string(), effort.clone()]);
+            }
+        }
+        _ => {
+            if let Some(model) = &papel.model {
+                chosen.extend(["-m".to_string(), model.clone()]);
+            }
+        }
+    }
+    match agent {
+        "codex" => cmd
+            .args(["exec", "--skip-git-repo-check", "-C", &tree_s, "-s", "workspace-write"])
+            .args(&chosen)
+            .args(["--config", "sandbox_workspace_write.network_access=true", "-o", &last.to_string_lossy(), &prompt]),
+        "claude" => cmd.args(["-p", "--permission-mode", "bypassPermissions"]).args(&chosen).arg(&prompt),
+        _ => cmd.args(["--yolo"]).args(&chosen).args(["-p", &prompt]),
     };
     // Item 63, rule 4: the reviewer starts with no variable whose name begins
     // with the bytes `SHIPCRAFT_`; names are compared as raw OS bytes.

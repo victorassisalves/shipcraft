@@ -126,7 +126,15 @@ pub fn status(repo: &Repo) -> Result<()> {
         "shipcraft: layers: ci {}; review {} (agent {})",
         ci,
         layer(&config.execucao.revisao),
-        config.papeis.revisao
+        config.papeis.revisao.agent
+    );
+    // Item 64: the roles, right after the layers line.
+    let unset = || "not set (the orchestrator's choice)".to_string();
+    println!(
+        "shipcraft: roles: red {}; green {}; review {}",
+        config.papeis.red.as_ref().map_or_else(unset, |p| p.shown()),
+        config.papeis.green.as_ref().map_or_else(unset, |p| p.shown()),
+        config.papeis.revisao.shown()
     );
     println!("{}", crate::init::hook_status(repo));
     let open: Vec<String> = lock_files(repo, &Snapshot::Tree)?

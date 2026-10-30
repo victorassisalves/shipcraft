@@ -1,7 +1,7 @@
 //! Item 3: `shipcraft pr`, the single door of a PR, and `shipcraft review`, the same
 //! review without (or for another) PR.
 
-use crate::config::{Camada, Config};
+use crate::config::{Camada, Config, Papel};
 use crate::docs;
 use crate::fila;
 use crate::forma;
@@ -266,11 +266,7 @@ fn wait_github_ci(repo: &Repo, config: &Config, head: &str) -> Result<Gate> {
             );
             return Ok(Gate::Stopped(
                 "ci-github-no-status",
-                format!(
-                    "CI was not green within {} s ({}); review did not run",
-                    limit.as_secs(),
-                    not_green.join(", ")
-                ),
+                format!("CI was not green within {} s ({}); review did not run", limit.as_secs(), not_green.join(", ")),
             ));
         }
         sleep((limit - elapsed).min(Duration::from_secs(2)));
@@ -303,11 +299,21 @@ fn valid_key(key: &str) -> bool {
 }
 
 /// Item 4, rule 4: the verdict of an earlier review of the same file versions.
-/// Item 54: and of the same PR title and body.
-fn earlier_verdict(repo: &Repo, diff_sha256: &str, text_sha256: &str) -> Option<(String, String)> {
+/// Item 54: and of the same PR title and body. Item 64: and of the same
+/// agent, model and effort; a missing `model` or `effort` counts as null, and
+/// a field of another type is never a source. Returns the result, the
+/// commit, and the source's model and effort.
+fn earlier_verdict(repo: &Repo, papel: &Papel, diff_sha256: &str, text_sha256: &str) -> Option<Reused> {
     if diff_sha256.is_empty() || !valid_key(text_sha256) {
         return None;
     }
+    let optional = |v: &serde_json::Value| -> Option<Option<String>> {
+        match v {
+            serde_json::Value::Null => Some(None),
+            serde_json::Value::String(s) => Some(Some(s.clone())),
+            _ => None,
+        }
+    };
     medicao::rows(repo)
         .into_iter()
         .rev()
@@ -317,16 +323,32 @@ fn earlier_verdict(repo: &Repo, diff_sha256: &str, text_sha256: &str) -> Option<
                 && r["diff_sha256"] == diff_sha256
                 && r["text_sha256"].as_str() == Some(text_sha256)
                 && (r["result"] == "passed" || r["result"] == "refused")
+                && r["agent"].as_str() == Some(papel.agent.as_str())
+                && optional(&r["model"]) == Some(papel.model.clone())
+                && optional(&r["effort"]) == Some(papel.effort.clone())
         })
-        .map(|r| {
-            (r["result"].as_str().unwrap_or_default().to_string(), r["commit"].as_str().unwrap_or_default().to_string())
+        .map(|r| Reused {
+            result: r["result"].as_str().unwrap_or_default().to_string(),
+            from: r["commit"].as_str().unwrap_or_default().to_string(),
+            model: r["model"].as_str().map(str::to_string),
+            effort: r["effort"].as_str().map(str::to_string),
         })
+}
+
+struct Reused {
+    result: String,
+    from: String,
+    model: Option<String>,
+    effort: Option<String>,
 }
 
 /// Runs (or reuses) the review and publishes `shipcraft/review` and the comment.
 fn review_and_publish(req: &Request) -> Result<Gate> {
     let (repo, sha) = (req.repo, req.sha.as_str());
-    if let Some((resultado, from)) = earlier_verdict(repo, &req.diff_sha256, &req.text_sha256) {
+    let papel = &req.config.papeis.revisao;
+    if let Some(Reused { result: resultado, from, model, effort }) =
+        earlier_verdict(repo, papel, &req.diff_sha256, &req.text_sha256)
+    {
         let (state, gate) = if resultado == "passed" {
             ("success", Gate::Passed)
         } else {
@@ -335,8 +357,8 @@ fn review_and_publish(req: &Request) -> Result<Gate> {
         // Item 38: a reused verdict is recorded, and is not a new round.
         let mut row = json!({"layer": "review", "secs": 0, "result": resultado,
                "code": if resultado == "passed" { "" } else { "changes-requested" },
-               "branch": req.branch, "commit": sha, "tokens": 0, "agent": req.config.papeis.revisao,
-               "pr": req.pr, "reused": true});
+               "branch": req.branch, "commit": sha, "tokens": 0, "agent": papel.agent,
+               "pr": req.pr, "reused": true, "model": model, "effort": effort});
         // Item 54: a reused row records both keys (reuse needs both).
         row["diff_sha256"] = json!(req.diff_sha256);
         row["text_sha256"] = json!(req.text_sha256);
@@ -346,7 +368,7 @@ fn review_and_publish(req: &Request) -> Result<Gate> {
         println!("shipcraft: shipcraft/review {state}: {description}");
         return Ok(gate);
     }
-    let agent = &req.config.papeis.revisao;
+    let agent = &papel.agent;
     gh::status(repo, sha, "shipcraft/review", "pending", &format!("on this machine: review in progress ({agent})"))?;
     let review = revisao::run(req)?;
     if let Some(pr) = req.pr {
