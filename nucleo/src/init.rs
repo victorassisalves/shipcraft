@@ -1,4 +1,5 @@
 //! `shipcraft init`: writes `.shipcraft.toml`, `.shipcraft/locks/`, the `AGENTS.md` block and its `CLAUDE.md` import (item 61),
+//! the phase briefs in `.shipcraft/briefs/` (item 68),
 //! and installs the pre-commit hook. Nothing else is written, in the project or in `.git`: the
 //! GitHub workflow is in `docs/github-ci.md`, for who turns it on (item 27). Review is on when an agent is installed (item 2) and, with `--github`, it marks
 //! the statuses as required where GitHub protects branches (item 5.3).
@@ -123,6 +124,8 @@ pub fn run(repo: &Repo, options: &Options) -> Result<()> {
         println!("{SEED_NOTICE}");
     }
     let agents = agents_block(repo, local);
+    // Item 68: only after everything else this run writes has succeeded.
+    let briefs = crate::init_briefs::write(repo, local);
     if let Some(command) = &build {
         println!("shipcraft: [build] in {CONFIG_FILE} runs `{command}` before suites");
     }
@@ -162,7 +165,7 @@ pub fn run(repo: &Repo, options: &Options) -> Result<()> {
         Hook::Tool(tool) => tool.writes.iter().map(|(file, ..)| format!(", {file}")).collect(),
         Hook::Own(_) => String::new(),
     };
-    println!("shipcraft: ready. Commit {CONFIG_FILE}{lefthook}{agents} and {LOCK_DIR}/;");
+    println!("shipcraft: ready. Commit {CONFIG_FILE}{lefthook}{agents}{briefs} and {LOCK_DIR}/;");
     println!("shipcraft: then write the failing test and stub, and run `shipcraft red`.");
     // 27.1, read raw: a `shipcraft_min` above this binary keeps the file's real `ci`.
     let table = fs::read_to_string(repo.path(CONFIG_FILE)).ok().and_then(|t| t.parse::<toml::Table>().ok());
@@ -495,9 +498,26 @@ const AGENTS_FILE: &str = "AGENTS.md";
 const CLAUDE_FILE: &str = "CLAUDE.md";
 const START_LINE: &str = "<!-- shipcraft -->";
 const END_LINE: &str = "<!-- /shipcraft -->";
-/// Item 61: the machine install's block; a project-local install gets it with
-/// `npx -- shipcraft` and the repository-root line (`agents_text`).
+/// Item 61's block with item 68's rules: the machine install's block; a
+/// project-local install gets it with `npx -- shipcraft` and the
+/// repository-root line (`variant`).
 const AGENTS_BLOCK: &str = "<!-- shipcraft -->
+## shipcraft: TDD with a lock (required in this repository)
+- Cycle: RED (a failing test) → `shipcraft red` → GREEN (code) → `git commit`. The git hook checks every commit.
+- A behavior change: write the failing test first (and a stub), run `shipcraft red` and commit the test together with the lock `.shipcraft/locks/*.json`; only then implement.
+- Before writing a RED test, read the existing tests that cover the behavior you change, and never contradict them unless the change says that behavior changes. Passing control tests next to the failing ones are fine.
+- Locked tests (listed in the open lock) are the contract: never change them; change the code until they pass. If a test looks wrong, stop and say so.
+- The RED and the GREEN are done by different agent sessions, both in the same checkout: in Claude Code a subagent per phase; in Codex a new `codex exec` session per phase (never `resume`).
+- The RED session commits the tests, the stubs they need and the lock in one commit, and stops.
+- The GREEN session starts from that commit and may change anything the open lock does not protect (product code, dependencies and their lockfiles, config), never a locked file, then commits. A test it finds wrong is reported back with the reason. The session the user talks to sets the GREEN's work aside (`git stash push --include-untracked`; it saved something only if `git rev-parse -q --verify refs/stash` changed, and `git status --porcelain` must then print nothing), starts a new RED session given the intent, the test and that report, never the GREEN's code, which fixes the test with `shipcraft red --redo` and commits; then, if something was saved and `refs/stash` still names it, it restores it with `git stash pop`; if nothing was saved, nothing is restored. If the GREEN already committed code after the RED commit, the work cannot be set aside, a step fails, or the restore conflicts, it stops, keeps the stash, and tells the user. If the repair would leave every locked test passing, or renames a test, `red --redo` refuses: report it to the user.
+- A session told it is the RED or the GREEN does that phase only and starts no other session; the session the user talks to starts them.
+- Start each phase with the agent, model and effort that `shipcraft status` names on its roles line ([roles] red and green), when the project set them; if status refuses or that agent is not available, tell the user instead of choosing another. Each phase follows its brief in .shipcraft/briefs/ (red.md, green.md); where a brief is missing or disagrees with this block, this block wins.
+- Never use `--no-verify`, never edit or delete `.shipcraft/locks/*` by hand (`shipcraft red`, `shipcraft red --redo` and the hook write them), never touch the hook or `core.hooksPath`.
+- When in doubt, run `shipcraft status`.
+<!-- /shipcraft -->
+";
+/// Item 68: the block at v2.22.0 (`git show v2.22.0:nucleo/src/init.rs`), a known block in both variants.
+const AGENTS_BLOCK_2_22: &str = "<!-- shipcraft -->
 ## shipcraft: TDD with a lock (required in this repository)
 - Cycle: RED (a failing test) → `shipcraft red` → GREEN (code) → `git commit`. The git hook checks every commit.
 - A behavior change: write the failing test first (and a stub), run `shipcraft red` and commit the test together with the lock `.shipcraft/locks/*.json`; only then implement.
@@ -527,10 +547,15 @@ const DIFFERS: &str = "; it differs from this version's: edit it by hand to matc
 /// Item 61: the block's current variant; from a project-local install (item 58)
 /// every command is `npx -- shipcraft` (fixed point 39), run from the root.
 fn agents_text(local: bool) -> String {
+    variant(AGENTS_BLOCK, local)
+}
+
+/// A block (this version's or v2.22.0's) in its machine or project-local form.
+fn variant(block: &str, local: bool) -> String {
     if !local {
-        return AGENTS_BLOCK.to_string();
+        return block.to_string();
     }
-    let text = AGENTS_BLOCK.replace("`shipcraft ", "`npx -- shipcraft ");
+    let text = block.replace("`shipcraft ", "`npx -- shipcraft ");
     let (head, rest) = text.split_at(text.find("\n- ").unwrap() + 1);
     format!("{head}{ROOT_LINE}{rest}")
 }
@@ -541,7 +566,9 @@ fn agents_text(local: bool) -> String {
 fn agents_block(repo: &Repo, local: bool) -> String {
     let new = agents_text(local);
     let other = agents_text(!local);
-    let (wrote, current) = onboard(repo, AGENTS_FILE, &new, &[&other], Some(AGENTS_BLOCK_2_14));
+    let (bare_2_22, local_2_22) = (variant(AGENTS_BLOCK_2_22, false), variant(AGENTS_BLOCK_2_22, true));
+    let known = [other.as_str(), bare_2_22.as_str(), local_2_22.as_str()];
+    let (wrote, current) = onboard(repo, AGENTS_FILE, &new, &known, Some(AGENTS_BLOCK_2_14));
     let mut listed = if wrote { format!(", {AGENTS_FILE}") } else { String::new() };
     let claude = match repo.path(CLAUDE_FILE).symlink_metadata() {
         Ok(_) => true,
