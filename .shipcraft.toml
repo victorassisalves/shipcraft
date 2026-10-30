@@ -2,7 +2,7 @@
 # metrics/dogfood-red-2026-10-28.md: red 99 s, hook p90 22.9 s). Metric: RED->main
 # time against the 11 min median, false hook refusals, hook and red times.
 # Revert: delete this file and .shipcraft/locks/.
-shipcraft_min = "2.18"
+shipcraft_min = "2.20"
 
 [[suite]]
 name = "acceptance"
@@ -22,12 +22,22 @@ filter = "command"
 ci = "github"
 suite_checks = ["acceptance"]
 # Dogfood step 2 (2026-10-29): the product's review replaces the hand-made Codex prompt.
-# After green CI the reviewer does not rerun the battery (item 63, 2.19.0); until that
-# binary is installed it still does (~20 min here), hence the longer timeout.
+# After green CI the reviewer does not rerun the battery (item 63, 2.19.0): 69 and 94 s
+# on PR #66, against ~22 min before. The timeout stays long for `shipcraft review` and
+# `review --pr`, which still run the whole battery.
 # Revert: review = "off" and drop [roles] and [review].
 review = "local"
 
 [roles]
+# Dogfood step 4 (2026-10-30, item 64): who does each phase, written here instead of in
+# private notes. Shipcraft runs only the review; the orchestrator starts the RED and the
+# GREEN with these roles (`shipcraft status` shows them; `shipcraft red` names the GREEN).
+# RED by Codex gpt-6.1-sol at medium effort (POC-022: better coverage, 0 wrong tests);
+# GREEN by Claude; review by Codex, default model and effort.
+# Metric: 0 false refusals of this config over the next 5 items.
+# Revert: drop red and green, and set shipcraft_min back to "2.18".
+red = { agent = "codex", model = "gpt-6.1-sol", effort = "medium" }
+green = "claude"
 review = "codex"
 
 [review]
