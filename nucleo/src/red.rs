@@ -205,6 +205,9 @@ fn red_report(repo: &Repo, config: &Config, again: &str, plan: Plan, chosen: &mu
     let first = chosen.insert(Chosen::new(&plan, locked.len()));
     let ran = first_run(repo, config, plan, first);
     println!("{}", first.notice());
+    if let Some(support) = first.support_notice() {
+        println!("{support}");
+    }
     let report = match ran? {
         Ok(report) => report,
         // Item 45: a failing check names itself, and says to fix what it reports.
@@ -250,7 +253,8 @@ fn red_report(repo: &Repo, config: &Config, again: &str, plan: Plan, chosen: &mu
 
 /// Item 55: the first run's report. The build runs as today; then, with
 /// selected files, the narrowed run, whose reports stand only when every case
-/// maps to one locked file and every selected file holds a case. Otherwise
+/// maps to one locked file and (item 65) each suite that ran has a selected
+/// file that holds a case; the others are support files. Otherwise
 /// `chosen` says why, and every suite's command runs in full (its check ran).
 fn first_run(repo: &Repo, config: &Config, plan: Plan, chosen: &mut Chosen) -> Result<suite::Ran<Report>> {
     // The RED judges its own tree: the build runs there (item 16a).
@@ -267,13 +271,17 @@ fn first_run(repo: &Repo, config: &Config, plan: Plan, chosen: &mut Chosen) -> R
     let locked = config.test_files(repo)?;
     let mut report = Report::empty();
     let mut fallback: Option<Fallback> = None;
+    let mut support = BTreeSet::new();
     for ((suite, files), ran) in config.suites().iter().zip(&selected).zip(ran) {
         let why = match ran {
             Narrowed::Skipped => continue,
             Narrowed::NoReport => Fallback::NoReport,
             Narrowed::Ran(ran) => match suite::covered(repo.root(), suite, &locked, &present, files, ran) {
-                Ok(kept) => {
+                Ok((kept, uncovered)) => {
                     report.absorb(&suite.nome, kept);
+                    // Item 65: each suite's own uncovered files, by repository path.
+                    let prefix = suite.prefix();
+                    support.extend(uncovered.into_iter().map(|rel| format!("{prefix}{rel}")));
                     continue;
                 }
                 Err(why) => why,
@@ -281,7 +289,10 @@ fn first_run(repo: &Repo, config: &Config, plan: Plan, chosen: &mut Chosen) -> R
         };
         fallback = Some(fallback.map_or(why, |first| first.min(why)));
     }
-    let Some(why) = fallback else { return Ok(Ok(report)) };
+    let Some(why) = fallback else {
+        chosen.support = support;
+        return Ok(Ok(report));
+    };
     chosen.fallback = Some(why);
     suite::run_commands(repo.root(), config)
 }

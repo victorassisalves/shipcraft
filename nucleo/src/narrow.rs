@@ -6,6 +6,7 @@
 use crate::config::{self, Config, CONFIG_FILE};
 use crate::git::{git_in, Repo};
 use crate::lock::Lock;
+use crate::refusal::short_list;
 use crate::suite;
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -62,13 +63,16 @@ pub struct Chosen {
     pub selected: usize,
     pub locked: usize,
     pub fallback: Option<Fallback>,
+    /// Item 65: the selected files (repository paths) that hold no case in
+    /// their suite's own report, when the narrowed run stood. Not logged.
+    pub support: BTreeSet<String>,
 }
 
 impl Chosen {
     pub fn new(plan: &Plan, locked: usize) -> Chosen {
         match plan {
-            Plan::All(why) => Chosen { selected: 0, locked, fallback: Some(*why) },
-            Plan::Changed { files, .. } => Chosen { selected: *files, locked, fallback: None },
+            Plan::All(why) => Chosen { selected: 0, locked, fallback: Some(*why), support: BTreeSet::new() },
+            Plan::Changed { files, .. } => Chosen { selected: *files, locked, fallback: None, support: BTreeSet::new() },
         }
     }
 
@@ -78,6 +82,19 @@ impl Chosen {
             Some(why) => format!("shipcraft: red ran every suite: {}", why.text()),
             None => format!("shipcraft: red ran the changed test files: {} of {}", self.selected, self.locked),
         }
+    }
+
+    /// Item 65: the line right after the notice when the narrowed run stood
+    /// and a selected file holds no case.
+    pub fn support_notice(&self) -> Option<String> {
+        if self.fallback.is_some() || self.support.is_empty() {
+            return None;
+        }
+        let paths: Vec<&String> = self.support.iter().collect();
+        Some(format!(
+            "shipcraft: red did not run the tests that may use the changed support file(s): {}; CI runs them",
+            short_list(&paths)
+        ))
     }
 
     /// `selection`, `selected_files` and `fallback` on the `red` row.

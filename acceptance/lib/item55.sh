@@ -159,6 +159,22 @@ r=[json.loads(x) for x in open('.git/shipcraft/runs.jsonl') if json.loads(x).get
 assert r['code']=='error-before-assertions' and r['selection']=='changed' and r['fallback'] is None,r
 PY
       pass; return ;;
+    support-test)
+      chk 'passing selected test refuses despite legacy failure' eq "$RC" 1
+      chk 'narrowed support refusal, no lock and one row' "$PY" - "$OUT" "$support" <<'PY65SUPPORT'
+import json,sys
+from pathlib import Path
+s=Path(sys.argv[1]).read_text(); lines=s.splitlines()
+protected={'.shipcraft.toml'}|{str(p) for p in Path('tests' if Path('tests').exists() else 'src').glob('*') if p.is_file() and ((p.suffix=='.py' and p.name!='__init__.py') or p.name.endswith('.test.ts') or p.name=='setup55.ts')}
+notice=f'shipcraft: red ran the changed test files: 2 of {len(protected)}'
+i=lines.index(notice)
+assert lines[i+1]=='shipcraft: red did not run the tests that may use the changed support file(s): '+sys.argv[2]+'; CI runs them',lines
+assert not list(Path('.shipcraft/locks').glob('*.json'))
+rows=[json.loads(x) for x in Path('.git/shipcraft/runs.jsonl').read_text().splitlines() if json.loads(x).get('layer')=='red']
+assert len(rows)==1,rows
+r=rows[0]; assert (r['selection'],r['selected_files'],r['fallback'],r['code'])==('changed',2,None,'red-already-passes'),r
+PY65SUPPORT
+      pass; return ;;
     environment)
       chk 'custom RED accepted' rc_zero
       chk 'first command gets sorted absolute NUL files only' "$PY" - "$CW" "$new" <<'PY'
