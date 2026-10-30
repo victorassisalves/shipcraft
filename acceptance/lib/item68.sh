@@ -153,7 +153,7 @@ elif case in ('folder-link','folder-dangling','folder-file','parent-link','paren
   if case=='folder-readonly':Path('.shipcraft').chmod(0o700)
  assert any(l.startswith('shipcraft: .shipcraft/briefs not written: ') and len(l)>len('shipcraft: .shipcraft/briefs not written: ') for l in text(p).splitlines()),'missing folder notice'
  if protected is not None:assert snapshot(entry)==protected,'unsafe folder entry was replaced or modified'
- assert snapshot(outside)==(before if not case.startswith('parent-link') or case.endswith('locks') else ('dir',before[1],dict(before[2],locks=('dir',0o755,{})))),'brief writing followed parent/folder symlink or damaged target'
+ assert snapshot(outside)==(before if not case.startswith('parent-link') else ('dir',before[1],dict(before[2],locks=('dir',0o755,{'.gitkeep':('file',0o644,b'')})))),'brief writing followed parent/folder symlink or damaged target'
  for n in NAMES:assert not (BRIEFS/n).exists(),'unsafe folder got a brief'
  closing(p,[])
 elif case=='write-partial':

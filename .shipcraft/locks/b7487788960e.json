@@ -56,7 +56,7 @@
     "acceptance/lib/item65.sh": "sha256:d737101d4ec1a0dd15ba54bd5f906fb34f9fc9453ec5105ac552ee8312135a0a",
     "acceptance/lib/item66.sh": "sha256:f1576ed535b7cccd3aabe17c4719db1f385a6157a1abc3cc494811a5f8ec8c73",
     "acceptance/lib/item67.sh": "sha256:f259f1504594e0f1216374a1ce1919ef19d8acbe20a3dbc888c128ed77412667",
-    "acceptance/lib/item68.sh": "sha256:1eb0c7410806f703d79a3fdc0b061fa30db7d8019b2a034d684cc734434c9d9b",
+    "acceptance/lib/item68.sh": "sha256:31b8693a296f623929fa89c8dddc587a7a312ccf076c86df9bf9197ee91dea62",
     "acceptance/lib/rename.sh": "sha256:a6ac8f0def7da9c3bd4f55793c12d19067e66841179cfa47fdb78bd6bdc6860a",
     "acceptance/lib/v1.sh": "sha256:0ce6e96ef2975138128b3ee3a922912d30dffdbc3c663fb1a280555e89a953aa",
     "acceptance/pontos/15a.md": "sha256:f1480266606c0a01f815315cb04ddea9544438df9dda618e06cf167ca9f971b2",
@@ -106,7 +106,7 @@
     "acceptance/pontos/65.md": "sha256:907e5de5ebd835142f72a3b66c3b63e8c6490dcea32936f23183b7672241d299",
     "acceptance/pontos/66.md": "sha256:3da36d41379a58bfc1e06ebef10178fa76bdaa65828d3123236d03cf5c057c71",
     "acceptance/pontos/67.md": "sha256:35919357176927eddac1228c45ef089eceb8b7cb9d54ddaedbef00c88a3fa24f",
-    "acceptance/pontos/68.md": "sha256:6ac506874f5621feef33546808ef3a146ab83d0947f404b27a40fc1788b13e22",
+    "acceptance/pontos/68.md": "sha256:96327296777330afc4d8cab9405caed8a1ed122c13bb96aff282c85ee3343f27",
     "acceptance/pontos/item25.md": "sha256:94107f93cd65f71ffacfa768d4924e3bcb6b3a9037d24086d8e4825ae9bc0f57",
     "acceptance/reuso.sh": "sha256:6a2bc0851b3170c442400bb0d0246c237380f392041448b4943afc76fd50d4c3",
     "acceptance/run.sh": "sha256:fa2048c24ad98a84012006b0a41cdecc0c6b69c1982c025d462a43b20c8df965",
@@ -645,5 +645,5 @@
     "acceptance:acceptance/lib/item68.sh::core::v1-68.write-fails-kept",
     "acceptance:acceptance/lib/item68.sh::core::v1-68.write-partial"
   ],
-  "seal": "8dd13630c89c8a1c9a6f94de09bf2d4cef06396167064791e76acd9f69f63d16"
+  "seal": "455613a9a2279088657473e4bc76a28b5f786195a968f1e3a7cd2c5ac08e205e"
 }
