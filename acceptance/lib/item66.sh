@@ -196,8 +196,11 @@ else:
     want(len(ids)==expected_count and all(any(name in s.lower() for s in ids) for name in expected_names),'kept '+key+': '+repr(ids)+' expected '+repr(expected_names))
   if mode!='log-fails': want(r.get('lock')==ls[0].stem,'row lock id')
 if warning:
- paths=["outside/test_committed66.py","outside/test_new66.py"] if mode=="warnings-local" else ["outside/test_new66.py"]
- file_warning="shipcraft: warning: "+str(len(paths))+" changed test file(s) match no suite's globs and are not locked: "+", ".join(paths)+"; widen a suite's globs, or add a [[suite]] for them (when the base has a .shipcraft.toml, CI judges a PR by the base's, so a new suite goes in a PR of its own first)"
+ # Root-level fixture tests also lie outside core/, landing/ and jobs/.
+ # The soft reset makes bridge66 a changed candidate only in warnings-local.
+ paths=["outside/test_committed66.py","outside/test_new66.py","tests/test_bridge66.py","tests/test_fresh66.py"] if mode=="warnings-local" else ["outside/test_new66.py","tests/test_fresh66.py"]
+ listing=", ".join(paths[:3])+(' and '+str(len(paths)-3)+' more' if len(paths)>3 else '')
+ file_warning="shipcraft: warning: "+str(len(paths))+" changed test file(s) match no suite's globs and are not locked: "+listing+"; widen a suite's globs, or add a [[suite]] for them (when the base has a .shipcraft.toml, CI judges a PR by the base's, so a new suite goes in a PR of its own first)"
  suite_warning="shipcraft: warning: the lock has cases in suite(s) absent from "+chosen+"'s .shipcraft.toml: jobs; CI judges a PR by its base's config and will refuse them as case-missing; bring the suite to "+chosen+" in a PR of its own, then rebase this branch"
  want([s for s in p.stderr.splitlines() if s.startswith('shipcraft: warning:')]==[file_warning,suite_warning],'warnings must read chosen commit and name same short base: '+p.stderr)
 # A resolving candidate is never reconsidered after merge-base failure.

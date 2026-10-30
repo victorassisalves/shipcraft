@@ -54,7 +54,7 @@
     "acceptance/lib/item63.sh": "sha256:bd39e2c030cc454a3a6e18000da26e70d2ee18ca73e0c546954d9c496613bdd3",
     "acceptance/lib/item64.sh": "sha256:528e6dc6f9abcf88d0e75d128a1d2826a304c10f8c6a3152c5afac386431ee42",
     "acceptance/lib/item65.sh": "sha256:d737101d4ec1a0dd15ba54bd5f906fb34f9fc9453ec5105ac552ee8312135a0a",
-    "acceptance/lib/item66.sh": "sha256:6c6510776a47b647eb409f1fb587985057b1e65a0bc95e21d64681c83fca86ee",
+    "acceptance/lib/item66.sh": "sha256:f1576ed535b7cccd3aabe17c4719db1f385a6157a1abc3cc494811a5f8ec8c73",
     "acceptance/lib/rename.sh": "sha256:a6ac8f0def7da9c3bd4f55793c12d19067e66841179cfa47fdb78bd6bdc6860a",
     "acceptance/lib/v1.sh": "sha256:0ce6e96ef2975138128b3ee3a922912d30dffdbc3c663fb1a280555e89a953aa",
     "acceptance/reuso.sh": "sha256:6a2bc0851b3170c442400bb0d0246c237380f392041448b4943afc76fd50d4c3",
@@ -268,5 +268,5 @@
     "acceptance:acceptance/lib/item66.sh::python::v1-66.warnings",
     "acceptance:acceptance/lib/item66.sh::python::v1-66.warnings-local"
   ],
-  "seal": "fc12096b019d0327d9cc51dee18165ecaadbaaf7febd1114f3881df13ff67818"
+  "seal": "21eded292ee23429533742f71609719f3a03b52cef7982e8f02ae251d0dc5da9"
 }
