@@ -16,6 +16,7 @@ mod gh;
 mod git;
 mod glob;
 mod init;
+mod init_briefs;
 mod init_msg;
 mod init_tool;
 mod jsonc;

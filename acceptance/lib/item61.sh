@@ -23,6 +23,40 @@ OLD='''<!-- shipcraft -->
 - Never use `--no-verify`, never edit or delete `.shipcraft/locks/*`, never touch the hook or `core.hooksPath`.
 - When in doubt, run `shipcraft status`.
 '''.encode()
+# Exact v2.22.0 fixture; only this historical constant and agents_text were read.
+PREVIOUS_BARE='''<!-- shipcraft -->
+## shipcraft: TDD with a lock (required in this repository)
+- Cycle: RED (a failing test) → `shipcraft red` → GREEN (code) → `git commit`. The git hook checks every commit.
+- A behavior change: write the failing test first (and a stub), run `shipcraft red` and commit the test together with the lock `.shipcraft/locks/*.json`; only then implement.
+- Locked tests (listed in the open lock) are the contract: never change them; change the code until they pass. If a test looks wrong, stop and say so.
+- The RED and the GREEN are done by different agent sessions, both in the same checkout: in Claude Code a subagent per phase; in Codex a new `codex exec` session per phase (never `resume`).
+- The RED session commits the tests, the stubs they need and the lock in one commit, and stops.
+- The GREEN session starts from that commit and may change anything the open lock does not protect (product code, dependencies and their lockfiles, config), never a locked file, then commits. A test it finds wrong is reported back, and a RED session fixes it with `shipcraft red --redo`.
+- A session told it is the RED or the GREEN does that phase only and starts no other session; the session the user talks to starts them.
+- Never use `--no-verify`, never edit or delete `.shipcraft/locks/*` by hand (`shipcraft red`, `shipcraft red --redo` and the hook write them), never touch the hook or `core.hooksPath`.
+- When in doubt, run `shipcraft status`.
+<!-- /shipcraft -->
+'''.encode()
+ROOT_LINE=b"- Run Shipcraft commands from the repository root, where `npx -- shipcraft` runs this project's install.\n"
+PREVIOUS_LOCAL=PREVIOUS_BARE.replace(b'`shipcraft ',b'`npx -- shipcraft ')
+head,rest=PREVIOUS_LOCAL.split(b'\n- ',1)
+PREVIOUS_LOCAL=head+b'\n'+ROOT_LINE+b'- '+rest
+READ_TESTS=b'- Before writing a RED test, read the existing tests that cover the behavior you change, and never contradict them unless the change says that behavior changes. Passing control tests next to the failing ones are fine.\n'
+REPAIR=b"A test it finds wrong is reported back with the reason. The session the user talks to sets the GREEN's work aside (`git stash push --include-untracked`; it saved something only if `git rev-parse -q --verify refs/stash` changed, and `git status --porcelain` must then print nothing), starts a new RED session given the intent, the test and that report, never the GREEN's code, which fixes the test with `shipcraft red --redo` and commits; then, if something was saved and `refs/stash` still names it, it restores it with `git stash pop`; if nothing was saved, nothing is restored. If the GREEN already committed code after the RED commit, the work cannot be set aside, a step fails, or the restore conflicts, it stops, keeps the stash, and tells the user. If the repair would leave every locked test passing, or renames a test, `red --redo` refuses: report it to the user."
+ROLES=b'- Start each phase with the agent, model and effort that `shipcraft status` names on its roles line ([roles] red and green), when the project set them; if status refuses or that agent is not available, tell the user instead of choosing another. Each phase follows its brief in .shipcraft/briefs/ (red.md, green.md); where a brief is missing or disagrees with this block, this block wins.\n'
+def expected_block(local=False):
+ lines=PREVIOUS_BARE.splitlines(keepends=True); result=[]
+ for line in lines:
+  if line.startswith(b'- The GREEN session '):
+   line=line.replace(b'A test it finds wrong is reported back, and a RED session fixes it with `shipcraft red --redo`.',REPAIR)
+  result.append(line)
+  if line.startswith(b'- A behavior change:'): result.append(READ_TESTS)
+  if line.startswith(b'- A session told it is '): result.append(ROLES)
+ text=b''.join(result)
+ if local:
+  text=text.replace(b'`shipcraft ',b'`npx -- shipcraft ')
+  head,rest=text.split(b'\n- ',1);text=head+b'\n'+ROOT_LINE+b'- '+rest
+ return text
 HINT='shipcraft: not set up in this repository: run shipcraft init (from a package install: pnpm exec shipcraft init, or npx shipcraft init)'
 SKIP="shipcraft: CLAUDE.md not written: AGENTS.md does not hold this version's shipcraft block"
 DIFF="; it differs from this version's: edit it by hand to match docs/spec.md"
@@ -59,6 +93,7 @@ def kept(p,name,b,diff=False):
  if diff: notice(p,name,'already has the shipcraft block, kept'); want(DIFF in output(p),'missing manual-edit guidance')
 def block_contract(b,local):
  want(closed(b),'new AGENTS block must have LF start/end lines')
+ want(b==expected_block(local),'item 68 block must make exactly the three specified changes, with all other bytes and line order preserved')
  s=b.decode(); low=s.lower()
  patterns=[r'claude code',r'subagent',r'codex exec',r'resume',r'same (?:checkout|working tree)',r'RED.*?commit',r'stubs?',r'GREEN',r'dependenc',r'lockfiles?',r'config',r'red --redo',r'by hand',r'user',r'(?:not protect|unprotected|does not protect|outside.*?lock)']
  for pat in patterns: want(re.search(pat,s,re.I|re.S) is not None,'block omitted '+pat)

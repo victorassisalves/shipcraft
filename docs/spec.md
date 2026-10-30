@@ -506,6 +506,74 @@ POC-021 (2026-10-29, Shipcraft 2.14.0 from npm) asked Claude Code and Codex, in 
 - The hint covers a repository with no config. A fresh clone of a project that has one, but whose hooks are not installed yet, gets no hint; CI is the backstop, as today.
 - `npx -- shipcraft` needs Node at the agent's shell, as item 58's hooks do, and resolves the root install only from the repository root; an agent that runs it inside a workspace package with its own older install gets that one.
 
+### The block carries the flow's rules, and `init` installs the phase briefs (item 68)
+
+Three rules that make our own RED/GREEN cycle work lived only in our private process notes, so an adopter's agents never saw them:
+- **Read the tests the change touches.** All 5 wrong RED tests of items 64 to 66 contradicted behavior an earlier test had already fixed.
+- **A wrong locked test goes to a new RED session that does not see the GREEN's code.** A test fixed while looking at the implementation tends to fit the implementation.
+- **Start each phase with the role the project chose** (item 64's `[roles]`).
+
+Victor's instruction for the dogfood was "the rules in the product, not in memory". Item 68 puts these rules in the `AGENTS.md` block, and gives each phase a short brief that `init` installs in the project.
+
+1. **The new block.** The current variants of item 61's block (the `shipcraft` and `npx -- shipcraft` forms) change as follows. Every other line stays, in its order. Below, `<cmd>` is `shipcraft`, or `npx -- shipcraft` in the local variant, as item 61 writes every command.
+   - After the line about writing the failing test first, a new line: `- Before writing a RED test, read the existing tests that cover the behavior you change, and never contradict them unless the change says that behavior changes. Passing control tests next to the failing ones are fine.`
+   - The GREEN line's ending, `A test it finds wrong is reported back, and a RED session fixes it with \`<cmd> red --redo\`.`, becomes: `A test it finds wrong is reported back with the reason. The session the user talks to sets the GREEN's work aside (\`git stash push --include-untracked\`; it saved something only if \`git rev-parse -q --verify refs/stash\` changed, and \`git status --porcelain\` must then print nothing), starts a new RED session given the intent, the test and that report, never the GREEN's code, which fixes the test with \`<cmd> red --redo\` and commits; then, if something was saved and \`refs/stash\` still names it, it restores it with \`git stash pop\`; if nothing was saved, nothing is restored. If the GREEN already committed code after the RED commit, the work cannot be set aside, a step fails, or the restore conflicts, it stops, keeps the stash, and tells the user. If the repair would leave every locked test passing, or renames a test, \`red --redo\` refuses: report it to the user.`
+   - After the line `A session told it is the RED or the GREEN ...`, a new line: `- Start each phase with the agent, model and effort that \`<cmd> status\` names on its roles line ([roles] red and green), when the project set them; if status refuses or that agent is not available, tell the user instead of choosing another. Each phase follows its brief in .shipcraft/briefs/ (red.md, green.md); where a brief is missing or disagrees with this block, this block wins.`
+2. **Known blocks.** The two variants item 61 wrote (the exact bytes of both current variants at tag `v2.22.0`) join the known blocks, so `init` replaces them with the new block under item 61's rules. The 2.14.0 block stays known, and every other case is unchanged. `CLAUDE.md`'s block does not change.
+3. **The phase briefs.**
+   - **The files.** `init` writes two files, `.shipcraft/briefs/red.md` and `.shipcraft/briefs/green.md`. Their text is built into the binary, in a `shipcraft` and an `npx -- shipcraft` variant chosen as item 61 chooses the block's (`<cmd>` below). They use LF line endings and end with a newline. Their last line is `<!-- written by shipcraft X.Y.Z -->`, with the full package version, without the build hash.
+   - **The RED brief says:**
+     - write the failing tests from the intent, never from an implementation;
+     - write two cases per rule, the ordinary one and a boundary a rushed GREEN would get wrong;
+     - read the existing tests that cover the behavior the change touches first, and never contradict them unless the intent says that behavior changes;
+     - each test written for the new behavior must fail for the right reason before `<cmd> red`; passing control tests are fine and are locked as controls;
+     - fake external tools with their real output;
+     - commit the tests, their stubs and the lock in one commit, and stop;
+     - list ambiguities instead of picking a reading silently.
+   - **The GREEN brief says:**
+     - start from the RED commit;
+     - never edit a locked file or a lock;
+     - change product code, dependencies or config until the locked tests pass;
+     - running the other tests the change touches is a check, not a gate: report a failure outside the locked tests, and let the hook's verdict decide the commit, since CI runs the rest;
+     - stop and report a test that looks wrong, with the reason, instead of working around it;
+     - commit.
+   - **Writing them.** For each file:
+     - absent: it is written;
+     - a regular file whose bytes equal the built-in text of either variant: kept;
+     - a regular file that reads as UTF-8 with other text: kept, with `shipcraft: .shipcraft/briefs/<name> differs from this version's, kept: compare it with docs/spec.md`. No marker in it is read, and nothing is appended;
+     - a file that is not valid UTF-8, a symlink, an entry that is not a regular file, or a read failure: kept, with `shipcraft: .shipcraft/briefs/<name> could not be read, kept`.
+   - **When.** The briefs are written only after everything else `init` writes has succeeded, `.shipcraft/locks` included. A failure before that point is today's failure: the same exit, the same rollback, and no brief written. A blocking `.shipcraft` file stays fatal, as items 25, 58, 61 and 67 require.
+   - **The folder.** `.shipcraft` and `.shipcraft/briefs` are each checked with `lstat` and never followed. A symlinked `.shipcraft` that `init` accepted for the locks still gets no briefs. If either is a symlink or not a folder, a check fails with an error other than not-found, or it cannot be created, neither brief is written, and `init` prints `shipcraft: .shipcraft/briefs not written: <reason>`.
+   - **A write failure.** Writing goes through a temporary file in the same folder, renamed into place. If writing a brief fails, the old file, if any, keeps its bytes; the temporary file and any partly written new file are removed; `init` prints `shipcraft: .shipcraft/briefs/<name> not written: <reason>` and goes on with the other brief.
+   - **What never fails `init`.** No brief case above (the folder, a kept file, a write failure) changes `init`'s exit or rolls back what it wrote: it goes on, and exits as it would have.
+   - **The closing guidance.** It names each brief `init` wrote, inside the existing `shipcraft: ready. Commit ...` line, after `AGENTS.md` and `CLAUDE.md`, red before green. No line is added, and the final CI line stays last.
+   - **No special status.** The briefs are ordinary project files, versioned with the project. When a suite's globs select them, they are locked like any other selected file. This item changes no lock rule.
+   - **`--lang other`** (item 67) writes them too.
+4. **Touches.** These earlier items' cases cover what this item shares or changes.
+   - **Assertions that change, and nothing else:**
+     - item 61's expected block text and its new known-block upgrades (`v1-61.*`, `acceptance/lib/item61.sh`, `pontos/61.md`);
+     - the untracked-files allowlist of `python::init-files`, `node::init-files` and `go::init-files` (`acceptance/run.sh`), which gains exactly the two brief paths;
+     - the new-files allowlist of item 67's successful-init cases (`acceptance/lib/item67.sh`, from `v1-67.plain` to `v1-67.no-report-exit`), which gains exactly the two brief paths.
+   - **Must keep passing unchanged:**
+     - `v1-2.5-agents-novo`, `v1-2.5-agents-acrescenta`, `v1-2.5-agents-uma-vez`, `v1-2.5-agents-link`;
+     - item 64's `init-*` and `status-*` cases (the roles line the block points to);
+     - `v1-27.mensagem-local`, `v1-27.mensagem-desligado`, `v1-27.mensagem-github` (the CI line stays last), and item 25's closing lines;
+     - the rollback cases `v1-20.rollback`, `v1-25.husky.rollback`, `v1-25.pre.rollback`, `v1-61.refused-late`, `v1-67.rollback`, `v1-67.rollback-kept`, item 15a's (`v1-15a.1-*`) and item 58's `v1-58.rollback`, `v1-58.lefthook.rollback`, `v1-58.husky.rollback`, `v1-58.pre.rollback`: a refused `init` writes no brief;
+     - item 67's refusal cases;
+     - item 46's redo cases, which define the limits the block now names.
+5. **Measure and revert.**
+   - **Metric:**
+     - for an adopter, wrong locked tests fixed by a new RED session with the GREEN's work set aside, rather than by the session that saw the code, counted in draken-platform's next 5 items;
+     - for a fresh agent, POC-021's "after" run: does it read the touched tests, and does it hand a wrong test to a new RED?
+   - **Threshold:** in POC-021's after run, both behaviors are observed in at least 1 of 2 runs per agent.
+   - **Revert:** a release drops the block's new lines and the briefs. Projects keep the files they have.
+6. **Known limits.**
+   - The battery checks the text written, not whether an agent follows it.
+   - Setting work aside with `git stash` hides it from the new RED's checkout, but not from someone who goes looking in the stash. Ignored files (build output) stay in the checkout.
+   - A GREEN that committed code before finding the wrong test cannot hand it to a new RED this way; the user decides.
+   - A project that edited its block or its briefs keeps its own text.
+   - Briefs written by an older version are not upgraded, because there is only one version so far.
+
 ## 4. Configuration
 
 `.shipcraft.toml` lives at the project root.
@@ -917,4 +985,4 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.23.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.24.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.

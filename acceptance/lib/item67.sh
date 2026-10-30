@@ -170,7 +170,7 @@ if case=='red-space':command='sh tests/run.sh --report={junit}';args=['--lang','
 if case.startswith('no-report'):
  command='sh tests/run.sh {junit}';write('tests/run.sh','#!/bin/sh\necho ran >> calls67\nexit '+('37' if case.endswith('exit') else '0')+'\n')
 state=Path('.git/shipcraft/sentinel').read_bytes();before_init=snapshot();p=init(args)
-allowed={'.shipcraft.toml','AGENTS.md','CLAUDE.md','.git/hooks/commit-msg','.git/hooks/post-commit'}
+allowed={'.shipcraft/briefs/red.md','.shipcraft/briefs/green.md','.shipcraft.toml','AGENTS.md','CLAUDE.md','.git/hooks/commit-msg','.git/hooks/post-commit'}
 assert all(k in allowed or k.startswith('.shipcraft/locks/') or v[-1]=='dir' for k,v in snapshot().items() if k not in before_init), 'init wrote an unexpected file or stub'
 assert not Path('calls67').exists(),'init ran custom command'
 assert not Path(cw,'npx67-calls').exists(),'other init invoked npx/tsc'
