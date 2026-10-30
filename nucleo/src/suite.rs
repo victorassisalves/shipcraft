@@ -141,9 +141,10 @@ pub fn run_changed(
 
 /// Item 55: the cases of a suite's narrowed report that are in its selected
 /// files, mapped by the hook's mapper to the suite's `locked` files (paths
-/// from the project's root). Fails when the mapper finds no single map, a
-/// case maps to no locked file or to more than one, or a selected file holds
-/// no case: then `red` runs every suite.
+/// from the project's root), and (item 65) the selected files that hold no
+/// case (from the suite's root). Fails when the mapper finds no single map, a
+/// case maps to no locked file or to more than one, or (item 65) none of the
+/// selected files holds a case, of any outcome: then `red` runs every suite.
 pub fn covered(
     dir: &Path,
     suite: &Suite,
@@ -151,7 +152,7 @@ pub fn covered(
     present: &[String],
     selected: &BTreeSet<String>,
     report: Report,
-) -> std::result::Result<Report, Fallback> {
+) -> std::result::Result<(Report, BTreeSet<String>), Fallback> {
     let ids = report.ids();
     if ids.is_empty() {
         return Err(Fallback::FileWithoutCases);
@@ -167,10 +168,11 @@ pub fn covered(
         }
         held.insert(file);
     }
-    if !selected.is_subset(&held) {
+    if selected.is_disjoint(&held) {
         return Err(Fallback::FileWithoutCases);
     }
-    Ok(report.only(&keep))
+    let uncovered = selected.difference(&held).cloned().collect();
+    Ok((report.only(&keep), uncovered))
 }
 
 /// Item 60: the files (from the suite's root) that hold `cases`, the suite's
