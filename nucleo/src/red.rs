@@ -49,6 +49,7 @@ pub fn run(repo: &Repo, base: Option<&str>, all: bool, chosen: &mut Option<Chose
     );
     println!("shipcraft: commit the lock with the tests; the hook checks the RED commit.");
     warn_absent_suites(repo, &config, base, &lock);
+    next_green(&config);
     Ok((path, dropped.len()))
 }
 
@@ -113,7 +114,16 @@ pub fn redo(
     println!("shipcraft: cases newly failing at RED: {}", list(minus(&lock.failing_at_red, &old.failing_at_red)));
     println!("shipcraft: commit the lock with the repaired tests, and nothing else; the hook checks the redo commit.");
     warn_absent_suites(repo, &config, base, &lock);
+    next_green(&config);
     Ok(())
+}
+
+/// Item 64: after a lock is written, the last stdout line names the GREEN.
+fn next_green(config: &Config) {
+    match &config.papeis.green {
+        Some(green) => println!("shipcraft: next: the GREEN, in a new session ({}, [roles] green)", green.shown()),
+        None => println!("shipcraft: next: the GREEN, in a new session ([roles] green not set)"),
+    }
 }
 
 /// Item 46: the one open lock HEAD holds, read as today (a broken seal is
@@ -317,7 +327,8 @@ fn confirm(
     let rerun = |tmp: &Path| -> Result<Vec<String>> {
         let mut dropped = Vec::new();
         for suite in config.suites() {
-            let cases: Vec<String> = failing.iter().filter(|case| config.own(&suite, case).is_some()).cloned().collect();
+            let cases: Vec<String> =
+                failing.iter().filter(|case| config.own(&suite, case).is_some()).cloned().collect();
             if cases.is_empty() {
                 continue;
             }
