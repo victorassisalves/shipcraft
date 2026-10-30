@@ -54,30 +54,57 @@ pub fn open() -> Result<Repo> {
     })
 }
 
-pub fn run(repo: &Repo, lang_flag: Option<&str>, github: bool) -> Result<()> {
+/// The arguments of `init`, already past the syntax check (item 67).
+#[derive(Default)]
+pub struct Options<'a> {
+    pub lang: Option<&'a str>,
+    pub command: Option<&'a str>,
+    pub globs: Vec<&'a str>,
+    pub github: bool,
+}
+
+/// Item 67: the full form of `init --lang other`, in the `Next:` of its refusals.
+const OTHER_FORM: &str =
+    "shipcraft init --lang other --command '<test command writing JUnit to {junit}>' --glob '<test files>'";
+const SEED_NOTICE: &str = "shipcraft: .shipcraft.toml exists and was kept; --command and --glob only seed a new config";
+
+/// Item 67: a suite Shipcraft runs as written; its command and normalized globs.
+struct Custom {
+    command: String,
+    globs: Vec<String>,
+}
+
+pub fn run(repo: &Repo, options: &Options) -> Result<()> {
     crate::config::reject_legacy_file(repo, &Snapshot::Tree)?;
-    let (lang, mut suites) = plan(repo, lang_flag)?;
+    let custom = custom(options)?;
+    let (lang, mut suites) = match &custom {
+        Some(_) => (None, Vec::new()),
+        None => plan(repo, options.lang).map(|(lang, suites)| (Some(lang), suites))?,
+    };
     let install = install(repo);
     let local = matches!(install, Install::Project);
     let hook = decide_hook(repo, local)?;
     let raise = init_msg::raise_min(repo)?;
     // Item 16b: proved on the tree before anything is written.
     let kept = repo.path(CONFIG_FILE).symlink_metadata().is_ok();
-    let (build, built) = match if kept { None } else { tsbuild::infer(repo)? } {
+    // Item 67: `--lang other` skips TypeScript build inference entirely.
+    let (build, built) = match if kept || custom.is_some() { None } else { tsbuild::infer(repo)? } {
         Some((command, dirs)) => (Some(command), dirs),
         None => (None, Vec::new()),
     };
-    let unchecked = if kept || lang != Lang::Node { Vec::new() } else { drop_empty_checks(repo, &mut suites, &built) };
-    match suites.as_slice() {
-        [(_, raiz, profile)] if raiz == "." => {
+    let unchecked =
+        if kept || lang != Some(Lang::Node) { Vec::new() } else { drop_empty_checks(repo, &mut suites, &built) };
+    match (lang, suites.as_slice()) {
+        (None, _) => println!("shipcraft: test command run as written (filter = \"command\")"),
+        (Some(lang), [(_, raiz, profile)]) if raiz == "." => {
             println!("shipcraft: language {} (runner {})", lang.name(), profile.runner)
         }
-        _ => println!("shipcraft: workspace {} with {} suite(s)", lang.name(), suites.len()),
+        (Some(lang), _) => println!("shipcraft: workspace {} with {} suite(s)", lang.name(), suites.len()),
     }
     let reviewer = reviewer();
     // Item 15a: a write that fails in the middle undoes what this run created.
     let mut created = Vec::new();
-    let written = write_once(repo, &mut created, CONFIG_FILE, &config_text(lang, &suites, &reviewer, build.as_deref()))
+    let written = write_once(repo, &mut created, CONFIG_FILE, &config_text(lang, custom.as_ref(), &suites, &reviewer, build.as_deref()))
         .and_then(|()| write_once(repo, &mut created, &format!("{LOCK_DIR}/.gitkeep"), ""))
         .and_then(|()| match &hook {
             Hook::Own(hooks) => install_hooks(hooks, local, &mut created),
@@ -91,6 +118,9 @@ pub fn run(repo: &Repo, lang_flag: Option<&str>, github: bool) -> Result<()> {
         }
         println!("shipcraft: undid what this run created");
         return Err(stop);
+    }
+    if kept && custom.is_some() {
+        println!("{SEED_NOTICE}");
     }
     let agents = agents_block(repo, local);
     if let Some(command) = &build {
@@ -116,7 +146,7 @@ pub fn run(repo: &Repo, lang_flag: Option<&str>, github: bool) -> Result<()> {
     if let Hook::Tool(tool) = &hook {
         init_tool::notice(tool);
     }
-    if github {
+    if options.github {
         protect(repo, reviewer.is_some());
     }
     match &reviewer {
@@ -255,6 +285,68 @@ fn checks_no_file(path: &Path) -> bool {
         && config.get("references").and_then(|v| v.as_array()).is_some_and(|r| !r.is_empty())
 }
 
+/// Item 67: `--command` and `--glob` belong to `--lang other`, which needs both;
+/// the command (step 3) is judged before the globs (step 4, the first invalid
+/// one in argument order). Kept configs do not skip this.
+fn custom(options: &Options) -> Result<Option<Custom>> {
+    let other_refusal = |what: String| {
+        refuse(
+            "lang-unknown",
+            what,
+            "shipcraft runs a test command it does not know as written: it needs the command, {junit} where it writes its JUnit report, and the test files",
+            OTHER_FORM,
+        )
+    };
+    if options.lang != Some("other") {
+        let given = match (options.command.is_some(), !options.globs.is_empty()) {
+            (true, true) => "--command and --glob",
+            (true, false) => "--command",
+            (false, true) => "--glob",
+            (false, false) => return Ok(None),
+        };
+        return other_refusal(format!("{given} given without --lang other"));
+    }
+    let Some(command) = options.command else {
+        return other_refusal("--lang other needs --command".to_string());
+    };
+    if options.globs.is_empty() {
+        return other_refusal("--lang other needs at least one --glob".to_string());
+    }
+    if let Some(problem) = command_problem(command) {
+        return other_refusal(format!("the --command value {problem}"));
+    }
+    let mut globs: Vec<String> = Vec::new();
+    for glob in &options.globs {
+        match crate::config::normal_glob(glob) {
+            Ok(normal) if globs.contains(&normal) => {}
+            Ok(normal) => globs.push(normal),
+            Err(problem) => {
+                return refuse(
+                    "config-invalid",
+                    format!("--glob {} {problem}", shell_quote(&crate::red::one_line(glob))),
+                    "the lock covers test files by their path within the project, and shipcraft does not guess another",
+                    OTHER_FORM,
+                )
+            }
+        }
+    }
+    Ok(Some(Custom { command: command.to_string(), globs }))
+}
+
+/// What breaks item 67's rules for `--command`, if anything.
+fn command_problem(command: &str) -> Option<&'static str> {
+    if command.matches("{junit}").count() != 1 {
+        return Some("must contain {junit} exactly once");
+    }
+    if command.replacen("{junit}", "", 1).chars().all(char::is_whitespace) {
+        return Some("has nothing but whitespace besides {junit}");
+    }
+    if command.chars().any(char::is_control) {
+        return Some("has a control character");
+    }
+    None
+}
+
 fn choose_lang(repo: &Repo, flag: Option<&str>) -> Result<Lang> {
     if let Some(name) = flag {
         return match Lang::from_name(name) {
@@ -272,8 +364,8 @@ fn choose_lang(repo: &Repo, flag: Option<&str>) -> Result<Lang> {
         [] => refuse(
             "lang-unrecognized",
             "could not recognize the project language",
-            "shipcraft recognizes a language by its project file, and found none it knows",
-            "specify the language: shipcraft init --lang python|node|go",
+            "shipcraft recognizes a language by its project file, and found none it knows; it can also run any test command that writes JUnit",
+            format!("specify the language: shipcraft init --lang python|node|go; for any other: {OTHER_FORM}"),
         ),
         found => refuse(
             "lang-multiple",
@@ -282,7 +374,7 @@ fn choose_lang(repo: &Repo, flag: Option<&str>) -> Result<Lang> {
                 found.iter().map(|l| l.name()).collect::<Vec<_>>().join(", ")
             ),
             "each project has a runner and a suite; shipcraft does not choose for you",
-            "specify the language: shipcraft init --lang python|node|go",
+            format!("specify the language: shipcraft init --lang python|node|go; for any other: {OTHER_FORM}"),
         ),
     }
 }
@@ -309,7 +401,8 @@ fn quoted(s: &str) -> String {
 }
 
 fn config_text(
-    lang: Lang,
+    lang: Option<Lang>,
+    custom: Option<&Custom>,
     suites: &[(String, String, Profile)],
     reviewer: &Option<String>,
     build: Option<&str>,
@@ -319,7 +412,18 @@ fn config_text(
     };
     let check = |p: &Profile| p.check.as_ref().map_or(String::new(), |c| format!("check = {}\n", quoted(c)));
     let min = minimum_version();
-    let mut text = format!("{HEADER}shipcraft_min = {}\nlang = {}\n", quoted(&min), quoted(lang.name()));
+    let mut text = format!("{HEADER}shipcraft_min = {}\n", quoted(&min));
+    if let Some(lang) = lang {
+        text += &format!("lang = {}\n", quoted(lang.name()));
+    }
+    // Item 67: no lang, runner, check or [build]; the command filters itself.
+    if let Some(custom) = custom {
+        let globs = toml::Value::Array(custom.globs.iter().map(|g| toml::Value::String(g.clone())).collect());
+        text += &format!(
+            "test_command = {}\ntest_globs = {globs}\nfilter = \"command\"\n",
+            quoted(&custom.command)
+        );
+    }
     if let [(_, raiz, profile)] = suites {
         if raiz == "." {
             text += &format!(
@@ -352,7 +456,7 @@ fn config_text(
             quoted(command)
         );
     }
-    if !(suites.len() == 1 && suites[0].1 == ".") {
+    if suites.len() > 1 || suites.first().is_some_and(|s| s.1 != ".") {
         for (nome, raiz, profile) in suites {
             text += &format!(
                 "\n[[suite]]\nname = {}\nroot = {}\n{}command = {}\nglobs = {}\n",

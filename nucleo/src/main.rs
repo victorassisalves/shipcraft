@@ -41,7 +41,9 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 const USAGE: &str =
-    "usage: shipcraft --version | shipcraft init [--lang python|node|go] [--github] | shipcraft red [--redo] [--base <ref>] [--all] | shipcraft check [--commit-msg <file>] | shipcraft close
+    "usage: shipcraft --version | shipcraft init [--lang python|node|go] [--github]
+     | shipcraft init --lang other --command <cmd> --glob <glob>... [--github]
+     | shipcraft red [--redo] [--base <ref>] [--all] | shipcraft check [--commit-msg <file>] | shipcraft close
      | shipcraft ci --base <ref> [--pr]
      | shipcraft pr [--title <t>] [--body <file>] | shipcraft review [--pr <n>]
      | shipcraft merge <pr> [--no-review \"<reason>\"] | shipcraft status | shipcraft report [--json]";
@@ -69,17 +71,24 @@ fn main() -> ExitCode {
 fn run(args: &[&str]) -> Result<()> {
     match args {
         ["init", rest @ ..] => {
-            let mut lang = None;
-            let mut github = false;
+            // Item 67: syntax first (exit 2): `--lang` and `--command` once each, every
+            // flag with a value, and a value that starts with `--` is a missing one.
+            let mut options = init::Options::default();
             let mut rest = rest.iter();
             while let Some(arg) = rest.next() {
+                let mut value = || match rest.next() {
+                    Some(v) if !v.starts_with("--") => Ok(*v),
+                    _ => Err(invalid(args)),
+                };
                 match *arg {
-                    "--lang" => lang = Some(*rest.next().ok_or_else(|| invalid(args))?),
-                    "--github" => github = true,
+                    "--lang" if options.lang.is_none() => options.lang = Some(value()?),
+                    "--command" if options.command.is_none() => options.command = Some(value()?),
+                    "--glob" => options.globs.push(value()?),
+                    "--github" => options.github = true,
                     _ => return Err(invalid(args)),
                 }
             }
-            init::run(&init::open()?, lang, github)
+            init::run(&init::open()?, &options)
         }
         ["red", rest @ ..] => {
             // Item 55: each option once, in any order; item 60: `--redo` takes the others too.
