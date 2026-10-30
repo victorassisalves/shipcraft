@@ -13,10 +13,13 @@ use crate::processo::{self, End};
 use crate::refusal::{failed, Result};
 use serde_json::json;
 use std::fs::{self, File};
+use std::os::unix::ffi::OsStrExt;
 use std::process::{Command, Stdio};
 use std::time::Instant;
 
 const BRIEF: &str = include_str!("brief.md");
+/// Item 63: the brief when the review comes after green CI at the same head.
+const BRIEF_AFTER_CI: &str = include_str!("brief_after_ci.md");
 const MAX_DIFF: usize = 400_000;
 const MAX_BATTERY: usize = 200_000;
 
@@ -34,6 +37,10 @@ pub struct Request<'a> {
     pub diff_sha256: String,
     /// Item 54: SHA-256 of title, NUL, body; empty when the text could not be read.
     pub text_sha256: String,
+    /// Item 63: `shipcraft pr` reached the review after the CI gate passed at
+    /// this head (local or GitHub CI). Chooses the brief that does not rerun
+    /// the suite and is recorded as `after_green_ci`.
+    pub after_green_ci: bool,
 }
 
 pub enum Verdict {
@@ -91,6 +98,7 @@ pub fn run(req: &Request) -> Result<Review> {
     let mut row = json!({
         "layer": "review", "secs": medicao::seconds(started), "result": resultado, "code": codigo,
         "branch": req.branch, "commit": req.sha, "tokens": tokens(&review.text), "agent": agent, "pr": req.pr,
+        "after_green_ci": req.after_green_ci,
     });
     if !req.diff_sha256.is_empty() {
         row["diff_sha256"] = json!(req.diff_sha256);
@@ -130,10 +138,22 @@ fn execute(req: &Request, agent: &str) -> Result<Review> {
         "claude" => cmd.args(["-p", "--permission-mode", "bypassPermissions", &prompt]),
         _ => cmd.args(["--yolo", "-p", &prompt]),
     };
+    // Item 63, rule 4: the reviewer starts with no variable whose name begins
+    // with the bytes `SHIPCRAFT_`; names are compared as raw OS bytes.
+    for (name, _) in std::env::vars_os() {
+        if name.as_bytes().starts_with(b"SHIPCRAFT_") {
+            cmd.env_remove(&name);
+        }
+    }
     cmd.current_dir(&tree).stdin(Stdio::null()).stdout(file(&out)?).stderr(file(&err)?);
     let limit = req.config.revisao.tempo_max;
+    let after = if req.after_green_ci {
+        format!("; CI is green at {}, so the suite is not rerun", short(&req.sha))
+    } else {
+        String::new()
+    };
     eprintln!(
-        "shipcraft: review by {agent} on this machine, in an isolated copy of {} (up to {limit} s)",
+        "shipcraft: review by {agent} on this machine, in an isolated copy of {} (up to {limit} s){after}",
         short(&req.sha)
     );
     let end = processo::run(&mut cmd, limit);
@@ -247,11 +267,13 @@ fn brief(req: &Request, tree: &str, work: &str) -> Result<String> {
         None => format!("the branch {} (before its pull request)", req.branch),
     };
     let body = if req.body.trim().is_empty() { "(the PR has no body)".to_string() } else { req.body.clone() };
-    Ok(BRIEF
+    let template = if req.after_green_ci { BRIEF_AFTER_CI } else { BRIEF };
+    Ok(template
         .replace("{{WHAT}}", &what)
         .replace("{{PROJECT}}", &repo.name())
         .replace("{{TITLE}}", &req.title)
         .replace("{{SHA}}", &req.sha)
+        .replace("{{SHORT}}", &short(&req.sha))
         .replace("{{BASE_SHA}}", &req.base_sha)
         .replace("{{TREE}}", tree)
         .replace("{{WORK}}", work)
