@@ -1,0 +1,107 @@
+name: release-shadow
+
+# POC-023 (shadow): builds the two macOS release binaries on GitHub's macOS runners and
+# runs the whole battery against the exact arm64 binary it uploads, as release/publish.sh
+# does on the releaser's Mac. publish.sh does not use these artifacts yet; the POC compares
+# wall time, battery verdict and binary behavior over the next releases. Revert: delete
+# this file.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-shadow-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build darwin
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add the x86_64 target
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Build both targets (as publish.sh does)
+        working-directory: nucleo
+        run: |
+          for target in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --release --locked -j 4 --target "$target"
+            mkdir -p "$GITHUB_WORKSPACE/out/$target"
+            cp "target/$target/release/shipcraft" "$GITHUB_WORKSPACE/out/$target/shipcraft"
+            chmod 755 "$GITHUB_WORKSPACE/out/$target/shipcraft"
+          done
+          cd "$GITHUB_WORKSPACE/out"
+          shasum -a 256 */shipcraft | tee SHA256SUMS
+          aarch64-apple-darwin/shipcraft --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shipcraft-darwin-${{ github.sha }}
+          path: out/
+          retention-days: 30
+
+  # 5 macOS shards against the uploaded arm64 binary: the tested binary is the built one.
+  battery:
+    needs: build
+    name: macos ${{ matrix.shard }}/5 (uploaded binary)
+    runs-on: macos-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: shipcraft-darwin-${{ github.sha }}
+          path: out/
+
+      - name: Check the binary is the uploaded one
+        run: |
+          chmod 755 out/*/shipcraft
+          cd out && shasum -a 256 -c SHA256SUMS
+          ./aarch64-apple-darwin/shipcraft --version
+
+      - name: Set up Go (Go targets)
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Set up Node (vitest targets)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Set up Python (pytest targets)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run the acceptance suite (shard ${{ matrix.shard }}/5)
+        env:
+          SHIPCRAFT_ACCEPTANCE_JOBS: "4"
+          SHIPCRAFT_ACCEPTANCE_SHARD: "${{ matrix.shard }}/5"
+          SHIPCRAFT_ACCEPTANCE_VERBOSE: "1"
+        run: bash acceptance/run.sh "$PWD/out/aarch64-apple-darwin/shipcraft" all
+
+  # One line to compare with publish.sh: green only when every shard passed.
+  ready:
+    name: release ready (shadow)
+    needs: [build, battery]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          test "${{ needs.build.result }}" = success
+          test "${{ needs.battery.result }}" = success
+          echo "release-shadow: ready at $(date -u +%FT%TZ) for ${{ github.sha }}"
