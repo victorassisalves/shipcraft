@@ -109,7 +109,7 @@ if mode=='lock-only':
 if mode=='growth':
  test(active+'/tests/test_added60.py',[('added60',False),('new_pass60',True)]); n=2
 if mode=='all': args=['--all']; reason='--all'
-if mode=='no-base': git('symbolic-ref','--delete','refs/remotes/origin/HEAD'); reason='no base'
+if mode=='no-base': git('symbolic-ref','--delete','refs/remotes/origin/HEAD')
 if mode=='bad-base': args=['--base','nonexisting60']; reason='no base'
 if mode in ('deleted','moved'):
  # The anchor was absent at base, so protected-file-removed must not mask lock mapping.

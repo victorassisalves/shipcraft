@@ -158,7 +158,7 @@ if ci or mode.startswith('suites') or mode=='stderr-closed':
   for _,root in current: write(root+'/value','green')
  if mode=='ci-present': current=[('core','core')]; config(current); absent=[]
  if mode=='suites-no-base':
-  git('symbolic-ref','--delete','refs/remotes/origin/HEAD'); absent=[]
+  git('symbolic-ref','--delete','refs/remotes/origin/HEAD')
  if mode=='suites-base':
   # Explicit ref has the new names; origin/HEAD does not. Its tip is not the merge base.
   oid=config_object(Path('.shipcraft.toml').read_text()+'\n# alternate tip\n')
@@ -200,7 +200,7 @@ else:
   config(current)
   write('core/tests/test_core.py','import pytest\nfrom pathlib import Path\n@pytest.mark.parametrize("n", range(40), ids=["%02d"%i for i in range(40)])\ndef test_anchor(n):\n    assert Path("value").read_text()=="green"\n')
 
-ref='before59' if mode=='files-base' else 'landing59' if mode=='suites-base' else 'origin/HEAD'
+ref='before59' if mode=='files-base' else 'landing59' if mode=='suites-base' else 'origin/main' if mode in ('files-no-base','suites-no-base') else 'origin/HEAD'
 # For successful --all comparisons, removing only the diagnostic inputs must leave
 # lock bytes and every stable event field identical. secs/at/lock-id are per-run.
 def normalized(r): return {k:v for k,v in r.items() if k not in ('at','secs','lock')}
@@ -243,12 +243,12 @@ else:
  if mode=='suites-passing':
   for n in absent:
    assert any(c.startswith(n+':') for c in d['cases']) and not any(c.startswith(n+':') for c in d['failing_at_red']),d
- if mode.startswith('files') and mode not in ('files-all','files-config','files-no-base','files-globs','files-many','files-base'):
+ if mode.startswith('files') and mode not in ('files-all','files-config','files-globs','files-many','files-base'):
   assert (r['selection'],r['selected_files'],r['fallback'])==('changed',1,None),r
  if mode=='files-all': assert (r['selection'],r['selected_files'],r['fallback'])==('all',0,'--all'),r
  if mode=='files-config': assert (r['selection'],r['selected_files'],r['fallback'])==('all',0,'config changed'),r
- if mode=='files-no-base': assert r['fallback']=='no base',r
- if mode!='stderr-closed' and not ci: warnings(p,() if mode=='files-no-base' else paths,() if mode=='suites-redo-same' else absent,ref,many=mode=='files-many')
+ if mode=='suites-no-base': assert (r['selection'],r['selected_files'],r['fallback'])==('all',0,'config changed'),r
+ if mode!='stderr-closed' and not ci: warnings(p,paths,() if mode=='suites-redo-same' else absent,ref,many=mode=='files-many')
 
 if ci or mode=='files-many':
  # Commit the real lock with its RED tests, then fix product only. No protected

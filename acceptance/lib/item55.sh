@@ -108,7 +108,7 @@ SH55
   i55_write "$new" fresh55
   case "$c" in
     all|all-log-fails) reason=--all; selected=0 ;;
-    no-base) git remote remove origin; reason='no base'; selected=0 ;;
+    no-base) git remote remove origin ;;
     config) printf '\n# changed config\n' >> .shipcraft.toml; reason='config changed'; selected=0 ;;
     removed) rm "$support"; reason='protected file removed'; selected=0 ;;
     support|support-test)
