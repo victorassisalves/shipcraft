@@ -8,7 +8,10 @@ shipcraft_min = "2.20"
 name = "acceptance"
 root = "."
 command = "acceptance/shipcraft.sh {junit}"
-globs = ["acceptance/lib/**", "acceptance/tools/**", "acceptance/fixtures/**", "acceptance/stubs/**", "acceptance/*.sh"]
+# acceptance/pontos/** (2026-10-30): the fixed points are locked with their cases, so a RED's
+# fixed points are protected from the GREEN and a redo can repair them in the redo commit.
+# Revert: drop that glob.
+globs = ["acceptance/lib/**", "acceptance/tools/**", "acceptance/fixtures/**", "acceptance/stubs/**", "acceptance/*.sh", "acceptance/pontos/**"]
 filter = "command"
 
 [execution]
