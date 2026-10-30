@@ -81,8 +81,8 @@ These readings remain part of the acceptance contract. Historical item numbers i
 11. The no-review reason appears in published PR text and runs.jsonl; it cannot bypass red CI.
 12. Status prints one protection line: an unprotected repository says it has no protection and names `shipcraft merge`.
 13. CI on main warns about bypassed merges by PR number or short SHA, exits 0 and logs `escape: true` with the merge commit. Gated merges and recorded no-review merges do not warn.
-14. Init writes local CI and local review with the detected reviewer, or review off with instructions to enable local review. The minimum version comes from the binary; multiple reviewers have no fixed default in these cases.
-15. Init explains RED, GREEN, provider and off; it reads one stdin line even without a terminal. Empty stdin uses the default.
+14. Init asks nothing. Init writes local CI and local review with the detected reviewer, or review off with instructions to enable local review. The minimum version comes from the binary; multiple reviewers have no fixed default in these cases.
+15. Init asks nothing; it explains RED, GREEN, provider and off.
 16. A local layer exposes “on this machine” in terminal, PR text or status description.
 17. Suite command runs in root, replaces `{junit}`, and uses root-relative globs. Init names suites after package directories with tests; legacy lang/runner keys may coexist.
 18. Unknown lock format or a minimum version above the binary refuses in three lines naming the format/version, in hook and CI.

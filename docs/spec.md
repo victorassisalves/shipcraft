@@ -338,7 +338,7 @@ Each command is `shipcraft <command>`. Exit codes, unless the row says otherwise
 |---|---|
 | `--version` | Prints `shipcraft <X.Y.Z> (<12-char commit>)`, in any folder. |
 | (no arguments) | Prints usage, exit `0`. |
-| `init [--lang python\|node\|go] [--github]` | Sets up the project (below). |
+| `init [--lang python\|node\|go] [--github]`, `init --lang other --command <cmd> --glob <glob>... [--github]` | Sets up the project (below; `other`, item 67). |
 | `red [--redo] [--base <ref>] [--all]` | Runs the RED's changed test files, or every suite when it cannot narrow safely (item 55), requires assertion failures, reruns the failing cases once and does not lock those that pass (item 53), writes an open lock; `--redo` rewrites the branch's open lock (item 46). Refuses `lock-open`, `red-already-passes`, `error-before-assertions`, `group-failed`, `red-not-reproduced`, `no-report`, `suite-without-tests`, `build-failed`. |
 | `check [--commit-msg <file>]` | The hook: judges the commit against the open locks and closes them when the RED cases pass. With `--commit-msg` it judges the final index and writes a close mark instead of the lock (`mark-failed` if it cannot). |
 | `close` | The `post-commit` half of the `commit-msg` route: if the mark matches the commit just made, adds one commit that only flips the lock to `closed`. On failure it changes nothing and says to rerun it. Always exits `0`. |
@@ -367,6 +367,46 @@ Each command is `shipcraft <command>`. Exit codes, unless the row says otherwise
 
   Anything `init` cannot prove (another tool's hook, `core.hooksPath` elsewhere, two hook managers, flow-style YAML, symlinks) refuses with `foreign-hook` and says where to add `shipcraft check` by hand. Edge cases are fixed by the acceptance battery (`acceptance/`).
 - **GitHub:** `init` never writes a workflow. With `--github` it marks `shipcraft/ci` and, when review is on, `shipcraft/review` as required checks where GitHub offers branch protection.
+
+### `init` for a project of any language (item 67)
+
+`init` knows Python, Node and Go. In any other project it refuses `lang-unrecognized`, and the only way out was to write `.shipcraft.toml` by hand. That cuts the hook, the `AGENTS.md` block, the review and the roles off from every project in another language. Shipcraft's own repository is one of them: a Rust core with a shell battery, where `init` says "could not recognize the project language" (dogfood step 1, 2026-10-29). Shipcraft never needed to know the language: with `filter = "command"` any command that writes a JUnit report is a suite.
+
+1. **`--lang other`.** `init --lang other --command '<command>' --glob '<glob>' [--glob '<glob>' ...]` sets up a project whose tests Shipcraft runs as written.
+   - **`--command`** is required. It is a shell command, run as every suite command runs today (`sh -c`, at the suite's root). `{junit}` is replaced by the shell-quoted report path, as today, so it must appear as an unquoted shell word or part of one (`--junitxml={junit}`, not `--junitxml="{junit}"`). It must contain `{junit}` exactly once, must hold, once `{junit}` is removed, at least one character that is not whitespace by Rust's `char::is_whitespace`, and must have no control character as Rust's `char::is_control` defines it. `init` does not parse or run the command.
+   - **`--glob`** is required at least once, and may repeat. Each value is a test or support file glob, validated and normalized as `test_globs` entries are today (relative, no `..`, no absolute path; `./` and empty components removed), and matched by Shipcraft's own glob matcher (`*`, `**`, `?`). It does not know braces `{a,b}` or character classes: they are taken literally. A vitest-style `**/*.{test,spec}.ts` is therefore two `--glob` values. After normalizing, repeats are dropped and the first one keeps its place.
+   - **What it writes, when there is no `.shipcraft.toml` yet:** the top-level suite keys `test_command` and `test_globs`, with `filter = "command"`, and no `lang`, `runner`, `check` or `[build]`. `lang` stays limited to `python`, `node` and `go`, and is optional, as it is today for a hand-written config. Everything else is today's `init`: `[execution]`, `[roles]` (`review` as a string), `shipcraft_min`, the hook, the `AGENTS.md` block and its `CLAUDE.md` import, the review choice and the closing guidance. `init` skips TypeScript build inference entirely for `other`, so it runs no `tsc` and writes no `[build]`. It writes no stub.
+   - **When `.shipcraft.toml` already exists,** it is kept as today: its suites and every other key stay as they are, and the only change is item 20.2's raise of `shipcraft_min` to the running binary's version, when that applies. The flags are still validated (point 2), but they do not change the config, and `init` prints `shipcraft: .shipcraft.toml exists and was kept; --command and --glob only seed a new config`. The closing guidance describes the kept config, as today.
+   - Only `init --lang other` with valid flags takes this path. A plain `init` in a project whose language it cannot detect still refuses `lang-unrecognized`, even when a hand-written `.shipcraft.toml` exists.
+   - The first `red` runs the command, and refuses `no-report` if it writes no report, as today.
+2. **Refusals and their order.** Every refusal leaves the tree as it was, as `init` refusals do today. They come in this order:
+   1. Command-line syntax, exit `2`: a repeated `--command`, a repeated `--lang`, or a flag without a value. A value that starts with `--` counts as missing, so `--command --glob x` is exit `2`.
+   2. Today's legacy-config refusal, in its place.
+   3. `lang-unknown`: `--command` or `--glob` given without `--lang other`, whether `--lang` names another language or is omitted. Also `--lang other` without `--command` or without any `--glob`, and a `--command` that breaks point 1's rules.
+   4. `config-invalid`: the first invalid `--glob`, in argument order.
+   5. Everything after that is today's `init` (hook planning, `foreign-hook` and the rest), with today's messages.
+   
+   The refusals in steps 3 and 4 end with `Next:` showing the full form: `shipcraft init --lang other --command '<test command writing JUnit to {junit}>' --glob '<test files>'`. No other refusal changes its `Next:`.
+3. **Detection is unchanged.** With no `--lang`, detection still knows only Python, Node and Go. No language found still refuses `lang-unrecognized`, and more than one still refuses `lang-multiple`. Both add the full form of point 2 to their `Next:`. For `lang-unrecognized`, `Why:` adds that Shipcraft can run any command that writes JUnit.
+4. **Touches.** These earlier items' cases cover what this item shares or changes. They must keep passing unchanged:
+   - language and init output: `init-detect`, `init-files`, `init-workflow`, `init-lang-flag` (`run.sh`), item 16b's `init --lang node` and its TypeScript build inference (`acceptance/lib/item16b.sh`, `pontos/16b.md`), and item 25's `init --lang python`;
+   - workspaces: `v1-9.1-init-pnpm`, `v1-9.1-init-workspaces-do-package-json`, `v1-9.1-init-go-work`;
+   - checks and npx: `v1-13.1-init-escreve-verifica`, `v1-13.1-init-verifica-com-traco`, `v1-12.1-npx-tsc-com-traco`, `v1-12.1-todo-npx-com-traco`, and item 56;
+   - globs and `--github`: item 30's glob normalization and rejection cases (`v1-30.1-glob-*`, `v1-30.1-v0-glob-*`, `v1-30.3-*`), `v1-5.3-init-github-marca-obrigatorios` and `v1-5.3-init-github-plano-gratis`;
+   - refusal order and rollback: `v1-15a.1-recusa-antes-de-perguntar-e-escrever`, `v1-15a.1-decide-antes-e-desfaz-escrita-no-meio`, `v1-15a.1-falha-preserva-config-simbolica`, `r-legacy-config-init`, `r-legacy-config-coexists`;
+   - hooks: `v1-20.rota.commit-msg`, `v1-20.rota.post-commit`, `v1-58.plain`, `v1-58.kept`, `v1-58.rollback`;
+   - guidance and comments: `v1-27.mensagem-local`, `v1-27.mensagem-desligado`, `v1-27.mensagem-github`, `v1-62.init`, `v1-62.init-preserve`, and `v1-2.3-tela-do-init` (init asks nothing);
+   - item 61's `AGENTS.md` block and item 64's `[roles]` defaults.
+   
+   No existing case asserts the text of `lang-unrecognized` or `lang-multiple`, or uses `--command` or `--glob`. README fixed points 14 and 15 still describe a review question that `init` no longer asks (item 25 removed it); they are corrected to "init asks nothing". No assertion changes.
+5. **Measure and revert.**
+   - **Metric:** `init --lang other` on Shipcraft's own repository (with `.shipcraft.toml`, `.shipcraft/` and the hooks moved aside) writes a config whose suite matches ours: the same command and globs, and `filter = "command"`. It is also the onboarding path for adopters in other languages.
+   - **Threshold:** that run succeeds, plus 0 false refusals over the next 5 items.
+   - **Revert:** a release. A project already set up keeps its config.
+6. **Known limits.**
+   - Shipcraft does not filter a command it does not know, so the hook runs the whole command on every commit with an open lock, unless the command reads `SHIPCRAFT_FILES` or `SHIPCRAFT_CASES` itself (section 6).
+   - `init` writes no stub for a language it does not know.
+   - Rust's `cargo test` writes no JUnit by itself. A Rust project needs a reporter such as `cargo nextest` with a JUnit profile, named in `--command`.
 
 ### `init` writes no check that checks nothing (item 56)
 
@@ -738,7 +778,7 @@ Why: in a vitest workspace (for example a `vitest.workspace.*` file, or `test.pr
 
 `[build] command` runs once at the root before the first suite, in `red` and in `ci` on a clean tree or fresh clone. CI builds only HEAD. The build never runs on the hook's copy; the hook uses the build output already in the tree. `ci` with `[build]` on a dirty tree refuses (`build-dirty-tree`), and a failing build refuses (`build-failed`) before any suite.
 
-`init` writes `[build]` when a tracked `tsconfig.json` at the root or in a workspace package has `references` or `composite: true`: `npx --no -- tsc -b` followed by those folders, alphabetically. It runs the command first and writes it only if it succeeds; otherwise it says why and still exits `0`.
+`init` (except `--lang other`, item 67) writes `[build]` when a tracked `tsconfig.json` at the root or in a workspace package has `references` or `composite: true`: `npx --no -- tsc -b` followed by those folders, alphabetically. It runs the command first and writes it only if it succeeds; otherwise it says why and still exits `0`.
 
 ## 7. Refusals
 
@@ -766,7 +806,7 @@ Output from a project command that `shipcraft` passes through always ends before
 | `foreign-hook` | `init` cannot prove which hook runs, or another tool owns it. |
 | `group-failed` | At RED, a failing case is a vitest `describe` block whose `beforeAll` failed and whose tests were skipped, not a test (item 52). |
 | `lang-multiple` | `init` found more than one language. |
-| `lang-unknown` | `--lang` names an unsupported language. |
+| `lang-unknown` | `--lang` names an unsupported language, or `--lang other` without a valid `--command` and `--glob` (item 67). |
 | `lang-unrecognized` | `init` found no known project file. |
 | `hook-config-changed` | A hook integration file (lefthook, husky, pre-commit) changed with a lock open. |
 | `lock-closed-red` | A lock arrives closed while locked cases still fail. |
@@ -877,4 +917,4 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.22.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.23.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
