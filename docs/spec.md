@@ -171,7 +171,7 @@ Before item 55, `red` ran every suite in full to learn which cases fail, and mos
   - `v1-38.*`, one `red` row per command;
   - `v1-44.local-red`, `v1-44.github-red`, `v1-44.off-red`;
   - `v1-10.1-execucoes-jsonl`.
-- The cases with no `origin` run in full as before, and their command and environment counts stay as they are: `v1-22.ambiente-red`, `v1-22.ambiente-build`, `v1-22.bash`, `v1-53.*`, `v1-16a.1-red-build`, `v1-45.red-order`.
+- The cases with no `origin` run in full as before (since item 66: because their tests are committed at the base it finds, so nothing is selected), and their command and environment counts stay as they are: `v1-22.ambiente-red`, `v1-22.ambiente-build`, `v1-22.bash`, `v1-53.*`, `v1-16a.1-red-build`, `v1-45.red-order`.
 
 **Versions.** The item raises the binary to 2.13.0. No lock or config field changes.
 
@@ -248,10 +248,41 @@ Before item 60, `red --redo` always ran every suite, since a redo must see every
 **Known limits.**
 - A case of another file that the repaired test or its support code breaks is not run at redo; CI refuses it later as `suite-red`, as for item 55.
 - The lock files are those holding the lock's cases. Support files (`conftest.py`, setup files, runner configs, `testdata/`) and test files whose cases were all skipped are not selected for that reason. A lock case that only worked because another file was collected with it (a pytest plugin registered by a sibling module, read through `SHIPCRAFT_FILES`) can then fail or vanish at redo and refuse `redo-drops-case`; `red --redo --all` runs every suite as before.
-- Without a base (`git init` with no remote, no `origin/HEAD`), a redo runs every suite, even when every lock case maps.
+- Without a base, a redo runs every suite, even when every lock case maps. Since item 66, that means an unborn `HEAD` or a git failure: a repository with no remote uses `main`, `master` or `HEAD` (item 66).
 - A case whose test moved to another file in the repair maps to no file of the old lock, and the redo runs in full.
 
 ### The lock closes by itself
+
+### The base when `origin/HEAD` is missing (item 66)
+
+Item 55 narrows from `refs/remotes/origin/HEAD`. When that ref is missing, `red` falls back to the full run (`no base`). It then locks every failing case of the project, including tests that already failed on the branch and that the RED never touched. POC-021 saw exactly that: a project with no remote, where `red` locked an unrelated failing test (SHOP-212) beside the RED's own. `origin/HEAD` is missing more often than it looks. A repository that was never cloned has no remote at all. `git remote add origin` followed by `git push -u` creates `origin/main` but not `origin/HEAD`.
+
+1. **The base, without `--base`.** `red` first reads `HEAD` with `git rev-parse --verify -q HEAD^{commit}`. Exit status 1 means `HEAD` is unborn (no commit yet): there is no base, and `red` falls back to the full run with `no base`, as today. In a repository with no commit every test is new. Any other failure gives the full run with `git failed`: another exit status, a signal, a failure to start git, or output that is not one commit id. Otherwise `red` takes the first of these candidates that resolves to a commit:
+   1. `refs/remotes/origin/HEAD`, as today;
+   2. `refs/remotes/origin/main`, then `refs/remotes/origin/master`;
+   3. `refs/heads/main`, then `refs/heads/master`;
+   4. `HEAD`.
+   
+   Each candidate is resolved once with `git rev-parse --verify -q <ref>^{commit}`, and `red` keeps the commit id it gives. Exit status 1 means the candidate is absent or not a commit, so `red` moves to the next one. Any other result stops the search and `red` falls back to the full run with `git failed`: another exit status, a signal, a failure to start git, or output that is not one commit id. With `--base <ref>`, nothing changes: that ref is used, and its failures give the fallbacks they give today.
+2. **The merge base.** As in item 55: the merge base of `HEAD` and the chosen commit, as `git merge-base --all` gives it. There must be exactly one. If zero or several come out, `red` does not try the next candidate: it falls back with `no merge base`, as today. When `HEAD` is the chosen candidate, or `HEAD` is on the chosen branch, the merge base is `HEAD`. Then the changed paths are exactly what the working tree adds to `HEAD`, which is the RED's tests when they are not committed yet. The names `main` and `master` are a convention, not proof that the branch is the default. The first one that resolves is used, even if another branch is the real default.
+3. **Item 59's warnings use the same base.** Item 59's two warnings in `red` read the commit chosen here, and wherever they print a ref they print point 4's short name (`origin/main`, `main`, `HEAD` and so on): test files outside every suite's globs, and suites absent from the base config. So all three use one base: the selection, those warnings, and the line in point 4. Every reader outside `red` is unchanged: the hook, CI, `shipcraft pr` and `merge`, and `Repo::default_branch` (`origin/HEAD`, or `main` when it is missing).
+4. **Reported.** When the base came from candidates 2 to 4, `red` prints one line on stdout, right before item 55's selection line and only when that line is printed: `shipcraft: red compared with <name> (origin/HEAD is missing)`. `<name>` is `origin/main`, `origin/master`, `main`, `master` or `HEAD`. With `--base` or `origin/HEAD`, nothing is added.
+5. **The run log.** No field is added. Item 55's fields keep describing the run that actually happened: a project without `origin/HEAD` that now narrows writes `selection: "changed"` and `fallback: null`.
+6. **`--redo`.** Item 60's redo resolves its base the same way.
+7. **What does not change.** The lock format, the rules of items 55, 60 and 65 for selection and coverage, and every reader listed in point 3.
+8. **Battery.** These cases expect `no base` on a project that has no `origin/HEAD` but has `origin/main` or `main`. Their fixed points change with them. The first three change to the narrowed run on the new base. `v1-59.suites-no-base` keeps its full run, because its config changed (`config changed`), and changes only its warning: it now names the suites absent from the new base.
+   - `v1-55.no-base` (Python and Node), with `acceptance/pontos/55.md`;
+   - `v1-60.no-base`, with `acceptance/pontos/60.md`;
+   - `v1-59.files-no-base` and `v1-59.suites-no-base` (item 59's warnings now read the new base), with `acceptance/pontos/59.md`.
+   
+   These keep their expectations: an explicit bad base (`v1-55.redo-base`, `v1-60.bad-base`), and cases whose tests are already committed at the new base, which still fall back with `nothing selected` (`v1-22.ambiente-red`, `v1-22.ambiente-build`, `v1-22.bash`, `v1-16a.1-red-build`, `v1-45.red-order`, item 53's wrapper cases). The row-key checks of items 59 and 65 and item 10's log reader are unchanged.
+9. **Measure and revert.**
+   - **Metric:** the share of `red` rows with `fallback: "no base"` in adopters' run logs (draken-platform, the Forge, POC fixtures), and pre-existing failures locked by a RED in POC-021's fixture. **Threshold:** `no base` only on repositories with no commit, and 0 pre-existing failures locked in POC-021's fixture. That fixture is the evidence, not a general guarantee (see the limits).
+   - **Revert:** `red --all` forces the full run for one RED, `red --base <ref>` picks the base by hand, and a release reverts the rule.
+10. **Known limits.**
+    - When the chosen candidate contains `HEAD`, the merge base is `HEAD`. That happens with `HEAD` itself, with `main` while working on `main`, and with a stale `origin/master` that points at the branch. Tests committed before `red` ran are then not selected. If nothing else is selected, `red` falls back to the full run (`nothing selected`) and can lock failures that were already there, as before this item.
+    - The same full run follows a RED that changes no test file, for example only a product stub. It also follows a RED whose test files did not change at all.
+    - A local `main` far behind the real default branch gives a wider diff: more files run, and none is missed.
 
 ### A changed support file no longer runs every suite (item 65)
 
@@ -846,4 +877,4 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.21.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.22.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
