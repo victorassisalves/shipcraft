@@ -69,7 +69,7 @@ record=cw/'calls71.jsonl';answer=cw/'answer71';tools=cw/'tools71';tools.mkdir()
 env=dict(os.environ,PATH=str(tools)+os.pathsep+os.environ['PATH'],ITEM71_RECORD=str(record),ITEM71_ANSWER=str(answer),ITEM71_MODE=mode,ITEM71_CACHE=str(cw/'probe-cache'),ITEM71_CUSTOM='inherited value',CDPATH=str(cw))
 entries=[{'file':str(root/folder/'src/a.test.ts'),'projectName':['api','web'][i]} for i,folder in enumerate(folders)]
 projects=['api','web'][:len(folders)];reasons={}
-none='vitest listed none of its files';many='vitest listed its files in more than one project or without a project name';unsafe='its vitest project name is not one shipcraft writes in a command';outside='its vitest project also lists files outside it';badfolder='its folder name cannot be written in a glob'
+none='vitest listed none of its files';many='vitest listed its files in more than one project';unsafe='its vitest project name is not one shipcraft writes in a command';outside='its vitest project also lists files outside it';badfolder='its folder name cannot be written in a glob'
 if mode in ('safe-name','json-escaped'):entries[0]['projectName']=projects[0]='@Scope/a.B_9-x'
 if mode in ('unsafe-empty','unsafe-option','unsafe-space','unsafe-quote','unsafe-unicode'):
  entries[0]['projectName']={'unsafe-empty':'','unsafe-option':'--api','unsafe-space':'api web','unsafe-quote':"api'",'unsafe-unicode':'apí'}[mode];reasons[0]=unsafe
