@@ -955,7 +955,7 @@ So the failure comes from the full run. With item 80 the field run would have na
 3. **What is locked.** The cases left out are removed from `failing_at_red`, and also from `cases`. Item 46's `redo-drops-case` compares the lock's `cases` with later runs, and CI refuses `case-broke` for a case in `cases` that fails without being in `failing_at_red`, so a failing case cannot stay in `cases` alone. Then, on the cases that remain:
    - item 30.2's `suite-without-tests` is judged on them;
    - item 53's second run reruns only their suites and judges only them, so `red-not-reproduced` means every remaining case passed;
-   - `files` is hashed as today, so the files of the cases left out stay protected.
+   - `files` is hashed as today, so the files of the cases left out stay protected: while the lock is open, the hook and CI refuse any change to them `test-changed` (`check_files`, rule 4), and deleting one `locked-file-deleted`. A case left out is not required to pass to close the lock, but its test cannot be edited to make it pass. No new lock field is needed: `files` already expresses "protected", and `cases`/`failing_at_red` "required".
 4. **Reported.** When cases are left out, `red` prints one line on stdout, after item 53's `not locked, passed on a second run` line (when printed) and before `RED locked at` (`RED redone at` for `--redo`), only when it writes the lock:
 
    `shipcraft: not locked, failing in test files this RED did not change: <cases>; CI runs them`
@@ -1013,6 +1013,7 @@ So the failure comes from the full run. With item 80 the field run would have na
      - every case of `F` outside the RED, where nothing is left out;
      - each condition of point 1 turned off on its own (`--all`, `no base`, an unmapped case, an added file, an untracked file, a redo case of HEAD's lock);
      - a case left out of `cases` and `failing_at_red`, with `files` still hashing its file;
+     - a GREEN commit that edits the test file of a case left out is refused `test-changed`, and one that deletes it `locked-file-deleted`, also in `shipcraft ci`;
      - the second run not rerunning a suite whose only failing cases were left out;
      - the row field present only when cases are left out.
 10. **Measure and revert.**
