@@ -45,7 +45,8 @@ use std::time::Instant;
 const USAGE: &str =
     "usage: shipcraft --version | shipcraft init [--lang python|node|go] [--github]
      | shipcraft init --lang other --command <cmd> --glob <glob>... [--github]
-     | shipcraft red [--redo] [--base <ref>] [--all] | shipcraft check [--commit-msg <file>] | shipcraft close
+     | shipcraft red [--redo] [--base <ref>] [--all] [--fix [--reported-at <time>] [--fixes-release <tag>]]
+     | shipcraft check [--commit-msg <file>] | shipcraft close
      | shipcraft ci --base <ref> [--pr]
      | shipcraft pr [--title <t>] [--body <file>] | shipcraft review [--pr <n>]
      | shipcraft merge <pr> [--no-review \"<reason>\"] | shipcraft status | shipcraft report [--json]";
@@ -94,16 +95,36 @@ fn run(args: &[&str]) -> Result<()> {
         }
         ["red", rest @ ..] => {
             // Item 55: each option once, in any order; item 60: `--redo` takes the others too.
+            // Item 75: `--fix`, and `--reported-at` and `--fixes-release` only with it,
+            // never with `--redo`; each value in its grammar.
             let (mut redo, mut all, mut base) = (false, false, None);
+            let (mut fix, mut reported_at, mut fixes_release) = (false, None, None);
             let mut rest = rest.iter();
             while let Some(arg) = rest.next() {
                 match *arg {
                     "--redo" if !redo => redo = true,
                     "--all" if !all => all = true,
                     "--base" if base.is_none() => base = Some(*rest.next().ok_or_else(|| invalid(args))?),
+                    "--fix" if !fix => fix = true,
+                    "--reported-at" if reported_at.is_none() => {
+                        reported_at = Some(rest.next().filter(|v| lock::valid_time(v)).ok_or_else(|| invalid(args))?)
+                    }
+                    "--fixes-release" if fixes_release.is_none() => {
+                        fixes_release = Some(rest.next().filter(|v| lock::valid_tag(v)).ok_or_else(|| invalid(args))?)
+                    }
                     _ => return Err(invalid(args)),
                 }
             }
+            if (redo && (fix || reported_at.is_some() || fixes_release.is_some()))
+                || (!fix && (reported_at.is_some() || fixes_release.is_some()))
+            {
+                return Err(invalid(args));
+            }
+            let fix = lock::Fix {
+                kind: if fix { lock::Kind::Fix } else { lock::Kind::Feature },
+                reported_at: reported_at.map(|v| v.to_string()),
+                fixes_release: fixes_release.map(|v| v.to_string()),
+            };
             // Item 38: a lock written, or a refusal, is a row.
             let started = Instant::now();
             let repo = Repo::open()?;
@@ -126,8 +147,17 @@ fn run(args: &[&str]) -> Result<()> {
                 medicao::record(&repo, row);
                 return result;
             }
-            let result = red::run(&repo, base, all, &mut chosen);
+            let fields = [
+                ("kind", serde_json::Value::from(fix.kind.as_str())),
+                ("reported_at", fix.reported_at.clone().into()),
+                ("fixes_release", fix.fixes_release.clone().into()),
+            ];
+            let result = red::run(&repo, base, all, fix, &mut chosen);
             let mut row = medicao::row(&repo, "red", started, &result);
+            // Item 75: every non-redo row carries the fix fields.
+            for (key, value) in fields {
+                row[key] = value;
+            }
             if let Ok((path, dropped)) = &result {
                 row["lock"] = medicao::lock_id(path).into();
                 // Item 53: how many cases the second run did not lock.
