@@ -28,7 +28,14 @@ def snapshot(stable_git=False):
  def entry(p):
   return (stat.S_IMODE(p.lstat().st_mode), 'link',os.readlink(p)) if p.is_symlink() else (stat.S_IMODE(p.stat().st_mode),'file',p.read_bytes()) if p.is_file() else (stat.S_IMODE(p.stat().st_mode),'dir')
  # Unchanged-state checks preserve working-tree bytes and Git state, not Git's cache bytes.
- result={str(p):entry(p) for p in Path('.').rglob('*') if not stable_git or p.parts[0]!='.git'}
+ result={}
+ for p in Path('.').rglob('*'):
+  if stable_git and p.parts[0]=='.git':continue
+  try:result[str(p)]=entry(p)
+  except FileNotFoundError:
+   # Background Git maintenance can remove a transient file after rglob lists it.
+   if p.parts[0]=='.git' and (p.name.endswith('.lock') or p.name=='gc.pid') and not (p.exists() or p.is_symlink()):continue
+   raise
  if stable_git:
   # Keep byte-level coverage for hooks and Shipcraft's own Git-local writes.
   for name in ('.git/hooks','.git/shipcraft'):
@@ -65,7 +72,9 @@ def refusal(p,next_full=True,needle=None,init_only=True):
  if init_only:assert not Path('.git/shipcraft/runs.jsonl').exists()
  return lines
 root=Path(cw)/('project 67' if case=='red-space' else 'project67');root.mkdir();os.chdir(root)
-run('git','init','-q','-b','main');write('README.md','Markerless project\n')
+run('git','init','-q','-b','main')
+run('git','config','gc.auto','0');run('git','config','maintenance.auto','false');run('git','config','gc.autoDetach','false')
+write('README.md','Markerless project\n')
 run('git','add','.');run('git','commit','-q','-m','fixture: markerless repository')
 write('.git/shipcraft/sentinel',b'keep67\r\n\x00')
 if case=='version':

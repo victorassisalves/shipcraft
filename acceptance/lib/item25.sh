@@ -73,6 +73,10 @@ item25_case() {
   local scenario="${CASE//sc2/shipcraft}"
   EXPECT="item 25 contract"
   v1_start codex
+  # The raw .git snapshot must not race automatic maintenance after fixture commits.
+  git config gc.auto 0 || fail 'fixture: disable automatic gc'
+  git config maintenance.auto false || fail 'fixture: disable automatic maintenance'
+  git config gc.autoDetach false || fail 'fixture: disable detached gc'
   run_cmd "$PY" - "${scenario#v1-25.}" <<'PY25'
 import copy
 import json
