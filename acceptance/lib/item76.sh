@@ -3,7 +3,7 @@ item76_langs() { echo core; }
 item76_cases() {
   local c
   for c in metrics removed since since-order since-empty since-unavailable since-not-release since-offline-tag \
-    text text-empty rows states kinds-tip kinds-release kinds-head kinds-red kinds-legacy kinds-legacy2 invalid-seal invalid-schema \
+    text text-empty since-text-coverage rows states kinds-tip kinds-release kinds-head kinds-red kinds-legacy kinds-legacy2 invalid-seal invalid-schema \
     lead-missing lead-nonpositive lead-redo recover-missing recover-nonpositive recover-offset \
     rework-unknown failure-unknown failure-absent failure-null failure-scoped first-shipment \
     tags tag-blob tag-no-tagger tie tie-huge origin-main local-main origin-head master no-default \
@@ -134,6 +134,7 @@ if case=='since-not-release':args+=['--since','v99.0.0']
 if case=='since-offline-tag':
  git('checkout','-qb','unmerged76',r1);save(T1);tag('v99.0.0');git('checkout','main');args+=['--since','v99.0.0']
 if case in ('text','text-empty'):args=[]
+if case=='since-text-coverage':args=['--since','v2.0.0']
 if case=='tags':
  for t in ('release','v01.0.0','v1.01.0','v1.0.00','v1.0.0-rc1','packages/v8.0.0','v１.0.0'):tag(t)
  git('checkout','-qb','not-default76',r1);save(T1);tag('v99.0.0');git('checkout','main')
@@ -234,7 +235,7 @@ if case in ('since-not-release','since-offline-tag'):
  assert p.stderr.decode().strip()==f'report: --since v99.0.0 is not a release tag on {want_branch}',p.stderr
  sys.exit()
 assert p.returncode==0,('report must exit zero',p.returncode)
-if case in ('text','text-empty'):
+if case in ('text','text-empty','since-text-coverage'):
  text=p.stdout.decode();lines=text.splitlines()
  # Item 38's report opening stays separate from the new DORA block.
  assert lines and re.search('machine|local',lines[0],re.I),lines
@@ -246,7 +247,9 @@ if case in ('text','text-empty'):
  coverage=block if re.search('machine|local',block[0],re.I) else block[1:]
  assert len(coverage)>=2 and re.search('machine|local',coverage[0],re.I),block
  if case=='text':assert all(str(x) in coverage[0] for x in (T1-100,T3-800)),coverage
- assert re.search(r'\bmain\b',coverage[1]) and re.search(r'\b3\b',coverage[1]),coverage
+ count=1 if case=='since-text-coverage' else 3
+ assert re.search(r'\bmain\b',coverage[1]) and re.search(r'\b'+str(count)+r'\b',coverage[1]),coverage
+ if case=='since-text-coverage':assert 'v2.0.0' in coverage[1] and not re.search(r'\b3\b',coverage[1]),coverage
  assert re.search('branch.*tip|tip.*branch',coverage[1],re.I),coverage
  assert all(re.search(k,'\n'.join(block),re.I) for k in ('deploy','lead[ _-]time','rework','recover','change[ _-]failure')),block
  sys.exit()
