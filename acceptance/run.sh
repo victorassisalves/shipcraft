@@ -888,6 +888,9 @@ export GIT_AUTHOR_NAME="shipcraft acceptance" GIT_AUTHOR_EMAIL="shipcraft-accept
 export GIT_COMMITTER_NAME="shipcraft acceptance" GIT_COMMITTER_EMAIL="shipcraft-acceptance@example.invalid"
 export PIP_CACHE_DIR="$CACHE/pip" PIP_DISABLE_PIP_VERSION_CHECK=1
 export npm_config_cache="$CACHE/npm" npm_config_update_notifier=false npm_config_fund=false npm_config_audit=false
+# Installs come from the cache when it has the package (CI keeps it across runs); the registry
+# is asked only for what the cache lacks.
+export npm_config_prefer_offline=true
 export GOPATH="$CACHE/gopath" GOMODCACHE="$CACHE/gopath/pkg/mod" GOCACHE="$CACHE/gocache" GOBIN="$CACHE/gobin"
 export GOTOOLCHAIN=local GOFLAGS="-p=2" CGO_ENABLED=0
 # v1 cases run with a PATH where no real gh, codex, claude or gemini is visible: each
