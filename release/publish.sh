@@ -153,7 +153,8 @@ $OTHER was only built: the battery did not run against it (an accepted limit, it
 else
   # -------------------------------------------------------------- the release-shadow run
   # Strict reading of gh run list --json databaseId,status,conclusion: one JSON array of
-  # objects, each with a positive integer databaseId and string status and conclusion
+  # objects, each with a positive integer databaseId (kept as its digit string, of any
+  # length, never converted to a number) and string status and conclusion
   # (other fields allowed). Exit 2: unreadable; exit 3: no row completed with success;
   # otherwise it prints the databaseId of the first such row, in the CLI's order.
   RUNS_AWK='
@@ -231,7 +232,7 @@ function obj(row,   c, key, v, t) {
     p++
     v = value(); t = vtype
     if (row && key == "databaseId") {
-      if (hasid++ || t != "number" || v !~ /^[1-9][0-9]*$/ || length(v) > 18) err()
+      if (hasid++ || t != "number" || v !~ /^[1-9][0-9]*$/) err()
       rid = v
     } else if (row && key == "status") {
       if (hass++ || t != "string") err()
