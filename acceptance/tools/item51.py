@@ -15,7 +15,11 @@ NET_TIMEOUT = int(os.environ.get('SHIPCRAFT_ACCEPTANCE_NET_TIMEOUT', '600'))
 
 def run(*args, ok=True, timeout=120):
     start = time.monotonic()
-    p = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+    try:
+        p = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        print('$', shlex.join(args), f'[{time.monotonic() - start:.1f} s of {timeout}: timed out]', flush=True)
+        raise
     print('$', shlex.join(args), f'[{time.monotonic() - start:.1f} s of {timeout}]', '\n', p.stdout, p.stderr, flush=True)
     if ok:
         assert p.returncode == 0, (args, p.returncode)
