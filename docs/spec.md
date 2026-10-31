@@ -620,6 +620,40 @@ POC-021's after runs on 2.24.0 (2026-10-30): `init` ran in 3 of 4 runs, against 
    - A binary installed inside a package's own `node_modules` gets `shipcraft init`, which may not be on `PATH`. `init` itself says how that install is wired.
    - An agent that never runs `--version` or `--help`, and never reads the README, is not reached.
 
+### Workspace suites run from the root when the root vitest config defines the projects (item 71)
+
+Wrong-verdict note: since item 9 (2.0.0), `init` writes each Node workspace suite to run inside its package. Found on the Forge, the second adopter (2.25.0, deluge-forge-platform PR #805, 2026-10-31): its root vitest config carries the worker caps, a `globalSetup` that points `TMPDIR` at one folder per run and a guard against writes to the real home folder, and a run from inside a package skips all of them. The Forge rewrote every suite by hand to run from the root with `--project <name>`. The battery should have caught it, but no vitest fixture has a root config with projects (item 51's note says the same).
+
+1. **When it applies.** `init` writes a Node workspace (item 9) and, for each suite whose runner is vitest, decides between today's form and the root form. It asks vitest only when the repository root has a regular file (`lstat`, never followed) named `vitest.workspace.<ext>` or `vitest.config.<ext>`, `<ext>` one of `ts`, `mts`, `cts`, `js`, `mjs`, `cjs` (and `json` for `vitest.workspace` only). Otherwise every suite keeps today's form and nothing below runs.
+2. **Asking vitest.** `init` runs, once, at the repository root, `npx --no -- vitest list --filesOnly --json`, with the environment `init` itself received, stdin closed, stdout captured, stderr discarded, and a 60 s limit. It does not run a test. The answer is read as follows:
+   - the command must exit 0 within the limit, and stdout must parse as a JSON array of objects, each with a string `file`; `projectName` is read when it is a string and treated as absent otherwise;
+   - each `file` is an absolute path; it belongs to a suite when, after canonicalizing both, it lies under the suite's folder (the repository root canonicalized, joined with the suite's root);
+   - a suite gets the root form when its files in the answer are at least one and all carry the same non-empty `projectName` made only of the characters `A-Z a-z 0-9 @ / . _ -`.
+   - Any other outcome for a suite (no file of it in the answer, files without a name, two names, a name with another character) keeps that suite in today's form. A failure of the command itself (not found, a non-zero exit, the time limit, stdout that does not parse) keeps every suite in today's form.
+3. **The root form.** For a suite with project name `<project>` and folder `<dir>`:
+   - `root = "."`;
+   - `command = "npx --no -- vitest run --project <project> --reporter=default --reporter=junit --outputFile.junit={junit}"`, the same reporters as today's vitest command, with `--project <project>` after `run`;
+   - `globs`: each of today's globs for that suite, prefixed with `<dir>/` (`**/*.test.*` becomes `<dir>/**/*.test.*`), in today's order;
+   - its name, its `check` (and item 56's judgement of it, which still reads `<dir>/tsconfig.json`) and its place in the suite order: as today.
+4. **What `init` prints.** After the `workspace node with N suite(s)` line, one line per suite in suite order when at least one suite got the root form: `shipcraft: suite <name> runs from the repository root with --project <project>, so the root vitest config applies`. When `init` asked vitest and the command failed: one line `shipcraft: suites run inside their packages: \`vitest list\` <how>; the root vitest config does not apply to them`, `<how>` being `exited <code>`, `timed out`, `could not start` or `printed no file list`. A suite kept in today's form while others got the root form gets `shipcraft: suite <name> runs inside its package: vitest listed <none of its files|its files without one project name>`. `<name>` and `<project>` are escaped as in item 52's lists.
+5. **Current behavior** on the paths this item touches (rule 14):
+   - One suite per workspace package with tests, named after the folder, `root` the package folder, globs relative to it, the vitest command with `npx --no -- ` and the jest command unchanged: keep for every suite that does not get the root form, and for every jest suite.
+   - A single-package (non-workspace) Node project, Python, Go and `--lang other`: keep; `init` runs no `vitest list` there.
+   - `[build]` inference (item 16b), item 56's check judgement, the hooks, the `AGENTS.md` block, the briefs, the closing lines, the exit codes and rollbacks: keep.
+   - An existing `.shipcraft.toml` is not rewritten, and no `vitest list` runs then: keep.
+   - `init` runs `tsc -b` today when it infers `[build]`; it now also runs `vitest list` under point 1: change.
+6. **Touches.**
+   - **Must keep passing unchanged:** item 9's workspace cases (`v1-9.1-init-pnpm`, `v1-9.1-init-workspaces-do-package-json`, `v1-9.1-init-go-work`, `v1-9.1-monorepo-casos-por-suite`); item 12's and 13's node init cases (`v1-12.1-*`, `v1-13.1-init-*`); item 16b's (`v1-16b.1-*`); item 56's (`v1-56.*`); item 25's closing lines; item 51's vitest positional files (`v1-51.*`), which apply to the root form unchanged; item 55's narrowed `red` (`v1-55.*`); item 67's successful-init cases and allowlists; item 68's closing cases. None of their fixtures has a root vitest config, so none changes.
+   - **New cases** use a fake `npx` on `PATH` that answers `vitest list` with a canned answer and records its arguments and folder; one case may use a real vitest when the battery's cache has it.
+7. **Measure and revert.**
+   - **Metric:** the Forge's next `init` (or a fresh clone of its layout) writes the root form for each package suite its root config lists, with no hand edit.
+   - **Revert:** a release drops the `vitest list` step; projects keep the config they have.
+8. **Known limits.**
+   - `vitest list --filesOnly` needs vitest 2.1 or later and installed dependencies; without them every suite keeps today's form, with the line that says why.
+   - A root config without projects is not judged: its suites keep today's form even though it, too, would apply only from the root.
+   - The project name comes from vitest at `init` time; renaming a project later leaves the suite pointing at the old name, and vitest then runs nothing for it, which `red` refuses as `suite-without-tests`.
+   - The worker caps the Forge sets in its command's environment are the project's choice; `init` writes none.
+
 ## 4. Configuration
 
 `.shipcraft.toml` lives at the project root.
