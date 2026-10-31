@@ -45,6 +45,9 @@ if name == 'mv':
         assert Path(d['installed']).exists(), 'apagou anterior antes da renomeação'
     os.execv(os.environ['I21_MV'], [os.environ['I21_MV'], *args])
 if name == 'git':
+    if args == ['remote','get-url','origin']:
+        print('https://github.com/equipe/shipcraft.git')
+        sys.exit(0)
     if 'ls-remote' in args:
         if case == 'release-remoto' or (case == 'release-tags-falha' and '--tags' in args):
             sys.exit(71)
