@@ -339,7 +339,7 @@ Each command is `shipcraft <command>`. Exit codes, unless the row says otherwise
 | `--version` | Prints `shipcraft <X.Y.Z> (<12-char commit>)`, in any folder. |
 | (no arguments) | Prints usage, exit `0`. |
 | `init [--lang python\|node\|go] [--github]`, `init --lang other --command <cmd> --glob <glob>... [--github]` | Sets up the project (below; `other`, item 67). |
-| `red [--redo] [--base <ref>] [--all]` | Runs the RED's changed test files, or every suite when it cannot narrow safely (item 55), requires assertion failures, reruns the failing cases once and does not lock those that pass (item 53), writes an open lock; `--redo` rewrites the branch's open lock (item 46). Refuses `lock-open`, `red-already-passes`, `error-before-assertions`, `group-failed`, `red-not-reproduced`, `no-report`, `suite-without-tests`, `build-failed`. |
+| `red [--redo] [--base <ref>] [--all]` | Runs the RED's changed test files, or every suite when it cannot narrow safely (item 55), requires assertion failures, reruns the failing cases once and does not lock those that pass (item 53), writes an open lock; `--redo` rewrites the branch's open lock (item 46). Refuses `lock-open`, `install-not-committed` (item 80), `red-already-passes`, `error-before-assertions`, `group-failed`, `red-not-reproduced`, `no-report`, `suite-without-tests`, `build-failed`. |
 | `check [--commit-msg <file>]` | The hook: judges the commit against the open locks and closes them when the RED cases pass. With `--commit-msg` it judges the final index and writes a close mark instead of the lock (`mark-failed` if it cannot). |
 | `close` | The `post-commit` half of the `commit-msg` route: if the mark matches the commit just made, adds one commit that only flips the lock to `closed`. On failure it changes nothing and says to rerun it. Always exits `0`. |
 | `ci --base <ref> [--pr]` | CI (section 2). `--pr` allows the docs-only path (section 5). `ci` publishes no status (item 44). |
@@ -931,6 +931,65 @@ Two small field findings. The Forge (2.25.0, `review = "off"`, no `[roles] revie
    - A state that changes and changes back between two reads is not seen, as today.
    - The local CI queue's wait (item 41) prints no new line.
 
+### `red` refuses when the install is not committed (item 80)
+
+POC-021's after runs on 2.31.0 (2026-10-31, `after2-claude-existing`): Claude ran `shipcraft init` and did not commit what it installed. It then wrote a test and a stub and ran `shipcraft red`, with `.shipcraft.toml`, `.husky/commit-msg`, `.husky/post-commit`, the briefs and `.shipcraft/locks/.gitkeep` all untracked. `red` ran every suite (`fallback: "config changed"`, because the untracked config is a changed path) and wrote a lock that hashes `.shipcraft.toml`. The hook refused the RED commit `locked-file-deleted` (`locked file .shipcraft.toml was deleted in the index`), and no RED commit could pass without carrying the install in it. The full run also locked a test that already failed in a file the RED never touched (item 81). This item makes `red` say so before it runs anything.
+
+1. **The install paths.** These paths of the repository root, the ones `init` writes and git tracks:
+   - `.shipcraft.toml`;
+   - `.shipcraft/locks/.gitkeep`, `.shipcraft/briefs/red.md`, `.shipcraft/briefs/green.md`;
+   - the hook integration files item 15c.2 and item 25.4 protect, as `init` writes them: `.husky/commit-msg`, `.husky/post-commit`, `.pre-commit-config.yaml`, and the lefthook files `lefthook.yml`, `.lefthook.yml`, `lefthook.yaml`, `.lefthook.yaml`.
+
+   `.git/hooks/commit-msg` and `.git/hooks/post-commit` (plain git) are not tracked by git and do not count. Nor do `lefthook-local` files (never written by `init`), `.husky/_/`, `AGENTS.md`, `CLAUDE.md`, or the package manifest and lockfile of a project-local install.
+2. **The rule.** An install path is *uncommitted* when it exists in the working tree (`lstat` succeeds, whatever the entry's type) and HEAD's tree has no entry at that path. A staged path that HEAD lacks is uncommitted. When HEAD is unborn (no commit yet), every install path that exists is uncommitted. A path absent from the working tree is never uncommitted: a project installed before item 68 has no briefs and needs none. Only presence counts: a path that HEAD holds and the working tree changes is not uncommitted (see the limits).
+3. **How it is read.** HEAD is read with `git rev-parse -q --verify HEAD`, as `Repo::head` reads it today: exit status 1 means unborn. HEAD's entries are read with one `git ls-tree -z --name-only HEAD -- <paths>` over the install paths that exist. Any other failure of either command is today's git failure: `shipcraft: error: ...`, exit 2, with the run-log row as for any error. No `rev-parse <ref>^{commit}` is added, so item 66's candidate resolution and its order stay exactly as they are.
+4. **When.** `red` judges it after the config is read and validated and after `lock-open`, and before anything else: item 66's base, item 55's changed paths, item 59's first warning, `[build]`, any `check` or suite, and any write. `red --redo` judges it after HEAD's lock is read (`redo-without-lock`, `lock-open`, `lock-edited`, `lock-format`), and before the same steps. Those earlier refusals keep their precedence.
+5. **The refusal.** When any install path is uncommitted, `red` refuses `install-not-committed`, exit 1, with the paths in byte order, all of them, separated by a space in the command and by `, ` in the first line:
+
+   ```
+   shipcraft refused: the Shipcraft install is not committed: <paths> not in HEAD
+   Why: the lock protects .shipcraft.toml and the hook judges each commit against HEAD, so an install file HEAD lacks reads as a locked file deleted, or a hook file created while the lock is open, and the RED commit is refused
+   Next: commit the install in a commit of its own, without your tests or stub: `git add -- <paths>`, with the other files init's `shipcraft: ready. Commit ...` line named when they changed (AGENTS.md, CLAUDE.md, and package.json with its lockfile for a project install), then `git commit`; then run `shipcraft red` again
+   ```
+
+   For `--redo`, the `Next:` ends with ``run `shipcraft red --redo` again``. `init`'s closing line is the list the `Next:` refers to: `shipcraft: ready. Commit .shipcraft.toml<hook files>, AGENTS.md, CLAUDE.md, .shipcraft/briefs/red.md, .shipcraft/briefs/green.md and .shipcraft/locks/;` as `init` prints it, with the parts it did not write left out.
+6. **What it leaves.** No lock is written or changed, no suite, build or check runs, no stdout line of item 55, 65 or 66 is printed, and item 59's warnings are not printed. The run log gets one `red` row, `result: "refused"`, `code: "install-not-committed"`, without `selection`, `selected_files` and `fallback` (the selection was not decided, as for `lock-open`); a non-redo row carries item 75's `kind`, `reported_at` and `fixes_release` as every non-redo row does; a redo row has `redo: true`.
+7. **Current behavior** on the paths this item touches (rule 14):
+   - `red` and `red --redo` read the config first (`Config::load`: `no-config`, `config-invalid`, `shipcraft-min`, the legacy-config refusal), then `lock-open` (`refuse_if_a_lock_is_open`) or HEAD's lock (`head_lock`): keep, before the new check.
+   - With an install path uncommitted, `red` today goes on: item 66's base (on an unborn HEAD, `no base`), item 55's changed paths (an untracked or staged `.shipcraft.toml` is a changed path, so `config changed` and the full run), the full run, item 53's second run, and a lock whose `files` hash the working tree's `.shipcraft.toml` (`locked_files` in `red.rs`), with exit 0, its stdout lines and a `passed` row: change, it refuses as in point 5.
+   - The hook's judgment of the RED commit: `check::run` reads each locked file from the index through `check_files` (`contract.rs`), where `Repo::read` takes a path `git ls-files` does not list as absent, and refuses `locked-file-deleted` (`locked file <file> was deleted in the index`, Why `RED is the GREEN contract; deleting the test or config deletes the contract`); CI does the same on each commit's tree through `git ls-tree`. `.shipcraft.toml` is a locked file of every lock: `locked_files` adds `CONFIG_FILE` to the suites' test files. Keep.
+   - `check_lefthook` (`contract.rs`) is skipped for a commit that opens a lock and, on every later commit while a lock is open, refuses `hook-config-changed` for a hook integration file whose index bytes differ from every parent's, `was created` when no parent has it: keep. This is why an uncommitted hook file is a trap: it cannot be committed while the lock is open.
+   - A staged `.shipcraft.toml` that differs from HEAD's is validated by the hook even with no lock open (item 31): keep.
+   - `red`'s other effects (the `.git/shipcraft/tmp` list folder created and removed, the reports, `[build]` and `check` output, the lock written with `fs::write`, nothing rolled back on a refusal since nothing was written, the GREEN guidance as the last stdout line): keep on every path that passes the check.
+   - `init`: what it writes, its closing guidance, its exit codes and rollbacks: keep.
+8. **Section changes.** Item 66 point 1's unborn `HEAD` (`no base`) is no longer reached through `red`: an unborn `HEAD` with a config in the tree always refuses `install-not-committed` first. `no base` is then reached only with `--base` naming a ref that does not resolve. Item 66's metric reads "`no base` only with an explicit `--base`". Item 60's known limit ("without a base, a redo runs every suite ... an unborn `HEAD` or a git failure") keeps only the git failure: a redo always has a commit.
+9. **Touches.**
+   - **Assertions that change, and nothing else:**
+     - `v1-14.1-primeiro-red-sem-commit` (python, node, go; `acceptance/lib/v1.sh`): `git init`, `init` and `git add -A` leave every install path staged in an unborn repository. `red` now refuses `install-not-committed`, exit 1, naming `.shipcraft.toml`, `.shipcraft/briefs/green.md`, `.shipcraft/briefs/red.md` and `.shipcraft/locks/.gitkeep`, and writes no lock; the case's later RED and GREEN commits are dropped. `acceptance/pontos/57.md`, which lists it as unchanged, changes with it.
+     - `v1-17.primeiro-commit-verde-recusa` and `v1-17.primeiro-red-green-fecha` (`acceptance/tools/item17.py`, `setup(unborn=True)`): the same refusal, also naming `lefthook.yml`, at their `red`; their checks of a RED as the first commit are dropped. `acceptance/pontos/17.md` changes with them.
+     - `v1-66.unborn` and `v1-66.unborn-remote` (`acceptance/lib/item66.sh`): exit 1 with `install-not-committed` instead of the `no base` full run; no lock; one `red` row, `refused`, without the three selection fields. `acceptance/pontos/66.md` changes with them.
+     - `v1-59.suites-base-missing` (`acceptance/lib/item59.sh`): its fixture commits the rewritten `.shipcraft.toml` on `feature/item59` before `red`. Every assertion stays: the config is still a changed path since the base, so the run is the same full run with `config changed`, and the base still has no config.
+     - README fixed point 54 (judged copies before the first commit) now applies to the hook only: `red` cannot run before the first commit.
+   - **The version:** 2.33.0 in §11, `v1-62.version` and the other version cases item 69 lists.
+   - **Must keep passing unchanged:**
+     - every case that runs `red` after `setup_init`, `setup_red`, `pr_main` or a fixture commit of the install: `run.sh`'s main table, items 16a, 22, 25, 30, 32, 33, 38, 40, 42, 43, 44, 45, 46, 47, 50, 51, 52, 53, 55, 57, 58, 60, 62, 64, 65, 67, 71 and 75, and the other `v1.sh`, `v1-17.*` and `v1-66.*` cases;
+     - `v1-66.git-head`, `v1-66.git-invalid`, `v1-66.git-status` (their shim fails only `HEAD^{commit}`, which this item does not call) and the five `v1-66.<ref>-first` cases, which assert the exact sequence of `^{commit}` resolutions;
+     - `r-legacy-config-red`, whose config is moved aside but still in HEAD, and which refuses the legacy config first;
+     - item 55's `v1-55.config` and `v1-55.removed` and item 59's `files-config`, `files-invalid` and `suites-base-bad`, which change tracked files only;
+     - every `init` case (`init-*`, `v1-58.*`, `v1-61.*`, `v1-67.*`, `v1-68.*`): `init`'s output does not change.
+   - **New cases** include: each install path alone untracked (config, `.gitkeep`, each brief, each husky file, `.pre-commit-config.yaml`, a lefthook file); a staged config; an unborn HEAD; a project without briefs (not refused); a tracked config changed in the working tree (not refused); `--redo` with a husky file untracked; the refusal's precedence after `lock-open`, `no-config` and `redo-without-lock`; the row's fields; a failing `git ls-tree` (exit 2).
+10. **Measure and revert.**
+    - **Metric:** RED commits refused `locked-file-deleted` for `.shipcraft.toml` in POC-021's next after runs (1 in the 2.31.0 runs), and `install-not-committed` refusals in our own and adopters' run logs that the user did not follow by an install commit and a successful `red`.
+    - **Threshold:** 0 such RED commits; 0 `install-not-committed` refusals reported as false (a refusal where every install path was in fact committed) over the next 5 items and POC-021's next runs.
+    - **Revert:** a release drops the check. There is no per-run switch: committing the install is the way on.
+11. **Known limits.**
+    - Only presence is checked. An install path HEAD holds with other bytes in the working tree passes: `init` appending its commands to a tracked `.husky/commit-msg` or `lefthook.yml` and not committing them leaves a hook that works in this checkout but not in a clone, and a commit of that change while a lock is open is refused `hook-config-changed`.
+    - `AGENTS.md`, `CLAUDE.md`, `package.json` and its lockfile are not checked: none of them is locked or judged by the hook.
+    - Plain git hooks in `.git/hooks` are not tracked, so a clone never has them; this item cannot see that.
+    - A repository's first commit can no longer be a RED through `red`. The hook still judges a root commit that carries an open lock, but only a hand-made lock reaches it.
+    - An install path the project ignores (`.gitignore`) still counts; the `git add` in the `Next:` then needs `-f`, which the line does not say.
+    - A RED commit that carried the install with the tests would pass the hook today; it is refused here before it is made, since a RED with an uncommitted config also loses item 55's narrowing.
+
 ## 4. Configuration
 
 `.shipcraft.toml` lives at the project root.
@@ -1234,6 +1293,7 @@ Output from a project command that `shipcraft` passes through always ends before
 | `lang-unknown` | `--lang` names an unsupported language, or `--lang other` without a valid `--command` and `--glob` (item 67). |
 | `lang-unrecognized` | `init` found no known project file. |
 | `hook-config-changed` | A hook integration file (lefthook, husky, pre-commit) changed with a lock open. |
+| `install-not-committed` | `red` or `red --redo` while a file of the install (`.shipcraft.toml`, the briefs, `.shipcraft/locks/.gitkeep`, a tracked hook file) is in the working tree but not in HEAD (item 80). |
 | `lock-closed-red` | A lock arrives closed while locked cases still fail. |
 | `lock-deleted` | An open lock was deleted. |
 | `lock-edited` | A lock was edited outside `shipcraft` (the seal does not match). |
@@ -1342,4 +1402,4 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.31.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.33.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
