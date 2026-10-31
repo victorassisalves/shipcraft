@@ -450,7 +450,15 @@ Wrong-verdict note: since item 16b (2.0.0), `init` writes `[build]` (`tsc -b` on
    - Python, Go, `--lang other`, jest and vitest commands, the globs, an existing `.shipcraft.toml` (not rewritten, no line), `init`'s exit code, the closing guidance, the hooks, the block and the briefs: keep.
 6. **Touches.**
    - **Assertions that change:** item 56's cases whose fixture gets a written `[build]` that names the suite's folder while item 56 does not judge the tsconfig as checking no file: today they require `check` ending in `tsc --noEmit`; they now require no check and point 2's second line. The review names at least `v1-56.extends` and `v1-56.files`; the RED runs every `v1-56.*` mode against today's binary, lists each mode where `[build]` names the suite folder, and changes exactly those (`acceptance/tools/item56.py`), keeping every assertion of item 56's solution modes. README fixed points 40 and 57 (a check wherever a tsconfig exists) gain this exception next to item 56's. Item 16b's cases (`v1-16b.1-*`) where a suite's own folder is a `[build]` folder with a check expected change the same way; the RED lists them.
-   - **Assertions that may change:** earlier cases that assert a lock written by this binary's `red` is format 3 (`"format": 3`, or no `kind` key). The RED lists each one, which now expects format 4 with `kind: "feature"`, and changes nothing else in it. Cases that read hand-written format 2 or 3 fixtures keep their assertions.
+   - **Assertions that change, for the new lock and row shape, and nothing else in them:**
+     - `v1-9.2-formato-da-trava`: the generated lock's format becomes 4. Its legacy and unknown-format refusal checks stay.
+     - item 43's helper `i43_json` and the cases that use it (`v1-43.*`): a lock this binary writes is format 4, with a seal over the nine fields. A fixture built to be format 2 or 3 is built without the three new keys, so each digest or seal refusal is still caused by what the case is testing.
+     - item 46's `draken`, `lists` and `log-fails` (through `i43_json`) and `passes-hook`, whose hand reseal now covers the nine fields, keeping its `red-already-passes` refusal.
+     - item 59's `state()` and `event()` key sets (`v1-59.files*`, `v1-59.suites*`, `v1-59.stderr-closed`, `v1-59.ci*`) gain exactly the three new keys on a non-redo `red` lock and row.
+     - item 65's exact non-redo `red` row key set (`v1-65.*`) and item 66's exact non-redo row and lock shapes (`v1-66.*`) gain exactly the three new keys with their values.
+
+     Redo row shapes, selection, hashes, case counts, refusal precedence and row counts stay as they are.
+
    - **Must keep passing unchanged:** every other `v1-56.*` and `v1-16b.1-*` case; item 12's and 13's TypeScript init cases (`v1-12.1-*`, `v1-13.1-init-escreve-verifica`, `v1-13.1-init-verifica-com-traco`, `v1-13.1-verifica-fora-do-hook`) unless the RED shows their fixture's folder is a `[build]` folder; item 16a's hook cases (`v1-16a.1-hook-saida-ignorada`, `v1-16a.1-hook-sem-saida`) and README fixed point 59; item 9's workspace cases; `init-files`; `v1-15a.1-decide-antes-e-desfaz-escrita-no-meio`, `v1-15a.1-falha-preserva-config-simbolica`; `v1-58.plain`, `v1-58.kept`, `v1-58.rollback`; `v1-64.init-codex`, `v1-64.init-claude`, `v1-64.init-gemini`, `v1-64.init-none`, `v1-64.init-preserve`; item 25's closing lines; item 67's and 68's init cases.
 7. **Measure and revert.**
    - **Metric:** on the Forge's layout, `init` writes no per-suite check and `[build]` covers every package; 0 adopter suites refused with TS6310 over the next 5 adopter inits.
@@ -732,7 +740,7 @@ DORA's change failure rate and time to recover need two facts per item: whether 
      - `fixes_release`: the `<tag>` exactly as given, or `null`.
 
      A `feature` lock has `reported_at` and `fixes_release` both `null`. The seal covers the three fields like every other field, in that fixed order.
-   - **Judging, closing and redoing.** A format 4 lock is judged, closed and redone like a format 3 lock. Closing (`close`, and `check` when it closes) changes only `state` and `seal`. `red --redo` on a format 4 lock writes format 4 with the same three fields. `red --redo` on a format 2 or 3 lock keeps writing that lock's own format, as today, so a cycle opened before this item ends in its own format.
+   - **Judging, closing and redoing.** A format 4 lock is judged, closed and redone like a format 3 lock. Closing (`close`, and `check` when it closes) changes only `state` and `seal`. `red --redo` on a format 4 lock writes format 4 with the same three fields. `red --redo` on a format 2 or 3 lock writes format 3, exactly as today's binary does (it already upgrades format 2 to format 3, item 46), with no fix field: a cycle opened before this item keeps an unknown kind and is never guessed as a feature. This supersedes item 46's "the current format" only for those legacy locks.
    - **Reading.** This binary reads formats 2, 3 and 4, each lock by its own `format`.
      - In format 4, `kind` must be `"feature"` or `"fix"`; `reported_at` `null` or a string the grammar above accepts; `fixes_release` `null` or a string the tag syntax above accepts; and both are `null` when `kind` is `"feature"`. A missing field, another value, or a key that format 4 does not name makes it not a valid lock, in the same way as a lock whose seal is broken: every reader handles it exactly as it handles such a lock today, so the hook and CI refuse it as `lock-edited`, while `red`, `status` and `init` treat it as they treat a hand-edited lock now.
      - A format 2 or 3 lock that holds a `kind`, `reported_at` or `fixes_release` key, even `null`, is not a valid lock in the same way. Formats 2 and 3 carry no kind: readers that need one (item 76) treat it as unknown. Their other reading rules are unchanged.
@@ -760,8 +768,8 @@ DORA's change failure rate and time to recover need two facts per item: whether 
    - **Assertions that change, and nothing else:** the expected current block text, which gains point 2's line, wherever an earlier case builds it. That is item 61's `v1-61.block` and `v1-61.local-block`, item 68's block, upgrade and legacy cases, item 70's block and upgrade cases, and item 74's block, append, upgrade, brief-fails, write-fails and write-partial cases, with their `pontos`. It also covers the structural checks of `item70.sh` and `item74.sh`, which now also remove this item's line. Historical fixture bytes and the mode, prefix and suffix checks stay.
    - **The version:** 2.31.0 in §11, `v1-62.version` and the other version cases item 69 lists.
    - **Must keep passing unchanged:**
-     - item 43's lock-format cases (`v1-43.*`), `v1-9.2-formato-da-trava`, `v1-30.2-antiga-hook` and `v1-30.2-antiga-ci`;
-     - item 46's redo cases (`v1-46.*`), item 53's second run (`v1-53.*`), item 55's, 59's, 60's, 65's and 66's `red` cases;
+     - `v1-30.2-antiga-hook` and `v1-30.2-antiga-ci`, and every assertion of the cases above other than the shapes named there;
+     - item 53's second run (`v1-53.*`), item 55's and 60's `red` cases, and every other item 46 case;
      - item 64's `red-unset`, `red-set`, `redo-unset`, `redo-set` and `red-log-fails`, where the GREEN guidance stays the last stdout line;
      - item 17's close-mark cases (`v1-17.recusa-limpa-marca`, `marca-falha`, `worktree`, `index-lock`, `pos-ref-falha`), item 49's `post`, `retry` and `post-ref-failure`, and item 28's `msg-gitignore`, `msg-info`, `msg-global` and `msg-only-ignorado`;
      - `v1-20.trava`, `v1-40.trava-aberta`, item 42's `closed-ok`, `closed-no-review-waived`, `closed-no-ci`, `closed-no-review`, `closed-waiver-no-ci`, `closed-direct`, `closed-offline`, and item 62's `ci-open` and `ci-sealed`;
@@ -769,7 +777,7 @@ DORA's change failure rate and time to recover need two facts per item: whether 
      - every other `v1-61.*`, `v1-68.*`, `v1-70.*` and `v1-74.*` case.
    - **New cases** include:
      - a format 4 lock written by plain `red` (`kind: "feature"`) and by `red --fix`, with and without `--reported-at` and `--fixes-release`, then read, judged, closed and redone by this binary;
-     - a format 3 lock opened before this item, redone by this binary, staying format 3;
+     - a format 3 lock and a format 2 lock opened before this item, each redone by this binary into format 3, with no fix field;
      - the new `lock-format` wording for a format 5 lock;
      - the grammar's boundaries;
      - a format 4 lock with a missing, wrong-typed or extra key refused `lock-edited`, and a format 3 lock holding `kind` refused the same way;
