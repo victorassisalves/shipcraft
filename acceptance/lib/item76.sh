@@ -4,6 +4,7 @@ item76_cases() {
   local c
   for c in metrics removed since since-order since-empty since-unavailable since-not-release since-offline-tag \
     text text-empty since-text-coverage rows states kinds-tip kinds-release kinds-head kinds-red kinds-legacy kinds-legacy2 invalid-seal invalid-schema \
+    invalid-format invalid-format-zero invalid-format-string invalid-format-float \
     lead-missing lead-nonpositive lead-redo recover-missing recover-nonpositive recover-offset \
     rework-unknown failure-unknown failure-absent failure-null failure-scoped first-shipment \
     tags tag-blob tag-no-tagger tie tie-huge origin-main local-main origin-head master no-default \
@@ -112,6 +113,15 @@ if case in ('invalid-seal','invalid-schema'):
  # Corrupt every source so a valid release fallback cannot mask the invalid-lock rule.
  for t in ('v1.1.0','v2.0.0'):git('tag','-f',t)
  rs=[row('B',10)]
+if case.startswith('invalid-format'):
+ # Seal the unsupported format correctly; empty files isolate format validation.
+ fmt={'invalid-format':99,'invalid-format-zero':1,'invalid-format-string':'4','invalid-format-float':4.0}[case]
+ d=dict(format=fmt,state='closed',files={},cases=['tests/test_value.py::test_value'],failing_at_red=['tests/test_value.py::test_value'],seal='')
+ d['seal']=hashlib.sha256(json.dumps(d,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()
+ write(Path('.shipcraft/locks/B.json'),json.dumps(d)+'\n');save(T3+2)
+ # No valid release or HEAD source may mask fallback to the RED metadata.
+ for t in ('v1.1.0','v2.0.0'):git('tag','-f',t)
+ rs=[row('B',10,kind='fix',reported_at=reported(T1),fixes_release='v1.0.0')]
 if case=='lead-missing':rs=[r for r in rs if r['lock']!='C']
 if case=='lead-nonpositive':rs=[dict(r,at=T2) if r['lock']=='B' else r for r in rs]
 if case=='lead-redo':rs=[row('B',1,redo=True),row('B',2,result='refused')]+rs
@@ -302,6 +312,9 @@ if case.startswith('kinds-'):
  if expected is None:assert r['reported_at'] is None and r['fixes_release'] is None,r
 if case in ('invalid-seal','invalid-schema'):
  assert locks['B']['change_kind'] is None,locks
+if case.startswith('invalid-format'):
+ r=locks['B']
+ assert (r['change_kind'],r['reported_at'],r['fixes_release'])==('fix',reported(T1),'v1.0.0'),(case,r)
 if case=='invalid-config':
  assert locks['B']['change_kind']=='fix',locks
 if case in ('metrics','removed','nested','environment','readonly','invalid-config','worktree','origin-main','local-main','origin-head','master','tags','tag-blob','lead-redo'):
