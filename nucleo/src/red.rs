@@ -5,7 +5,7 @@ use crate::config::{self, Config, CONFIG_FILE};
 use crate::git::{Repo, Snapshot};
 use crate::glob;
 use crate::junit::{Outcome, Report};
-use crate::lock::{lock_files, new_digest, new_lock_path, Lock, LOCK_DIR};
+use crate::lock::{lock_files, new_digest, new_lock_path, Fix, Lock, LOCK_DIR};
 use crate::narrow::{self, ChangedPath, Chosen, Fallback, Plan};
 use crate::refusal::{failed, refuse, short_list, Result};
 use crate::suite::{self, Narrowed};
@@ -16,8 +16,14 @@ use std::path::Path;
 
 /// The path of the lock written, and how many cases the second run dropped.
 /// Item 55: `base` and `all` choose the first run; `chosen`, how it ran, once
-/// the selection is decided.
-pub fn run(repo: &Repo, base: Option<&str>, all: bool, chosen: &mut Option<Chosen>) -> Result<(String, usize)> {
+/// the selection is decided. Item 75: `fix`, the lock's fix fields.
+pub fn run(
+    repo: &Repo,
+    base: Option<&str>,
+    all: bool,
+    fix: Fix,
+    chosen: &mut Option<Chosen>,
+) -> Result<(String, usize)> {
     let config = Config::load(repo)?;
     refuse_if_a_lock_is_open(repo)?;
     let base = narrow::base(repo, base);
@@ -33,7 +39,7 @@ pub fn run(repo: &Repo, base: Option<&str>, all: bool, chosen: &mut Option<Chose
     // Item 53: hashed as the second run leaves the files.
     let files = locked_files(repo, &config)?;
 
-    let lock = Lock::open(files, report.cases_run(), failing);
+    let lock = Lock::open(files, report.cases_run(), failing, fix);
     let path = new_lock_path();
     let full_path = repo.path(&path);
     fs::create_dir_all(full_path.parent().expect("a lock path has a directory"))
@@ -91,7 +97,8 @@ pub fn redo(
     refuse_a_suite_without_tests(repo, &config, &files, &failing)?;
     let (failing, dropped) = confirm(repo, &config, &files, failing, "shipcraft red --redo")?;
     let files = locked_files(repo, &config)?;
-    let lock = Lock::open(files, run, failing);
+    // Item 75: format 4 keeps its fix fields; a format 2 or 3 lock becomes format 3.
+    let lock = old.redone(files, run, failing);
 
     let full_path = repo.path(&lock_path);
     let in_tree = fs::read(&full_path).ok().and_then(|bytes| Lock::parse(&bytes));

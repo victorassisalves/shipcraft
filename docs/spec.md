@@ -450,6 +450,7 @@ Wrong-verdict note: since item 16b (2.0.0), `init` writes `[build]` (`tsc -b` on
    - Python, Go, `--lang other`, jest and vitest commands, the globs, an existing `.shipcraft.toml` (not rewritten, no line), `init`'s exit code, the closing guidance, the hooks, the block and the briefs: keep.
 6. **Touches.**
    - **Assertions that change:** item 56's cases whose fixture gets a written `[build]` that names the suite's folder while item 56 does not judge the tsconfig as checking no file: today they require `check` ending in `tsc --noEmit`; they now require no check and point 2's second line. The review names at least `v1-56.extends` and `v1-56.files`; the RED runs every `v1-56.*` mode against today's binary, lists each mode where `[build]` names the suite folder, and changes exactly those (`acceptance/tools/item56.py`), keeping every assertion of item 56's solution modes. README fixed points 40 and 57 (a check wherever a tsconfig exists) gain this exception next to item 56's. Item 16b's cases (`v1-16b.1-*`) where a suite's own folder is a `[build]` folder with a check expected change the same way; the RED lists them.
+
    - **Must keep passing unchanged:** every other `v1-56.*` and `v1-16b.1-*` case; item 12's and 13's TypeScript init cases (`v1-12.1-*`, `v1-13.1-init-escreve-verifica`, `v1-13.1-init-verifica-com-traco`, `v1-13.1-verifica-fora-do-hook`) unless the RED shows their fixture's folder is a `[build]` folder; item 16a's hook cases (`v1-16a.1-hook-saida-ignorada`, `v1-16a.1-hook-sem-saida`) and README fixed point 59; item 9's workspace cases; `init-files`; `v1-15a.1-decide-antes-e-desfaz-escrita-no-meio`, `v1-15a.1-falha-preserva-config-simbolica`; `v1-58.plain`, `v1-58.kept`, `v1-58.rollback`; `v1-64.init-codex`, `v1-64.init-claude`, `v1-64.init-gemini`, `v1-64.init-none`, `v1-64.init-preserve`; item 25's closing lines; item 67's and 68's init cases.
 7. **Measure and revert.**
    - **Metric:** on the Forge's layout, `init` writes no per-suite check and `[build]` covers every package; 0 adopter suites refused with TS6310 over the next 5 adopter inits.
@@ -776,6 +777,7 @@ Victor's decision (2026-10-31): a local DORA readout in the product, from the ru
      - the shared allowed-kind list and the kind-order assertion in `acceptance/lib/item38.sh` (used by `timeline` to `nonobject`): `meta`, `lock`, `day`, `dora`, `gap`, in that order;
      - `acceptance/pontos/38.md`'s "no git" and "only meta" readings;
      - any `v1-38.*` fixture whose lock file sits at the default branch's tip without a `merge` row, which now shows `merge_not_observed`. The RED lists each.
+   - **The version:** 2.32.0 in §11, `v1-62.version` and the other version cases item 69 lists.
    - **Must keep passing unchanged:** every other `v1-38.*` assertion; `v1-46.report-zero` and `v1-46.report-count`; item 54's reused-review cases; item 75's cases (`v1-75.*`); item 10's run-log check. No item 62 reader is used.
    - **Shared lock reader, kept:** item 43's validity and canonical-seal rules, which `report` now applies when it reads a lock (`v1-43.seal`, `rewrite`, `legacy-close`, `mixed`, `legacy-prefixed`, `open-bare`, `open-uppercase`, `open-short`, `open-prefix`, `open-whitespace`, `closed-bare`, `closed-uppercase`, `closed-short`, `closed-prefix`, `closed-whitespace`) keep passing unchanged. Only what is done with an invalid lock differs: the gate refuses, and `report` treats it as unreadable for that lock.
    - **New cases** use fixture repositories with real annotated and lightweight tags, a release line where a lock ships, format 3 and format 4 locks (feature and fix, with and without `reported_at` and `fixes_release`) (including a closed lock removed after its release), run logs written by the battery, a default branch reached through `origin/main` only and through local `main` only, `--since` (valid, malformed, not a release, git unavailable), a tag on a blob, an annotated tag without a tagger line, two releases in the same second (`v1.9.0` and `v1.10.0`), `report` run from a package subfolder (same output as at the root), `report` with `GIT_DIR` and `GIT_WORK_TREE` pointing at another repository (same output as without them), a signed commit with `log.showSignature=true` and a recording `gpg.program` that is never started, a real shallow clone (`--depth=1`) that gets no DORA readout, and a real partial clone (`git clone --filter=blob:none` from a local origin with `uploadpack.allowFilter`) where `report` fetches nothing and writes no object.
@@ -790,6 +792,136 @@ Victor's decision (2026-10-31): a local DORA readout in the product, from the ru
    - A run log covers one machine: locks red elsewhere have no `red` time here.
    - A stale local default branch makes merged locks look `open`; nothing is fetched.
    - A partial or shallow clone gets no DORA readout; CI checkouts are usually shallow, so `report` is for a full local clone.
+
+### Fix data in the lock (item 75)
+
+DORA's change failure rate and time to recover need two facts per item: whether it fixes behavior a release already shipped, when the defect was first reported, and which release shipped it. Our private `metrics/item-times.tsv` holds them as hand-typed `kind` and `reported_at` columns, which an adopter does not have and which are often approximate. Victor's decision (2026-10-31): record them where the cycle starts, in the lock, for every RED, so no data is lost from here on. Item 76's `report` reads them. The release that introduced a defect is given by the RED, from the spec's wrong-verdict note (`--fixes-release`). Finding it by running the tests against earlier tags is a separate, parked item (77): its spec review (2026-10-31) showed it needs decisions this item does not take, such as which locked files are tests, how a tag's dependencies are prepared, and which release series counts.
+
+1. **`red --fix [--reported-at <time>] [--fixes-release <tag>]`.**
+   - **The options.** `shipcraft red` accepts `--fix`, and `--reported-at <time>` and `--fixes-release <tag>` only together with `--fix`; each at most once, in any order with today's `--base` and `--all`. `--redo` takes none of them: a redo keeps the lock's own fix fields. `<tag>` is `v` followed by `X.Y.Z`, each part a decimal number without leading zeros (`v2.25.0`); it is recorded as given, and its existence is not checked. A repeated option, `--reported-at` or `--fixes-release` without `--fix`, any of the three with `--redo`, a missing value, or a value outside the grammar below take today's invalid-arguments path (`shipcraft: error: invalid arguments: ...` with the usage, exit 2), before anything runs, is written or is logged.
+   - **The time grammar.** `<time>` is `YYYY-MM-DDTHH:MM` or `YYYY-MM-DDTHH:MM:SS`, then `Z` or `+HH:MM` or `-HH:MM`. It is ASCII digits only, with an uppercase `T` and `Z`. It must be a real calendar date (leap years by the Gregorian rule), with hours 00–23, minutes 00–59, seconds 00–59 and offset hours 00–23. There are no fractional seconds and no leap second, and `-00:00` is accepted like `+00:00`. This is Shipcraft's own grammar, close to RFC 3339 (which requires seconds), and the same check reads it back from a lock.
+   - **Lock format 4.** Every `red` now writes a format 4 lock: format 3's fields and rules, plus, after `failing_at_red` and before `seal`, in this order:
+     - `kind`: `"fix"` with `--fix`, else `"feature"`;
+     - `reported_at`: the `<time>` exactly as given, or `null`;
+     - `fixes_release`: the `<tag>` exactly as given, or `null`.
+
+     A `feature` lock has `reported_at` and `fixes_release` both `null`. The seal covers the three fields like every other field, in that fixed order.
+   - **Judging, closing and redoing.** A format 4 lock is judged, closed and redone like a format 3 lock. Closing (`close`, and `check` when it closes) changes only `state` and `seal`. `red --redo` on a format 4 lock writes format 4 with the same three fields. `red --redo` on a format 2 or 3 lock writes format 3, exactly as today's binary does (it already upgrades format 2 to format 3, item 46), with no fix field: a cycle opened before this item keeps an unknown kind and is never guessed as a feature. This supersedes item 46's "the current format" only for those legacy locks.
+   - **Reading.** This binary reads formats 2, 3 and 4, each lock by its own `format`.
+     - In format 4, `kind` must be `"feature"` or `"fix"`; `reported_at` `null` or a string the grammar above accepts; `fixes_release` `null` or a string the tag syntax above accepts; and both are `null` when `kind` is `"feature"`. A missing field, another value, or a key that format 4 does not name makes it not a valid lock, in the same way as a lock whose seal is broken: every reader handles it exactly as it handles such a lock today, so the hook and CI refuse it as `lock-edited`, while `red`, `status` and `init` treat it as they treat a hand-edited lock now.
+     - A format 2 or 3 lock that holds a `kind`, `reported_at` or `fixes_release` key, even `null`, is not a valid lock in the same way. Formats 2 and 3 carry no kind: readers that need one (item 76) treat it as unknown. Their other reading rules are unchanged.
+     - An older binary refuses a format 4 lock with `lock-format`, as item 43 says for format 3. Binaries up to 2.30 word that refusal as "only knows formats 2 and 3" with a Next to rerun `red`; that text cannot change, so the 2.31.0 release notes say that every lock it writes needs Shipcraft 2.31 or newer and that a team upgrades its pinned version together.
+     - From this item on, a lock whose format is above the highest this binary knows is refused `lock-format` with: `lock <path> needs a newer shipcraft (format <n>; this one knows formats 2 to 4)`, Why `a lock written by a newer shipcraft cannot be judged by an older one`, and Next `upgrade shipcraft to the version the project pins (package.json, or shipcraft_min), then run the command again`. A format that is not a positive integer, or below 2, keeps today's wording.
+   - **The run log.** Every `red` row of a non-redo invocation, passed or refused, carries `kind` (`"fix"` with `--fix`, else `"feature"`), `reported_at` and `fixes_release` (as given, or `null`). An invocation refused as invalid arguments writes no row, as today. `--redo` rows carry none of them.
+2. **The block.** The current variants of item 74's block gain one line, right after the line that starts `- A behavior change: write the failing test first`. In the machine variant:
+
+   ``- When the change fixes behavior a release already shipped, the RED runs `shipcraft red --fix`, with `--reported-at <time>` when the time the defect was first reported is known (for example `2026-10-31T00:36-03:00`) and `--fixes-release <tag>` when the release that shipped it is known (for example `v2.25.0`), so the lock records them.``
+
+   One line ending with `\n`; `<time>` is literal text. The local variant is built by item 61's rule, so it reads `npx -- shipcraft red --fix` there. Item 74's block joins the known blocks: both variants, exactly as `init` writes them at item 74's merge (`f4220f1`, version 2.30.0). `init` upgrades it, and the older known blocks stay known and upgrade to the new block.
+3. **Current behavior** on the paths this item touches (rule 14):
+   - `red` without `--fix`: its runs, narrowing (items 55, 65, 66), refusals and output (with the GREEN guidance as its last stdout line, item 64), row and exit codes: keep. Its lock: change, from format 3 to format 4 with `kind: "feature"`.
+   - `red`'s options parser and its invalid-arguments path: keep, with the two new options.
+   - Reading formats 2 and 3, the seal, `lock-format` (its wording for a format above the known ones: change, as point 1 says), `lock-edited`, closing (only `state` and `seal`), `red --redo` (item 46) and its refusals: keep, extended to format 4 as point 1 says.
+   - The hook and `check`: keep, extended to format 4 like format 3. This covers the per-worktree close mark (an old one removed, `mark-failed` when it cannot be written, a new one for a passing lock), a `check` that writes and stages a closed lock, and the warnings for a lock outside the commit or ignored by git.
+   - `close`: keep, extended to format 4 like format 3. It can exit 0 without closing and keep the mark for a retry, or move HEAD and then report a failed index or tree update. It keeps a working-tree lock edited since judging.
+   - `ci`, `pr`, `review` and `merge`: keep; they read a format 4 lock like a format 3 one, including the docs-only shortcut an open lock prevents (item 40), a closed lock admitted only through a proved squash (item 42), and suite checks (item 62).
+   - `status`: keep. It prints the layers, roles and hook lines before it reads the locks; an unknown format refuses after them; lock JSON that does not parse is listed as open, with exit 0; a lock folder it cannot read exits 2. It runs no project command, writes no file and logs no row.
+   - `init`'s duplicate-integration refusal, which adds "close the open lock" when HEAD's lock is open or unreadable: keep.
+   - `shipcraft report` (item 38): keep; the two new `red` row fields are extra keys it does not read.
+   - The standing effects the spec-review brief lists: keep.
+   - `init`'s block handling: keep, with point 2's new line and known block.
+4. **Touches.**
+   - **Assertions that change, and nothing else:** the expected current block text, which gains point 2's line, wherever an earlier case builds it. That is item 61's `v1-61.block` and `v1-61.local-block`, item 68's block, upgrade and legacy cases, item 70's block and upgrade cases, and item 74's block, append, upgrade, brief-fails, write-fails and write-partial cases, with their `pontos`. It also covers the structural checks of `item70.sh` and `item74.sh`, which now also remove this item's line. Historical fixture bytes and the mode, prefix and suffix checks stay.
+   - **Assertions that change, for the new lock and row shape, and nothing else in them:**
+     - `v1-9.2-formato-da-trava`: the generated lock's format becomes 4. Its legacy and unknown-format refusal checks stay.
+     - item 43's helper `i43_json` and the cases that use it (`v1-43.*`): a lock this binary writes is format 4, with a seal over the nine fields. A fixture built to be format 2 or 3 is built without the three new keys, so each digest or seal refusal is still caused by what the case is testing.
+     - item 46's `draken`, `lists` and `log-fails` (through `i43_json`) and `passes-hook`, whose hand reseal now covers the nine fields, keeping its `red-already-passes` refusal.
+     - item 59's `state()` and `event()` key sets (`v1-59.files*`, `v1-59.suites*`, `v1-59.stderr-closed`, `v1-59.ci*`) gain exactly the three new keys on a non-redo `red` lock and row.
+     - item 65's exact non-redo `red` row key set (`v1-65.*`) and item 66's exact non-redo row and lock shapes (`v1-66.*`) gain exactly the three new keys with their values.
+
+     Redo row shapes, selection, hashes, case counts, refusal precedence and row counts stay as they are.
+   - **The version:** 2.31.0 in §11, `v1-62.version` and the other version cases item 69 lists.
+   - **Must keep passing unchanged:**
+     - `v1-30.2-antiga-hook` and `v1-30.2-antiga-ci`, and every assertion of the cases above other than the shapes named there;
+     - item 53's second run (`v1-53.*`), item 55's and 60's `red` cases, and every other item 46 case;
+     - item 64's `red-unset`, `red-set`, `redo-unset`, `redo-set` and `red-log-fails`, where the GREEN guidance stays the last stdout line;
+     - item 17's close-mark cases (`v1-17.recusa-limpa-marca`, `marca-falha`, `worktree`, `index-lock`, `pos-ref-falha`), item 49's `post`, `retry` and `post-ref-failure`, and item 28's `msg-gitignore`, `msg-info`, `msg-global` and `msg-only-ignorado`;
+     - `v1-20.trava`, `v1-40.trava-aberta`, item 42's `closed-ok`, `closed-no-review-waived`, `closed-no-ci`, `closed-no-review`, `closed-waiver-no-ci`, `closed-direct`, `closed-offline`, and item 62's `ci-open` and `ci-sealed`;
+     - item 38's report cases (`v1-38.*`) and item 10's run-log check (`v1-10.1-execucoes-jsonl`), which accept extra row keys;
+     - every other `v1-61.*`, `v1-68.*`, `v1-70.*` and `v1-74.*` case.
+   - **New cases** include:
+     - a format 4 lock written by plain `red` (`kind: "feature"`) and by `red --fix`, with and without `--reported-at` and `--fixes-release`, then read, judged, closed and redone by this binary;
+     - a format 3 lock and a format 2 lock opened before this item, each redone by this binary into format 3, with no fix field;
+     - the new `lock-format` wording for a format 5 lock;
+     - the grammar's boundaries;
+     - a format 4 lock with a missing, wrong-typed or extra key refused `lock-edited`, and a format 3 lock holding `kind` refused the same way;
+     - the `red` row fields on a passed and on a refused `--fix` run.
+5. **Measure and revert.**
+   - **Metric:** every lock written from 2.31.0 on carries `kind`; of our own next 5 fix items, at least 4 also carry `reported_at` and `fixes_release`, with no hand-typed TSV value needed for item 76's report.
+   - **Revert:** a release where `red` writes format 3 again and `--fix` is an invalid argument. Locks already written in format 4 stay readable.
+6. **Known limits.**
+   - Nothing checks that a `--fix` item really fixes a shipped defect, that `reported_at` is true, or that `fixes_release` names a real tag; they are the RED's statement, sealed in the lock.
+   - A team must upgrade together: a binary older than 2.31 refuses every new lock (`lock-format`), with its old wording.
+   - Locks written before this item carry no fix data; item 76 counts them as missing data, never as features.
+   - Only the `red --redo` command keeps the fix fields. The hook and CI do not check that a redo commit's lock keeps them: a hand-generated lock that drops or changes them is judged by item 46's rules alone.
+
+### The release publishes the binaries CI tested (item 78)
+
+POC-023 ran `release-shadow.yml` beside `release/publish.sh` on two releases. On 2.25.0 the CI path was ready 12.6 min earlier, and on 2.30.0 20.0 min earlier. The battery verdicts were identical (2488/2488 and 2694/2694), with the same version line and the same smoke run. Its automatic rule says keep (2026-10-31). Today `publish.sh` builds both targets on the releaser's Mac and runs the whole battery there (item 21's release cases, `v1-21.release-*`). This item makes it publish the binaries the shadow workflow built and tested at the tagged commit. The local path stays as an explicit fallback.
+
+1. **The CI path, by default.** `release/publish.sh <version>` keeps every check item 21 makes before building, with their three-line refusals:
+   - the version syntax;
+   - macOS;
+   - the tools on `PATH`;
+   - HEAD equal to the remote's `main`;
+   - a clean tree;
+   - the version equal to `nucleo/Cargo.toml`'s;
+   - the tag still free on the remote.
+
+   It also keeps the `publish.sh: <tag> from commit <sha>` line. Then, instead of the fresh checkout, the build and the battery, it does the following inside its temporary work folder (`shipcraft-publish.XXXXXX` under `${TMPDIR:-/tmp}`, removed on exit, as today). Every refusal in this point is item 21's three-line form with exit 1. It happens before any `gh release create`, so nothing is published.
+   - **The repository.** Every `gh` call of the script (run lookup, download, release create, release delete) passes `-R github.com/<owner>/<repo>`, whatever `GH_HOST` says, resolved once from `git remote get-url origin` (`git@github.com:<o>/<r>(.git)`, `https://github.com/<o>/<r>(.git)` or `ssh://git@github.com/<o>/<r>(.git)`). Any other URL refuses. This changes item 21's create and delete, which inferred the repository, on both paths, `--local-build` included; their behavior is otherwise kept.
+   - **The run.** It runs `gh run list -R <repo> --workflow release-shadow.yml --branch main --event push --commit <sha> --json databaseId,status,conclusion --limit 20`.
+     - The output must be a JSON array of objects, each with a positive integer `databaseId` and string `status` and `conclusion` (`conclusion` may be the empty string while running). Anything else refuses, naming the output as unreadable. A failing `gh` refuses (`could not list the release-shadow runs`).
+     - It takes the first row, in the CLI's own newest-first order, whose `status` is `completed` and `conclusion` is `success`. It is chosen once: an older run is never tried after a later failure.
+     - No such row refuses (`no successful release-shadow run for <sha>`). Its Next names waiting for the push run, `gh run rerun` of the failed push run, and `--local-build`.
+   - **The artifact.** It runs `gh run download <id> -R <repo> -n shipcraft-darwin-<sha> -D <work>/ci`. The folder must then hold regular files (`lstat`, no symlink) `aarch64-apple-darwin/shipcraft` and `x86_64-apple-darwin/shipcraft`, and a `SHA256SUMS` with exactly one line for each of those two paths, in `shasum` format (64 lowercase hex, two spaces, the path) and no other line. `shasum -a 256 -c SHA256SUMS` run in that folder must exit 0. A failed download, a missing or non-regular binary, a malformed, missing or duplicate checksum line, or a failed check refuses, naming the run. The binaries are then given mode 755.
+   - **The version line.** The host is read as item 21 reads it (`sysctl -n hw.optional.arm64`; `1` means arm64, including under Rosetta). On arm64, `aarch64-apple-darwin/shipcraft --version` must exit 0 with stdout exactly `shipcraft <version> (<first 12 characters of the pinned commit>)` and a newline; stderr is ignored. Anything else refuses. When the query does not answer `1` the check is skipped, as on an Intel Mac, and the notes say so.
+   - **Packaging and publishing.** As item 21 does today:
+     - one `tar.gz` per target, holding only the executable `shipcraft` (a copy of the downloaded binary);
+     - a `SHA256SUMS` over the two archives;
+     - `gh release create`, with the same handling after creation: a release whose URL came back is deleted on a later error; with no URL, nothing is deleted and the three-line inspection guidance is printed.
+
+     The release notes say that the battery ran green in release-shadow run `<id>` (5 macOS shards, against the uploaded arm64 binary), and that the x86_64 binary was only built. The script writes nothing in the repository's working tree, runs no battery and runs no fixture command.
+2. **`--local-build`.** `release/publish.sh <version> --local-build` is item 21's path, unchanged: a fresh checkout of the pinned commit, both builds, the whole battery against this machine's target (with `acceptance/reuso.sh`'s reuse), packaging and publishing, with today's notes. Any other second argument, or more than two, is the usage refusal.
+3. **Current behavior** on the paths this item touches (rule 14):
+   - The checks before building, their three-line refusals, the start line, the temporary work folder under `${TMPDIR:-/tmp}` removed on exit, exit 2 when it cannot be made, exit 130 on INT or TERM, and that a refusal before `gh release create` publishes nothing: keep.
+   - With one argument, the fresh checkout, both local builds and the local battery: change, as point 1 says. With `--local-build`: keep. That includes the battery's own effects: its logs and fixture work under the caller's `TMPDIR`, pruning of older work, the `~/.cache/shipcraft-acceptance/<tree-id>` result and the attempted `acceptance/local` status on a green full run (a failure there only warns), and what its fixtures meet (run-log rows, locks, closing commits, suites on a copy or in the tree).
+   - Packaging (only the executable, one archive per target, `SHA256SUMS`), `gh release create`, deleting a half-made release whose URL came back, the three-line guidance when no URL came back, and the final `publish.sh: <tag> published at commit <sha>: <url>` line: keep.
+   - It publishes nothing to brew, crates.io or npm: keep. `release/npm.sh` reads the GitHub release, so it is unchanged.
+   - `install.sh` and the installation cases (`v1-21.instala-*`, `v1-21.remove`): keep.
+   - `release-shadow.yml`: keep its jobs, artifact name and layout, and its `retention-days: 30`. Only its header comment changes.
+4. **Touches.**
+   - **Assertions that change:** these ten cases now run `publish.sh` with `--local-build`, through the shared helper in `acceptance/tools/item21.py`, and keep every assertion: `v1-21.release-comum`, `release-prefixo`, `release-preso`, `release-build`, `release-bateria`, `release-rollback` and `release-incerto`, and item 37's `v1-37.release-comum`, `release-prefixo` and `release-preso`, which run the same helper and keep their archive and xattr checks. Item 37's probe that `dest.chmod(0o755)` appears exactly once in the helper may be adjusted only if the helper's insertion point moves. `acceptance/pontos/21.md` and `37.md` describe the fresh-checkout path as the `--local-build` fallback. The cases that refuse before the build (`release-formato`, `release-suja`, `release-versao`, `release-head`, `release-tag`, `release-remoto`, `release-tags-falha`) stay unchanged and run without the flag. Their fake `gh` gains `-R` handling only if the refusal happens after a `gh` call. The fixture's fake `git` may answer `remote get-url origin` with a synthetic `https://github.com/<o>/<r>.git` URL, while clone, push and `ls-remote` keep using the real local bare origin; nothing reaches the network.
+   - **Must keep passing unchanged:** `v1-21.versao-fora`, `v1-21.versao-min-numerica`, every `v1-21.instala-*` case and `v1-21.remove`.
+   - **New cases:** the CI path with a fake `gh` that answers `run list` and `run download` with the real JSON and artifact shapes:
+     - a successful run is published, with downloaded binaries that lack the execute bit;
+     - no run, a running run and a failed run refuse;
+     - a `gh` failure refuses;
+     - a missing or non-regular binary, a checksum mismatch, and a `SHA256SUMS` missing a line or holding an extra one refuse;
+     - unreadable `run list` output refuses;
+     - an origin URL that is not GitHub refuses;
+     - a version line naming another commit refuses;
+     - the Intel host skips the version check;
+     - `--local-build` takes item 21's path;
+     - a wrong second argument gets the usage refusal.
+     Every refusal before `gh release create` publishes nothing.
+5. **Measure and revert.**
+   - **Metric:** release ready (the tag published) at most 15 min after the merge to main, on the next 3 releases.
+   - **Revert:** `--local-build` for one release; a PR that restores the previous `publish.sh` for good.
+6. **Known limits.**
+   - The battery runs against the arm64 binary only, as it did locally on an arm64 Mac. The x86_64 binary is built in CI and not tested.
+   - The workflow keeps artifacts 30 days (`retention-days: 30`). After that, a successful run may still be listed while its artifact is gone, so the download refuses. Rerun that push run (`gh run rerun <id>`), which keeps its `push` event, or use `--local-build`.
+   - The binaries are not reproducible builds: the published bytes are CI's, not a local rebuild's.
 
 ### Workspace suites run from the root when the root vitest config defines the projects (item 71)
 
@@ -1284,4 +1416,4 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.30.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.32.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.

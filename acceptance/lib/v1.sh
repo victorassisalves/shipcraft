@@ -2379,7 +2379,7 @@ TOML
 import json, pathlib, sys
 path = pathlib.Path(sys.argv[1])
 lock = json.loads(path.read_text())
-assert lock['format'] == 3 and 'formato' not in lock, lock
+assert lock['format'] == 4 and 'formato' not in lock, lock
 lock['formato'] = 1
 lock.pop('format')
 path.write_text(json.dumps(lock))

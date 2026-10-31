@@ -524,10 +524,13 @@ const AGENTS_FILE: &str = "AGENTS.md";
 const CLAUDE_FILE: &str = "CLAUDE.md";
 const START_LINE: &str = "<!-- shipcraft -->";
 const END_LINE: &str = "<!-- /shipcraft -->";
-/// Item 61's block with item 68's rules: the machine install's block; a
-/// project-local install gets it with `npx -- shipcraft` and the
-/// repository-root line (`variant`).
-const AGENTS_BLOCK: &str = r#"<!-- shipcraft -->
+/// Item 75: the line the current block gains right after the behavior-change line.
+const FIX_LINE: &str = "- When the change fixes behavior a release already shipped, the RED runs `shipcraft red --fix`, with `--reported-at <time>` when the time the defect was first reported is known (for example `2026-10-31T00:36-03:00`) and `--fixes-release <tag>` when the release that shipped it is known (for example `v2.25.0`), so the lock records them.\n";
+/// Item 74's block (commit f4220f1, v2.30.0), a known block in both variants;
+/// the current block is it with `FIX_LINE` (`current_block`). Item 61's block
+/// with item 68's rules: the machine install's block; a project-local install
+/// gets it with `npx -- shipcraft` and the repository-root line (`variant`).
+const AGENTS_BLOCK_2_30: &str = r#"<!-- shipcraft -->
 ## shipcraft: TDD with a lock (required in this repository)
 - Cycle: RED (a failing test) → `shipcraft red` → GREEN (code) → `git commit`. The git hook checks every commit.
 - A behavior change: write the failing test first (and a stub), run `shipcraft red` and commit the test together with the lock `.shipcraft/locks/*.json`; only then implement.
@@ -608,10 +611,18 @@ const DIFFERS: &str = "; it differs from this version's: edit it by hand to matc
 /// Item 61: the block's current variant; from a project-local install (item 58)
 /// every command is `npx -- shipcraft` (fixed point 39), run from the root.
 fn agents_text(local: bool) -> String {
-    variant(AGENTS_BLOCK, local)
+    variant(&current_block(), local)
 }
 
-/// A block (this version's, v2.26.0's, v2.25.0's or v2.22.0's) in its machine or project-local form.
+/// Item 75: item 74's block with `FIX_LINE` right after the line that starts
+/// `- A behavior change: write the failing test first`.
+fn current_block() -> String {
+    let at = AGENTS_BLOCK_2_30.find("\n- A behavior change: write the failing test first").expect("the block has the line");
+    let end = at + 1 + AGENTS_BLOCK_2_30[at + 1..].find('\n').expect("the line ends") + 1;
+    format!("{}{FIX_LINE}{}", &AGENTS_BLOCK_2_30[..end], &AGENTS_BLOCK_2_30[end..])
+}
+
+/// A block (this version's, v2.30.0's, v2.26.0's, v2.25.0's or v2.22.0's) in its machine or project-local form.
 fn variant(block: &str, local: bool) -> String {
     if !local {
         return block.to_string();
@@ -630,6 +641,7 @@ fn agents_block(repo: &Repo, local: bool) -> String {
     let (bare_2_22, local_2_22) = (variant(AGENTS_BLOCK_2_22, false), variant(AGENTS_BLOCK_2_22, true));
     let (bare_2_25, local_2_25) = (variant(AGENTS_BLOCK_2_25, false), variant(AGENTS_BLOCK_2_25, true));
     let (bare_2_26, local_2_26) = (variant(AGENTS_BLOCK_2_26, false), variant(AGENTS_BLOCK_2_26, true));
+    let (bare_2_30, local_2_30) = (variant(AGENTS_BLOCK_2_30, false), variant(AGENTS_BLOCK_2_30, true));
     let known = [
         other.as_str(),
         bare_2_22.as_str(),
@@ -638,6 +650,8 @@ fn agents_block(repo: &Repo, local: bool) -> String {
         local_2_25.as_str(),
         bare_2_26.as_str(),
         local_2_26.as_str(),
+        bare_2_30.as_str(),
+        local_2_30.as_str(),
     ];
     let (wrote, current) = onboard(repo, AGENTS_FILE, &new, &known, Some(AGENTS_BLOCK_2_14));
     let mut listed = if wrote { format!(", {AGENTS_FILE}") } else { String::new() };

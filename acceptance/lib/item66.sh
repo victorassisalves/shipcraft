@@ -171,6 +171,9 @@ if mode!='log-fails':
  if code: keys.add('reason')
  else: keys.add('rerun_dropped')
  if redo: keys.add('redo')
+ else: keys.update(('kind','reported_at','fixes_release'))
+
+ if not redo: want((r.get('kind'),r.get('reported_at'),r.get('fixes_release'))==('feature',None,None),'fix row values')
  want(set(r)==keys,'red row gained/lost fields: '+repr(r))
  want(r.get('code')==code and r.get('result')==('refused' if code else 'passed'),'row verdict: '+repr(r))
  want(r.get('secs',-1)>=0 and r.get('layer')=='red','row identity/time')
@@ -184,7 +187,8 @@ else:
  want(len(ls)==1,'one open lock')
  if ls:
   d=json.loads(ls[0].read_text())
-  want(set(d)=={'format','state','files','cases','failing_at_red','seal'} and d['state']=='open','lock format changed')
+  want((d.get('kind'),d.get('reported_at'),d.get('fixes_release'))==('feature',None,None),'fix lock values')
+  want(set(d)=={'format','state','files','cases','failing_at_red','kind','reported_at','fixes_release','seal'} and d['state']=='open','lock format changed')
   want(set(d['files'])==protected,'protected files must not narrow: '+repr(d['files']))
   for f,h in d['files'].items(): want(h=='sha256:'+hashlib.sha256(Path(f).read_bytes()).hexdigest(),'wrong protected hash: '+f)
   for key in ('cases','failing_at_red'):
