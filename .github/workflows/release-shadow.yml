@@ -71,6 +71,17 @@ jobs:
           cd out && shasum -a 256 -c SHA256SUMS
           ./aarch64-apple-darwin/shipcraft --version
 
+      - name: Restore the fixture cache (npm, pip, Go)
+        uses: actions/cache@v4
+        with:
+          # Package caches only: xdg and anything Shipcraft writes stay per run.
+          path: |
+            ${{ runner.temp }}/acceptance-cache/npm
+            ${{ runner.temp }}/acceptance-cache/pip
+            ${{ runner.temp }}/acceptance-cache/gopath/pkg/mod
+          key: acceptance-cache-${{ runner.os }}-${{ hashFiles('acceptance/run.sh', 'acceptance/lib/v1.sh', 'acceptance/tools/item51.py', 'acceptance/fixtures/**/package*.json') }}
+          restore-keys: acceptance-cache-${{ runner.os }}-
+
       - name: Set up Go (Go targets)
         uses: actions/setup-go@v5
         with:
@@ -90,6 +101,7 @@ jobs:
       - name: Run the acceptance suite (shard ${{ matrix.shard }}/5)
         env:
           SHIPCRAFT_ACCEPTANCE_JOBS: "4"
+          SHIPCRAFT_ACCEPTANCE_CACHE: ${{ runner.temp }}/acceptance-cache
           SHIPCRAFT_ACCEPTANCE_SHARD: "${{ matrix.shard }}/5"
           SHIPCRAFT_ACCEPTANCE_VERBOSE: "1"
         run: bash acceptance/run.sh "$PWD/out/aarch64-apple-darwin/shipcraft" all
