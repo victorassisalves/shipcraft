@@ -728,8 +728,8 @@ DORA's change failure rate and time to recover need two facts per item: whether 
    - **Lock format 4.** `red --fix` writes a format 4 lock: format 3's fields and rules, plus `kind` (the string `"fix"`) and `reported_at` (the `<time>` exactly as given, or `null` without `--reported-at`), placed after `failing_at_red` and before `seal`. The seal covers them like every other field, in that fixed order. `red` without `--fix` writes format 3, as today, with neither field.
    - **Judging, closing and redoing.** A format 4 lock is judged, closed and redone like a format 3 lock. Closing (`close`, and `check` when it closes) changes only `state` and `seal`. `red --redo` on a format 4 lock writes format 4 with the same `kind` and `reported_at`. `red --redo` on a format 2 or 3 lock writes format 3, as today.
    - **Reading.** This binary reads formats 2, 3 and 4, each lock by its own `format`.
-     - In format 4, `kind` must be `"fix"`, and `reported_at` `null` or a string the grammar above accepts. A missing field, another value, or a key that format 4 does not name makes it not a valid lock, refused like a hand edit (`lock-edited`).
-     - A format 2 or 3 lock that holds a `kind` or a `reported_at` key, even `null`, is refused the same way. Their other reading rules are unchanged.
+     - In format 4, `kind` must be `"fix"`, and `reported_at` `null` or a string the grammar above accepts. A missing field, another value, or a key that format 4 does not name makes it not a valid lock, in the same way as a lock whose seal is broken: every reader handles it exactly as it handles such a lock today, so the hook and CI refuse it as `lock-edited`, while `red`, `status` and `init` treat it as they treat a hand-edited lock now.
+     - A format 2 or 3 lock that holds a `kind` or a `reported_at` key, even `null`, is not a valid lock in the same way. Their other reading rules are unchanged.
      - An older binary refuses a format 4 lock with `lock-format`, as item 43 says for format 3.
    - **The run log.** Every `red` row of an invocation with `--fix`, passed or refused, carries `kind: "fix"` and `reported_at` (the given `<time>`, or `null`). An invocation refused as invalid arguments writes no row, as today. Other `red` rows, `--redo` rows included, carry neither field.
 2. **The block.** The current variants of item 74's block gain one line, right after the line that starts `- A behavior change: write the failing test first`. In the machine variant:
@@ -743,7 +743,9 @@ DORA's change failure rate and time to recover need two facts per item: whether 
    - Reading formats 2 and 3, the seal, `lock-format`, `lock-edited`, closing (only `state` and `seal`), `red --redo` (item 46) and its refusals: keep, extended to format 4 as point 1 says.
    - The hook and `check`: keep, extended to format 4 like format 3. This covers the per-worktree close mark (an old one removed, `mark-failed` when it cannot be written, a new one for a passing lock), a `check` that writes and stages a closed lock, and the warnings for a lock outside the commit or ignored by git.
    - `close`: keep, extended to format 4 like format 3. It can exit 0 without closing and keep the mark for a retry, or move HEAD and then report a failed index or tree update. It keeps a working-tree lock edited since judging.
-   - `ci`, `pr`, `review` and `merge`: keep; they read a format 4 lock like a format 3 one.
+   - `ci`, `pr`, `review` and `merge`: keep; they read a format 4 lock like a format 3 one, including the docs-only shortcut an open lock prevents (item 40), a closed lock admitted only through a proved squash (item 42), and suite checks (item 62).
+   - `status`: keep. It prints the layers, roles and hook lines before it reads the locks; an unknown format refuses after them; lock JSON that does not parse is listed as open, with exit 0; a lock folder it cannot read exits 2. It runs no project command, writes no file and logs no row.
+   - `init`'s duplicate-integration refusal, which adds "close the open lock" when HEAD's lock is open or unreadable: keep.
    - `shipcraft report` (item 38): keep; the two new `red` row fields are extra keys it does not read.
    - The standing effects the spec-review brief lists: keep.
    - `init`'s block handling: keep, with point 2's new line and known block.
@@ -755,6 +757,7 @@ DORA's change failure rate and time to recover need two facts per item: whether 
      - item 46's redo cases (`v1-46.*`), item 53's second run (`v1-53.*`), item 55's, 59's, 60's, 65's and 66's `red` cases;
      - item 64's `red-unset`, `red-set`, `redo-unset`, `redo-set` and `red-log-fails`, where the GREEN guidance stays the last stdout line;
      - item 17's close-mark cases (`v1-17.recusa-limpa-marca`, `marca-falha`, `worktree`, `index-lock`, `pos-ref-falha`), item 49's `post`, `retry` and `post-ref-failure`, and item 28's `msg-gitignore`, `msg-info`, `msg-global` and `msg-only-ignorado`;
+     - `v1-20.trava`, `v1-40.trava-aberta`, item 42's `closed-ok`, `closed-no-review-waived`, `closed-no-ci`, `closed-no-review`, `closed-waiver-no-ci`, `closed-direct`, `closed-offline`, and item 62's `ci-open` and `ci-sealed`;
      - item 38's report cases (`v1-38.*`) and item 10's run-log check (`v1-10.1-execucoes-jsonl`), which accept extra row keys;
      - every other `v1-61.*`, `v1-68.*`, `v1-70.*` and `v1-74.*` case.
    - **New cases** include:
@@ -769,6 +772,7 @@ DORA's change failure rate and time to recover need two facts per item: whether 
    - Nothing checks that a `--fix` item really fixes a shipped defect, or that `reported_at` is true; they are the RED's statement, sealed in the lock.
    - Locks written before this item carry no fix data; item 76 counts them as missing data, never as features.
    - The release that introduced the defect is not recorded yet (a later item).
+   - Only the `red --redo` command keeps the fix fields. The hook and CI do not check that a redo commit's lock keeps them: a hand-generated lock that drops or changes them is judged by item 46's rules alone.
 
 ### Workspace suites run from the root when the root vitest config defines the projects (item 71)
 
