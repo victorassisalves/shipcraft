@@ -19,7 +19,7 @@ case,binary,acceptance,cw=sys.argv[1:];binary=str(Path(binary).resolve())
 version=tomllib.loads((Path(acceptance).parent/'nucleo/Cargo.toml').read_text())['package']['version']
 # Reuse acceptance fixtures only, never the implementation. Execute just fixture constants/function.
 source=(Path(acceptance)/'lib/item61.sh').read_text().split("<<'PY61'\n",1)[1].split('\nPY61',1)[0]
-names={'OLD','PREVIOUS_BARE','ROOT_LINE','PREVIOUS_LOCAL','head','rest','READ_TESTS','REPAIR','ROLES','FALLBACK'}
+names={'OLD','PREVIOUS_BARE','ROOT_LINE','PREVIOUS_LOCAL','head','rest','READ_TESTS','REPAIR','ROLES','FALLBACK','SANDBOX'}
 ns={}
 for n in ast.parse(source).body:
  if isinstance(n,ast.Assign):
