@@ -66,6 +66,10 @@ Blocking by itself. Style, naming, performance, missing tests, and doubts you co
 reproduce are notes, never Blocking. If Blocking is 0, the verdict is APPROVE; otherwise
 it is CHANGES REQUESTED.
 
+After you reproduce a Blocking item, keep going: check the rest of the diff against the
+spec and the intent, and list every Blocking item you reproduce, not only the first.
+Blocking: <n> counts all of them.
+
 ## Review format (your final message)
 
 The first two lines, exactly:
