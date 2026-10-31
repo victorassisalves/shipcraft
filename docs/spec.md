@@ -750,7 +750,7 @@ Victor's decision (2026-10-31): a local DORA readout in the product, from the ru
    - **State.** `merged` when its `merge` row passed (as today). Otherwise `merge_not_observed` when its lock file is at the default branch's tip, else `open`. A `merge_not_observed` lock keeps empty local merge times, and the day rows count only `merged` locks, as today.
    - **Change kind.** `change_kind` is the `kind` of its valid lock file at the default branch's tip, else at the latest release tag that holds it, else at HEAD, else in the earliest passed non-redo `red` row (ties in file order). It is `null` when none says, or the lock read is format 2 or 3. `reported_at` and `fixes_release` come from the same source, else `null`.
 3. **The DORA object.** `--json` prints one line `{"kind":"dora", ...}` after the `day` lines and before any `gap` line, also when the log is empty. The text output prints a `DORA` block after the days, with the same content. Durations are seconds. Medians and p90 are item 38's. The fields:
-   - `"git"`: `{"default_branch": "<ref>" | null, "releases": <int> | null, "reason": null | "<line>"}`.
+   - `"git"`: `{"default_branch": "<ref>" | null, "releases": <int> | null, "reason": null | "<line>"}`. `releases` is the repository total of release tags on the default branch, whatever `--since` says; the text block's coverage line and `deploys.n` give the releases read.
    - `"since"`: the `--since` tag, or `null`.
    - **The releases read:** every release tag, or with `report --since <tag>` those whose time is at or after that tag's. `--since`'s value is checked in this order:
      - not of the `v<X>.<Y>.<Z>` grammar above: the usage refusal, exit 2, before any git read;
@@ -793,6 +793,17 @@ Victor's decision (2026-10-31): a local DORA readout in the product, from the ru
    - A stale local default branch makes merged locks look `open`; nothing is fetched.
    - A partial or shallow clone gets no DORA readout; CI checkouts are usually shallow, so `report` is for a full local clone.
 
+8. **Open, no case (the GREEN's audit, 2026-10-31).** Readings the spec leaves open; the code's choice stands, and no case pins it:
+   - A `red` row's `kind`, `reported_at` and `fixes_release` are read one by one: a hand-written row with an invalid `kind` but a valid `reported_at` gives `change_kind: null` with that `reported_at`. `red` never writes such rows.
+   - JSON `git.releases` is the repository total; the text coverage line counts the releases read (see point 3).
+   - `default_branch` is the full ref name (`refs/remotes/origin/HEAD`), also in the `--since` refusal.
+   - With no `.git` found, the reason is `no git repository found`.
+   - An invalid lock file at the tip still makes a lock row and `merge_not_observed`; only its fix data falls through to the next source.
+   - `--since` reads by time: a release tagged in the same second as the `--since` tag is read even when it sorts before it.
+   - A `red` row without a numeric `at` is ignored as a source of fix data and of lead time.
+   - A negative tag or commit time is accepted as a decimal integer.
+   - `extensions.partialclone` set with no value is not a partial clone.
+   - The cleared environment variables are a fixed list (today's `git rev-parse --local-env-vars` plus `GIT_CEILING_DIRECTORIES`), not read at run time.
 ### Fix data in the lock (item 75)
 
 DORA's change failure rate and time to recover need two facts per item: whether it fixes behavior a release already shipped, when the defect was first reported, and which release shipped it. Our private `metrics/item-times.tsv` holds them as hand-typed `kind` and `reported_at` columns, which an adopter does not have and which are often approximate. Victor's decision (2026-10-31): record them where the cycle starts, in the lock, for every RED, so no data is lost from here on. Item 76's `report` reads them. The release that introduced a defect is given by the RED, from the spec's wrong-verdict note (`--fixes-release`). Finding it by running the tests against earlier tags is a separate, parked item (77): its spec review (2026-10-31) showed it needs decisions this item does not take, such as which locked files are tests, how a tag's dependencies are prepared, and which release series counts.
