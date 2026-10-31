@@ -61,7 +61,7 @@
     "acceptance/lib/item70.sh": "sha256:6a8ff3f1a2e0dc6f4e4a518e6cef30ece4f1c6c084b377bc4f6f55137337e429",
     "acceptance/lib/item71.sh": "sha256:73244a21edfc527ee600f67aa4154b0a09db09ca2bcad50319e0ed5d8dd2edea",
     "acceptance/lib/item72.sh": "sha256:ab73765489eea0a46c1cc7e059a850be703121fcf02a10df881fe279b6dfe15f",
-    "acceptance/lib/item73.sh": "sha256:15971140b51cd267a4ed7764608a173ed0c7d39a2f43ae40cbf2abacdfb27d90",
+    "acceptance/lib/item73.sh": "sha256:899c6e338775dfaa550a1b630d9af8b282a8eb4414d566837399c9ca34889924",
     "acceptance/lib/rename.sh": "sha256:a6ac8f0def7da9c3bd4f55793c12d19067e66841179cfa47fdb78bd6bdc6860a",
     "acceptance/lib/v1.sh": "sha256:0ce6e96ef2975138128b3ee3a922912d30dffdbc3c663fb1a280555e89a953aa",
     "acceptance/pontos/15a.md": "sha256:f1480266606c0a01f815315cb04ddea9544438df9dda618e06cf167ca9f971b2",
@@ -116,7 +116,7 @@
     "acceptance/pontos/70.md": "sha256:44ef886f6bda6450c47334dddd0741c8c31bee57af8f28d1a3ec16155b5277fe",
     "acceptance/pontos/71.md": "sha256:4ef3802f03b4ee9deb38c6aa5d9e081675dfc464d2f63b7f6fa9c9c9ca9a4fc1",
     "acceptance/pontos/72.md": "sha256:0572019b95bc503fed960ee9b04acc484ebddd4c9556549e0f4b52e987f71b1a",
-    "acceptance/pontos/73.md": "sha256:6eb48ea3b2911df7aa2b6daaee05907900809eb080324d7e8fc045a661ac467f",
+    "acceptance/pontos/73.md": "sha256:cf8c714eb3f741c1ee844c54698e1cdca18b71b0d3094a418324ccc0f5cf52e1",
     "acceptance/pontos/item25.md": "sha256:94107f93cd65f71ffacfa768d4924e3bcb6b3a9037d24086d8e4825ae9bc0f57",
     "acceptance/reuso.sh": "sha256:6a2bc0851b3170c442400bb0d0246c237380f392041448b4943afc76fd50d4c3",
     "acceptance/run.sh": "sha256:ef8431b29e8da9122a88fa13d4596594ef203644ded15208606e8859ebf3fe84",
@@ -463,5 +463,5 @@
     "acceptance:acceptance/lib/item73.sh::core::v1-73.transition",
     "acceptance:acceptance/lib/item73.sh::core::v1-73.transition-absence"
   ],
-  "seal": "7afcec54d3eeee3ee6eedf720decbb0c4345e7e9d138649f01212aeef8fc1f62"
+  "seal": "1b8865ce0e7f529eddbdaeb0a635f197ccf1549d5ddcd787f69433a15bd76572"
 }

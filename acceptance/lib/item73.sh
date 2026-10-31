@@ -139,13 +139,13 @@ is_check=any('/check-runs?' in a for a in args)
 if mode=='later-summary-fails' and args[:2]==['pr','comment']:
  nfile=st/'comments73';n=int(nfile.read_text())+1 if nfile.exists() else 1;nfile.write_text(str(n))
  if n==2:print('gh: injected summary failure (HTTP 503)',file=sys.stderr);sys.exit(1)
-start=time.monotonic()
+start=time.time()
 captured=root.parent/'stdout73'
 visible=sum(x.startswith('shipcraft: CI at ') for x in captured.read_text().splitlines()) if captured.exists() else 0
 if (mode=='slow-status' and is_status) or (mode=='slow-check' and is_check):time.sleep(2.2)
 p=subprocess.run([str(root/'gh73-real'),*args])
 if is_status or is_check:
- with (st/'timing73.jsonl').open('a') as f:f.write(json.dumps(dict(start=start,end=time.monotonic(),status=is_status,check=is_check,visible=visible))+'\n')
+ with (st/'timing73.jsonl').open('a') as f:f.write(json.dumps(dict(start=start,end=time.time(),status=is_status,check=is_check,visible=visible))+'\n')
 sys.exit(p.returncode)
 PY
   chmod +x "$CB/gh"
