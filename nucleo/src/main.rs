@@ -20,6 +20,7 @@ mod init_briefs;
 mod init_msg;
 mod init_probe;
 mod init_tool;
+mod install;
 mod jsonc;
 mod junit;
 mod lang;

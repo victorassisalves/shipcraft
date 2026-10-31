@@ -153,6 +153,7 @@ if ci or mode.startswith('suites') or mode=='stderr-closed':
    current=[('core','core'),('jobs','jobs')]; absent=[]
  for name,root in current[1:]: test(root,passing=mode=='suites-passing',extra=root=='jobs')
  config(current)
+ if mode=='suites-base-missing': git('add','--','.shipcraft.toml')
  if mode in ('suites-base-bad','suites-base-missing'): absent=[]
  if mode=='suites-base-reader': absent=['zeta']
  if mode=='suites-refusal':
