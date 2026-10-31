@@ -258,15 +258,31 @@ fn workspace_suites(repo: &Repo, lang: Lang, patterns: &[String]) -> Result<Suit
 
 /// Item 56: a suite whose `tsconfig.json` checks no file (a solution config)
 /// loses its `tsc --noEmit` when `[build]` type-checks its folder, and keeps it
-/// otherwise; either way a line says so. Returns those lines, in suite order.
+/// otherwise; either way a line says so. Item 72: any other suite whose folder
+/// `[build]` names loses its check too, with its own line. Returns those lines,
+/// in suite order.
 fn drop_empty_checks(repo: &Repo, suites: &mut Suites, built: &[String]) -> Vec<String> {
     let mut lines = Vec::new();
     for (name, root, profile) in suites.iter_mut() {
         let path = if root == "." { "tsconfig.json".to_string() } else { format!("{root}/tsconfig.json") };
-        if profile.check.is_none() || !checks_no_file(&repo.path(&path)) {
+        if profile.check.is_none() {
             continue;
         }
         let shown = if name.is_empty() { "default".to_string() } else { crate::red::one_line(name) };
+        let empty = checks_no_file(&repo.path(&path));
+        // Item 72: [build] type-checks the suite's package folder, whatever its
+        // tsconfig holds. Runs before item 71's probe, so `root` is still the
+        // package folder a converted suite's check would enter.
+        if !empty {
+            if built.contains(root) {
+                profile.check = None;
+                lines.push(format!(
+                    "shipcraft: no check written for suite {shown}: [build] type-checks {}",
+                    crate::red::one_line(&path)
+                ));
+            }
+            continue;
+        }
         let what = if built.contains(root) {
             profile.check = None;
             format!("no check written for suite {shown}: [build] type-checks its references")
