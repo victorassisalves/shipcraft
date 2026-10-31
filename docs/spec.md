@@ -718,6 +718,52 @@ Our own items 70 to 73 (2026-10-31): the Codex RED ran in its `workspace-write` 
    - The steps are handed over as text: the user, not Shipcraft, decides which step already succeeded, reads the lock path `red` prints, and resolves a staged-content mismatch after a refused commit (a formatter that rewrote a file); the hook and `shipcraft/ci` still judge the result.
    - The session that hands the command over does not verify the commit; the session the user talks to checks it before the next phase, as item 70's line says.
 
+### `report` with DORA (item 76)
+
+Item 38's `report` measures the flow per lock from the run log alone. Three gaps show on this repository and on adopters.
+- A lock merged through `gh` or the GitHub page has no `merge` row, so the report calls it `open` although its PR is on main.
+- With `ci = "github"` there is no local `ci` row, so the waiting time is always empty.
+- The report says nothing about releases, so DORA's keys live only in our private `metrics/dora.py`.
+Victor's decision (2026-10-31): a local DORA readout in the product, from the run log, the git tags and the locks. It reads the network only with `--github`. A key without data says so, and never guesses. Our private `dora.py` and `item-times.tsv` stay as they are.
+
+1. **What `report` reads, and the lock state.**
+   - **Inputs.** As today, the run log, read by item 38's rules. Now also git, through the `git` on `PATH`, run from the current folder:
+     - the default branch's tip: `refs/remotes/origin/HEAD` peeled, else `refs/heads/main`, else `refs/heads/master`;
+     - the release tags: `refs/tags/v<X>.<Y>.<Z>`, each part a decimal number without leading zeros, peeled to a commit that is an ancestor of the default branch's tip. Each tag's time is the tagger date of an annotated tag, else the commit's committer date;
+     - the lock files at that tip and at each release tag: `<rev>:.shipcraft/locks/<id>.json`.
+     If git cannot run, or a query fails, the git-derived parts say `no data` with the reason, and the rest of the report is item 38's. `report` still never refuses and exits 0.
+   - **States.** A lock is `merged` when its `merge` row passed, as today. Otherwise it is `merge not observed` when its lock file is at the default branch's tip, and `open` in every other case. A `merge not observed` lock keeps empty `merge_at`, `close_to_merge`, `red_to_merge` and `waiting`. The `--json` `state` values are `"open"`, `"merged"` and `"merge_not_observed"`.
+   - **Fix data.** For each lock, `kind` and `reported_at` are read from the lock file at the default branch's tip, else at HEAD, else from its `red` row (item 75). A lock with neither has `kind: null`. A format 2 or 3 lock read from a file is `"feature"`.
+2. **The DORA section.** After the lock and day rows, the text output prints a `DORA` block. `--json` prints one line `{"kind": "dora", ...}` before any `gap` line. Every key gives its value together with `n` (the items or releases it is computed from) and `missing` (the items it needed but could not use). A key with no usable item prints `no data` and its `missing` count, never a guess. Times are seconds and medians are item 38's.
+   - **`deploys`:** the release tags whose time falls within the run log's first and last row. It gives their count, the first and last tag, and the count per day over that span (`null` with fewer than 2 tags).
+   - **`lead_time`:** for each lock with a `red` time and a release, the time from RED to that release, as median and p90. A lock's release is the first release tag, in version order, whose tree holds its lock file. `red_to_merge` is repeated from item 38 for comparison. `missing` counts locks merged or `merge not observed` that have no `red` time or no release yet.
+   - **`rework_rate`:** of the releases that ship at least one lock, the share that ship a lock with `kind: "fix"`. `missing` counts shipped locks with `kind: null`. When any shipped lock has `kind: null`, the value is `no data`, not a lower bound.
+   - **`time_to_recover`:** for each `fix` lock with a `reported_at` and a release, the time from `reported_at` to that release, as median and p90. `missing` counts `fix` locks without `reported_at` or without a release.
+   - **`change_failure_rate`:** always `no data` until the release that introduced each defect is recorded, with `missing` equal to the number of `fix` locks. The text says so in one line.
+   - **What each number covers.** The block opens with one line naming the run log's span and what it holds: rows from this machine and its worktrees only. A second line names the default branch and the number of release tags read.
+3. **`--github`.** `shipcraft report --github` (with or without `--json`) also asks GitHub, through `gh`, once per merged or `merge not observed` lock whose `waiting` is empty. It does not run otherwise.
+   - **The PR.** It is the `pr` of the lock's `merge` row, else the `pr` of its `pr` row. Without one, the lock is counted in `waiting`'s `missing`.
+   - **The CI time.** It is the latest completion among the PR head's `shipcraft/ci` status and the check runs named in `[execution] suite_checks` (item 62's reader), as `gh` returns them.
+   - **The waiting.** It is from that CI time to `merge_at`. For a `merge not observed` lock, `merge_at` becomes the PR's `mergedAt` from `gh`, and that lock's `merge_at`, `close_to_merge` and `red_to_merge` are then filled. The `--json` lock row marks every value filled from GitHub with `"source": "github"`.
+   - **Failures.** If `gh` is missing, fails or returns something it cannot read, the value stays empty, the lock is counted in `missing`, and one line on stderr per kind of failure says what failed. `report` still exits 0.
+4. **Current behavior** on the paths this item touches (rule 14):
+   - `report`'s run-log reader, its gaps, its `meta`, its per-lock times, reviews, waiting from local `ci` rows, hook and `ci` counts, its day rows and their medians, `--json`'s one object per line, and exit 0 always: keep.
+   - "No git": change. `report` now runs read-only git queries, as point 1 says; it still writes nothing, runs no test, agent or network call (except `--github`), and appends no run-log row.
+   - The `open` state for a lock merged without a `merge` row: change, as point 1 says.
+   - Every other command: keep.
+5. **Touches.**
+   - **Assertions that may change:** item 38's cases (`v1-38.*`) where a fixture lock file sits at the default branch's tip without a `merge` row (now `merge not observed`), and where a case asserts the exact text output's last lines or the exact set of `--json` kinds (now also `dora`). The RED lists each one it changes, with the reason, and changes nothing else in them.
+   - **Must keep passing unchanged:** every other `v1-38.*` case; item 46's `redos`; item 54's reused reviews; item 75's lock and row fields (`v1-75.*`); item 10's run-log check.
+   - **New cases** use fixture repositories with real annotated and lightweight tags, locks of formats 3 and 4 committed on the default branch, run logs written by the battery, and a fake `gh` with real JSON shapes for `--github`.
+6. **Measure and revert.**
+   - **Metric:** on this repository, `shipcraft report` gives deploys, lead time and rework rate for the items from 75 on with no `missing`, matching `metrics/dora.py` within one minute for each common item.
+   - **Revert:** a release that drops the DORA block, the git reads and `--github`, and restores item 38's `open`.
+7. **Known limits.**
+   - Deploys are release tags; a project that deploys without tags has no `deploys`.
+   - Locks written before item 75 have `kind: null`, so `rework_rate` reads `no data` while any of them ships in a release in the span.
+   - A run log covers one machine: locks red on another machine have no `red` time here.
+   - `change_failure_rate` waits for the item that records the release a fix's defect came from.
+
 ### Workspace suites run from the root when the root vitest config defines the projects (item 71)
 
 Wrong-verdict note: since item 9 (2.0.0), `init` writes each Node workspace suite to run inside its package. Found on the Forge, the second adopter (2.25.0, deluge-forge-platform PR #805, 2026-10-31): its root `vitest.config.ts` carries the worker caps (pool options vitest reads only from the root config), a `globalSetup` that points `TMPDIR` at one folder per run and a guard against writes to the real home folder, and its `vitest.workspace.ts` lists one project per package. A run from inside a package skips all of them. The Forge rewrote every suite by hand to run from the root with `--project <name>`. The battery should have caught it: item 51's fixtures have a root workspace file, but they write `.shipcraft.toml` before `init`, so no case ran `init` on such a layout.
