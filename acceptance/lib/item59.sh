@@ -59,6 +59,7 @@ def state(expected=1):
   prefix=(name+':') if name else ''
   for p in Path(root+'/tests').glob('test_*.py'):
    if narrowed and str(p)!='core/tests/test_core.py': continue
+   if mode=='ci-longest' and root=='api': continue
    for function in re.findall(r'^def (test_\w+)\(',p.read_text(),re.M):
     suffixes=['[%02d]'%i for i in range(40)] if mode=='files-many' and function=='test_anchor' else ['']
     ids={prefix+'tests.'+p.stem+'::'+function+suffix for suffix in suffixes}
@@ -74,6 +75,7 @@ def event(before,code='',redo=False):
  keys={'at','branch','code','commit','fallback','layer','lock','result','secs','selected_files','selection'}
  if not code and mode!='suites-redo-same': keys.add('rerun_dropped')
  if code=='shipcraft-min': keys-={'selection','selected_files','fallback'}
+ if mode=='ci-longest': keys.add('unchanged_dropped')
  if code: keys.add('reason')
  if redo: keys.add('redo')
  else: keys.update(('kind','reported_at','fixes_release'))

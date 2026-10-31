@@ -170,11 +170,13 @@ if mode!='log-fails':
  if not early: keys|={'selection','selected_files','fallback'}
  if code: keys.add('reason')
  else: keys.add('rerun_dropped')
+ if warning: keys.add('unchanged_dropped')
  if redo: keys.add('redo')
  else: keys.update(('kind','reported_at','fixes_release'))
 
  if not redo: want((r.get('kind'),r.get('reported_at'),r.get('fixes_release'))==('feature',None,None),'fix row values')
  want(set(r)==keys,'red row gained/lost fields: '+repr(r))
+ if warning: want(r.get('unchanged_dropped')==(1 if mode=='warnings-local' else 2),'unchanged drop count')
  want(r.get('code')==code and r.get('result')==('refused' if code else 'passed'),'row verdict: '+repr(r))
  want(r.get('secs',-1)>=0 and r.get('layer')=='red','row identity/time')
  if mode not in ('unborn','unborn-remote'): want(r.get('commit')==git('rev-parse','HEAD'),'row commit must describe real run')
@@ -193,7 +195,7 @@ else:
   for f,h in d['files'].items(): want(h=='sha256:'+hashlib.sha256(Path(f).read_bytes()).hexdigest(),'wrong protected hash: '+f)
   for key in ('cases','failing_at_red'):
    ids=d[key]
-   if warning: want(set(ids)=={name+':tests.test_'+name+'66::test_'+name+'66' for name in ('core','landing','jobs')},'warning changed lock: '+repr(ids))
+   if warning: want(set(ids)=={name+':tests.test_'+name+'66::test_'+name+'66' for name in (('landing','jobs') if mode=='warnings-local' else ('jobs',))},'warning changed lock: '+repr(ids))
    else:
     expected_names={'fresh66'}|({'legacy66','bridge66'} if reason and bridge else {'legacy66'} if reason else {'bridge66'} if bridge in selected else set())
     expected_count=len(expected_names)+(1 if reason and key=='cases' else 0)
