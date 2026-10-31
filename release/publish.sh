@@ -326,7 +326,7 @@ END {
       "the arm64 binary of release-shadow run $RUN failed shipcraft --version" \
       "the release's shipcraft --version must say the tag's version and commit" \
       "rerun the release-shadow push run (gh run rerun $RUN -R $REPO) and run again, or run with --local-build"
-    [ "$(cat "$WORK/version.out"; printf x)" = "$WANT"$'\n'x ] || refuse \
+    printf '%s\n' "$WANT" >"$WORK/version.want" && cmp -s "$WORK/version.out" "$WORK/version.want" || refuse \
       "the arm64 binary of release-shadow run $RUN does not print exactly '$WANT' for --version" \
       "the release's shipcraft --version must say the tag's version and commit" \
       "check that run $RUN built commit $SHA, rerun it (gh run rerun $RUN -R $REPO), or run with --local-build"
