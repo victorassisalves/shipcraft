@@ -83,6 +83,7 @@ for suite in suites:
  suite_root='old' if suite=='alias' else suite
  Path(suite_root,'tests').mkdir(parents=True,exist_ok=True)
  command=shlex.join([sys.executable,str(adapter),suite,lang,'{junit}'])
+ if lang=='go': command+=' # gotestsum'
  config+='\n[[suite]]\nname = '+json.dumps(suite)+'\nroot = '+json.dumps(suite_root)+'\nfilter = "command"\ncommand = '+json.dumps(command)+'\nglobs = '+json.dumps(['tests/**'] if lang!='go' else ['**/*_test.go'])+'\n'
 write('.shipcraft.toml',config)
 old_suite='own' if same else 'old'
