@@ -288,7 +288,10 @@ impl Evidence {
                 if !parsed.contains_key(oid) {
                     let spec = format!("{commit}:.shipcraft/locks/{id}.json");
                     let bytes = git.ok(&["cat-file", "blob", spec.as_str()])?;
-                    parsed.insert(oid.clone(), Lock::parse(&bytes));
+                    // Item 76, point 1: only a lock valid by this binary's rules
+                    // (a supported format, seal included) ends the search.
+                    let lock = lock::check_format(&spec, &bytes).ok().and_then(|()| Lock::parse(&bytes));
+                    parsed.insert(oid.clone(), lock);
                 }
                 if let Some(lock) = &parsed[oid] {
                     let data = match &lock.fix {

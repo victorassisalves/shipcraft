@@ -289,7 +289,7 @@ pub fn lock_files(repo: &Repo, snapshot: &Snapshot) -> Result<LockFiles> {
 /// Refuses a lock written in a format this shipcraft does not know. A lock that is
 /// not JSON, or has no format, is left to the seal check (edited by hand).
 /// Item 75: a format above the highest known one asks for a newer shipcraft.
-fn check_format(path: &str, bytes: &[u8]) -> Result<()> {
+pub(crate) fn check_format(path: &str, bytes: &[u8]) -> Result<()> {
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) else { return Ok(()) };
     let legacy = value.get("formato").is_some();
     match value.get("format").or_else(|| value.get("formato")) {
