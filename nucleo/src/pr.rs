@@ -236,12 +236,32 @@ fn wait_github_ci(repo: &Repo, config: &Config, head: &str) -> Result<Gate> {
     };
     println!("shipcraft: waiting for {waited} at {} (up to {} s)", short(head), limit.as_secs());
     let started = Instant::now();
+    // Item 73: the last state vector printed.
+    let mut printed: Option<Vec<String>> = None;
+    let mut report = |vector: Vec<String>| {
+        if printed.as_ref() != Some(&vector) {
+            let ci = match vector[0].as_str() {
+                "\0none" => "no status",
+                "" => "no state",
+                other => other,
+            };
+            let mut line = format!("shipcraft: CI at {} s: shipcraft/ci {ci}", started.elapsed().as_secs());
+            for (name, word) in names.iter().zip(&vector[1..]) {
+                line.push_str(&format!("; {name} {word}"));
+            }
+            println!("{line}");
+            printed = Some(vector);
+        }
+    };
     loop {
         let ci = gh::statuses(repo, head)?.get("shipcraft/ci").map(|(s, _)| s.clone());
+        let ci_key = ci.clone().unwrap_or_else(|| "\0none".to_string());
         if let Some(state @ ("failure" | "error")) = ci.as_deref() {
+            report(vec![ci_key]);
             return Ok(Gate::Stopped("ci-github", format!("GitHub shipcraft/ci returned {state}; review did not run")));
         }
         let checks: Vec<(&String, gh::Check)> = names.iter().map(|name| (name, gh::check(repo, head, name))).collect();
+        report(std::iter::once(ci_key).chain(checks.iter().map(|(_, c)| c.word().to_string())).collect());
         if let Some((name, _)) = checks.iter().find(|(_, check)| *check == gh::Check::Failed) {
             return Ok(Gate::Stopped("ci-github", format!("GitHub check {name} failed; review did not run")));
         }
