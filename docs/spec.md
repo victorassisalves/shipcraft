@@ -586,7 +586,7 @@ Victor's instruction for the dogfood was "the rules in the product, not in memor
 | `lang` | `python`, `node` or `go`. |
 | `runner` | The runner name (`pytest`, `vitest`, `jest`, `gotestsum`). |
 | `test_command` | The test command. `{junit}` is replaced by the report path. |
-| `test_globs` | Test and support file globs. These files are locked. |
+| `test_globs` | Test and support file globs. These files are locked. Any other file the GREEN must not change, such as the spec the tests were written from, can be listed too: it is protected and never run. |
 | `check` | Optional project-wide check (type check, vet). Runs in CI and at RED, never in the hook. A failing check refuses `no-report` with a reason that names the check (item 45). |
 | `filter` | Who filters the hook's run (section 6). |
 
@@ -598,7 +598,7 @@ Victor's instruction for the dogfood was "the rules in the product, not in memor
 | `[[suite]] root` | Folder the command runs in. Globs are relative to it. | `.` |
 | `[[suite]] command` | Test command, with `{junit}`. | required |
 | `[[suite]] check` | Project-wide check for this suite. | none |
-| `[[suite]] globs` | Test and support file globs. | `[]` |
+| `[[suite]] globs` | Test and support file globs, plus any other file to protect from the GREEN (see `test_globs`). | `[]` |
 | `[[suite]] filter` | `"shipcraft"` or `"command"` (section 6). | `"shipcraft"` |
 | `[build] command` | Runs once at the root before the first suite (section 6). | none |
 | `[execution] ci` | Where CI runs: `local` (this machine, through `shipcraft pr`), `github` (GitHub Actions) or `off` (not run, not required). | `local` |

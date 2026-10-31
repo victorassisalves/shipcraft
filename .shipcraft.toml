@@ -2,7 +2,8 @@
 # metrics/dogfood-red-2026-10-28.md: red 99 s, hook p90 22.9 s). Metric: RED->main
 # time against the 11 min median, false hook refusals, hook and red times.
 # Revert: delete this file and .shipcraft/locks/.
-shipcraft_min = "2.20"
+# 2.22 (item 5(b)): item 65 keeps a selected docs/spec.md without cases from sending red to the full run.
+shipcraft_min = "2.22"
 
 [[suite]]
 name = "acceptance"
@@ -11,7 +12,10 @@ command = "acceptance/shipcraft.sh {junit}"
 # acceptance/pontos/** (2026-10-30): the fixed points are locked with their cases, so a RED's
 # fixed points are protected from the GREEN and a redo can repair them in the redo commit.
 # Revert: drop that glob.
-globs = ["acceptance/lib/**", "acceptance/tools/**", "acceptance/fixtures/**", "acceptance/stubs/**", "acceptance/*.sh", "acceptance/pontos/**"]
+# docs/spec.md (2026-10-30, item 5(b)): the spec the RED wrote its tests from is locked with
+# them, so the GREEN cannot change the contract; a redo can repair it in the redo commit.
+# Metric: 0 false refusals over the next 5 items. Revert: drop that glob.
+globs = ["acceptance/lib/**", "acceptance/tools/**", "acceptance/fixtures/**", "acceptance/stubs/**", "acceptance/*.sh", "acceptance/pontos/**", "docs/spec.md"]
 filter = "command"
 
 [execution]
