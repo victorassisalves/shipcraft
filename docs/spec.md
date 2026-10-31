@@ -1073,6 +1073,34 @@ POC-021's after runs on 2.31.0 (2026-10-31, `after2-claude-existing`): Claude ra
     - A path staged when `red` runs and unstaged (or never committed) before the RED commit still makes the hook refuse `locked-file-deleted` for `.shipcraft.toml`, or leaves a hook file to be created later and refused `hook-config-changed`. `red` judges the index at its own time, not the commit's.
     - A staged config that HEAD lacks is still a changed path, so `red` falls back to the full run (`config changed`), as in the field run. Item 81 keeps failures in test files the RED did not change out of the lock.
 
+### The review lists every Blocking item it reproduces (item 82)
+
+Since item 70, every review that blocked on this repository found exactly one Blocking item: PR #90 (item 78) blocked twice and PR #92 (item 76) three times, one finding per round, each a different real bug. Each round costs a RED, a GREEN, CI and another review. Neither built-in brief tells the reviewer to stop at the first Blocking item, but none tells it to go on either. It reproduces one and writes the review. Victor's coordinator decided (2026-10-31): ask for all of them in one round.
+
+1. **The new paragraph.** Both built-in briefs, `nucleo/src/brief.md` and `nucleo/src/brief_after_ci.md`, gain one paragraph at the end of "## Rules for a Blocking item", after the sentence that ends `otherwise it is CHANGES REQUESTED.`, separated by a blank line:
+
+   ```
+   After you reproduce a Blocking item, keep going: check the rest of the diff against the
+   spec and the intent, and list every Blocking item you reproduce, not only the first.
+   Blocking: <n> counts all of them.
+   ```
+
+   Nothing else in either brief changes: the steps, the format, the ground rules, the placeholders and their substitution stay byte for byte.
+2. **Current behavior** on the paths this item touches (rule 14):
+   - Which brief is chosen (item 63: after green CI, or not), the substitutions (`{{WHAT}}`, `{{TITLE}}`, `{{SHA}}`, `{{BASE_SHA}}`, `{{TREE}}`, `{{WORK}}`, `{{COMMANDS}}`, `{{BODY}}`, `{{SPEC}}`, `{{DIFF}}`, `{{BATTERY}}`, `{{MINUTES}}`), the brief written to the review's work folder as `brief.md` and passed to the agent: keep.
+   - The verdict parsing (first line, `Blocking: N`), fail closed, the statuses, reuse by `diff_sha256` and `text_sha256` (item 54), the run-log `review` rows and `after_green_ci`, the reviewer's environment (item 63 point 4), the queue: keep. A verdict that lists several Blocking items is parsed as today: only the first two lines count.
+   - The standing effects the spec-review brief lists: keep.
+   - Reuse: a verdict from before this item is still reused when the diff and the text match, since the brief's text is not part of either key: keep.
+3. **Touches.**
+   - **Assertions that change, and nothing else:** item 63's exact-bytes check of the brief that is not after green CI (`i63_brief` in `acceptance/lib/item63.sh`, the SHA-256 of the normalized brief, used by `v1-63.brief-off`, `brief-off-spoof`, `brief-review`, `brief-review-pr` and `brief-review-pr-spoof`): the pinned hash becomes the new brief's. Every other assertion of `i63_brief` stays, and its after-green-CI checks (`brief-local`, `brief-github`, `brief-local-docs`, `brief-github-docs`) keep passing unchanged, since the new paragraph does not mention the suite.
+   - **The version:** 2.36.0 in §11, `v1-62.version` and the other version cases item 69 lists.
+   - **Must keep passing unchanged:** every other `v1-63.*` case; item 54's reuse cases (`v1-54.*`); item 64's brief and prompt checks (`acceptance/lib/item64.sh`); item 40's `src/brief.md` cases, which are about a project file of that name, not this brief.
+   - **New cases:** each brief (after green CI and not) carries the paragraph, once, right after the CHANGES REQUESTED sentence and before `## Review format`; a fake reviewer that answers `Blocking: 2` with two sections gives `CHANGES REQUESTED`, `failure`, and a row as today.
+4. **Measure and revert.**
+   - **Metric:** Blocking items per blocking review round (today 1 in 5 of 5), and review rounds per blocked item, over the next 5 items whose review blocks at least once; and review `secs` (non-reused rows), which may at most double (about 60 to 90 s today after green CI).
+   - **Revert:** if rounds per blocked item do not go down, or review time more than doubles, a release restores both briefs' text.
+5. **Known limits.** The reviewer still has a time budget (`{{MINUTES}}`); a long list can cut its own checks short, and the brief already tells it to write what it has. Nothing makes the reviewer find more: the paragraph asks, and the metric says whether it does.
+
 ## 4. Configuration
 
 `.shipcraft.toml` lives at the project root.
@@ -1485,4 +1513,4 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.34.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.36.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
