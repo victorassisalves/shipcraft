@@ -628,7 +628,13 @@ impl Report {
             .map(|id| {
                 let mine: Vec<&Row> = rows.iter().filter(|r| locks_of(r).contains(id)).collect();
                 let (mut row, m) = lock_row(id, &mine);
-                let fix = facts.and_then(|f| f.fix.get(id)).cloned().unwrap_or_default();
+                // Item 76, point 2: the fix data's last source is the earliest passed
+                // non-redo `red` row, which needs no git; only git-derived values
+                // go null when git evidence is unavailable.
+                let fix = match facts {
+                    Some(f) => f.fix.get(id).cloned().unwrap_or_default(),
+                    None => red_row(rows, id).map(fix_of_row).unwrap_or_default(),
+                };
                 if m.is_none() && facts.is_some_and(|f| f.tip.contains(id)) {
                     row["state"] = "merge_not_observed".into();
                 }
