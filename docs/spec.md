@@ -729,11 +729,13 @@ Victor's decision (2026-10-31): a local DORA readout in the product, from the ru
 
 1. **What `report` reads.**
    - **The run log**, by item 38's rules, unchanged: found by walking up from the current folder (a `.git` file and `commondir` included), missing or unreadable read as empty, lossy UTF-8, BOM and CR stripped, blank lines skipped, `escape: true` rows ignored, gaps reported.
-   - **Git**, through the `git` on `PATH`, read-only, from the repository the run log belongs to. Nothing is fetched.
+   - **Git**, through the `git` on `PATH`, read-only, from the repository the run log belongs to. Nothing is fetched:
+     - every git call runs with `GIT_NO_LAZY_FETCH=1` and `GIT_TERMINAL_PROMPT=0` in its environment;
+     - first, `git config --get extensions.partialclone`. When it prints a value (a partial clone, where a promised object would be fetched from the remote), no other git read runs, and every git-derived value is `null` with the reason `partial clone: report reads no network`. Exit 1 with no output means not a partial clone.
      - *The default branch*: the first of `refs/remotes/origin/HEAD`, `refs/remotes/origin/main`, `refs/heads/main`, `refs/heads/master` for which `git rev-parse --verify -q <ref>^{commit}` prints a commit. Its exit 1 with no output means that ref is absent and the next is tried; it is not a failure. None present: every git-derived value is `null` with the reason `no default branch`. The report names the ref used.
-     - *Release tags*: `git for-each-ref refs/tags`, keeping names `v<X>.<Y>.<Z>` (decimal parts without leading zeros) whose target peels to a commit that is an ancestor of the default branch (`git merge-base --is-ancestor`; exit 1 means not an ancestor, not a failure). A tag's time is its tagger date for an annotated tag, else its commit's committer date. Releases are ordered by that time, ties by version.
+     - *Release tags*: `git for-each-ref refs/tags --format='%(refname:strip=2)'`, keeping names `v<X>.<Y>.<Z>` (decimal parts without leading zeros). For each, `git rev-parse --verify -q refs/tags/<name>^{commit}`: a commit printed is its commit; exit 1 with no output (a tag on a blob or tree, as an imported tag can be) means not a release and the tag is skipped, not a failure. A release is such a tag whose commit is an ancestor of the default branch (`git merge-base --is-ancestor`; exit 1 means not an ancestor, not a failure). A tag's time is its tagger date for an annotated tag, else its commit's committer date. Releases are ordered by that time, ties by version.
      - *Lock files* at a commit: `git ls-tree` of `.shipcraft/locks/` and `git cat-file blob` of each `<id>.json`. A path absent at a commit is absent, not a failure.
-     - *A failure* (git not found, a non-zero exit other than the ref-absent and ancestry "no" answers above, unreadable output) makes every git-derived value `null` with the reason in the report's `git` field. The rest is item 38's. `report` still never refuses and exits 0.
+     - *A failure* (git not found, a non-zero exit other than the ref-absent, non-commit tag and ancestry "no" answers above, a missing object, unreadable output) makes every git-derived value `null` with the reason in the report's `git` field. The rest is item 38's. `report` still never refuses and exits 0.
    - **A lock file** is read only when it is a valid lock by this binary's rules (format 2, 3 or 4, seal included, item 75). An invalid one counts as unreadable for that lock, never as a feature.
 2. **Lock states and fix data.**
    - **Lock rows.** One lock row per lock id found in the run log, in first-seen order as today, then one per lock file at the default branch's tip that the log does not name, in id byte order. The latter have no run-log times.
@@ -743,40 +745,45 @@ Victor's decision (2026-10-31): a local DORA readout in the product, from the ru
 3. **The DORA object.** `--json` prints one line `{"kind":"dora", ...}` after the `day` lines and before any `gap` line, also when the log is empty. The text output prints a `DORA` block after the days, with the same content. Durations are seconds. Medians and p90 are item 38's. The fields:
    - `"git"`: `{"default_branch": "<ref>" | null, "releases": <int> | null, "reason": null | "<line>"}`.
    - `"since"`: the `--since` tag, or `null`.
-   - **The releases read:** every release tag, or with `report --since <tag>` (a `vX.Y.Z` tag that is a release; anything else is the usage refusal, exit 2) those whose time is at or after that tag's. A release *ships* the locks whose release it is, a lock's release being the earliest release by time whose tree holds its lock file (first appearance only). The *shipped locks* are those shipped by the releases read.
+   - **The releases read:** every release tag, or with `report --since <tag>` those whose time is at or after that tag's. `--since`'s value is checked in this order:
+     - not of the `v<X>.<Y>.<Z>` grammar above: the usage refusal, exit 2, before any git read;
+     - git evidence unavailable (any of point 1's `null` reasons): the report prints as usual with `since` kept, every DORA metric `null` with that reason, exit 0;
+     - git read, and the name is not among the release tags: `report: --since <tag> is not a release tag on <default branch>` on stderr, nothing on stdout, exit 2. A release *ships* the locks whose release it is, a lock's release being the earliest release by time whose tree holds its lock file (first appearance only). The *shipped locks* are those shipped by the releases read.
    - Every metric below is `{"value": ..., "n": <int>, "missing": <int>, "reason": null | "<line>"}`. `value` is `null` whenever `n` is 0, or a rule below says so, and `reason` then says why.
    - `"deploys"`: `value` is `{"count", "first", "last", "per_day"}`, where `per_day` = count ÷ ((last time − first time) / 86400), or `null` with fewer than 2 releases or a zero span. `n` is the releases read and `missing` is 0.
    - `"lead_time"`: `value` is `{"median", "p90"}` of release time − RED time, over the shipped locks with a passed non-redo `red` row (the earliest). `n` is those samples. `missing` counts the shipped locks with no such row, and samples where the release is not after the RED, with the reason.
    - `"rework_rate"`: `value` is the share (0 to 1) of the releases read that ship at least one lock and ship a lock with `change_kind: "fix"`. `n` is the releases read that ship at least one lock. `missing` is the shipped locks with `change_kind: null`; when above 0, `value` is `null`.
    - `"time_to_recover"`: `value` is `{"median", "p90"}` of release time − `reported_at` (item 75's grammar and offset), over the shipped `fix` locks that have one. `n` is those samples. `missing` counts shipped `fix` locks without `reported_at`, and non-positive samples.
-   - `"change_failure_rate"`: `value` is the share of the releases read named by some lock's `fixes_release` (any lock in the population, shipped in any release). `n` is the releases read. `missing` counts locks of unknown kind among all shipped locks, plus `fix` locks whose `fixes_release` is `null` or not a release tag; when above 0, `value` is `null`.
+   - `"change_failure_rate"`: `value` is the share of the releases read named by the `fixes_release` of some shipped `fix` lock. `n` is the releases read. `missing` counts the shipped locks with `change_kind: null`, plus the shipped `fix` locks whose `fixes_release` is `null` or not a release tag; when above 0, `value` is `null`. Everything here is scoped to the releases read: with `--since`, a lock shipped before it neither names a failure nor counts as missing.
    - **The coverage lines.** The text block opens with two lines. The first gives the run log's span (first and last row) and says it holds this machine's runs only. The second gives the default branch, the releases read (and `--since`), and that lock rows without log times come from the branch tip.
-5. **Current behavior** on the paths this item touches (rule 14):
+4. **Current behavior** on the paths this item touches (rule 14):
    - `report`'s run-log reader, discovery, gaps, `meta`, per-lock times, reviews, local waiting, hook and `ci` stats, day rows, lock order (first seen in the log), `--json` one object per line, and exit 0 always: keep.
-   - `main.rs` accepting only `report` and `report --json`: change, to `report [--json] [--since <tag>]` in any order. Any other spelling, or a repeated flag, still prints invalid arguments with the usage and exits 2.
+   - `main.rs` accepting only `report` and `report --json`: change, to `report [--json] [--since <tag>]` in any order. Any other spelling, or a repeated flag, still prints invalid arguments with the usage and exits 2. A `--since` naming a tag that is not a release is a new exit 2, as point 3 says; `report` otherwise never refuses.
    - "No git" (`v1-38.offline`'s trap) and "an empty log prints only `meta`": change, as points 1 and 3 say. No network: keep.
    - `open` for a lock merged without a `merge` row: change, as point 2 says.
    - `report` writes nothing, appends no run-log row, and runs no test, agent or network call: keep.
    - The standing effects the spec-review brief lists, met by the fixtures: keep.
-6. **Touches.**
+5. **Touches.**
    - **Assertions that change, and nothing else in them:**
-     - `v1-38.offline`: its git trap may now be called; it still asserts no network and no write;
+     - `v1-38.offline`: its git trap may now be called; it still asserts no network and no write (the partial-clone case adds a real-git check of both);
      - `v1-38.empty`, `missing-log`, `escape-only` and `blank-only`: exactly two objects now, `meta` then `dora`;
      - the shared allowed-kind list and the kind-order assertion in `acceptance/lib/item38.sh` (used by `timeline` to `nonobject`): `meta`, `lock`, `day`, `dora`, `gap`, in that order;
      - `acceptance/pontos/38.md`'s "no git" and "only meta" readings;
      - any `v1-38.*` fixture whose lock file sits at the default branch's tip without a `merge` row, which now shows `merge_not_observed`. The RED lists each.
    - **Must keep passing unchanged:** every other `v1-38.*` assertion; `v1-46.report-zero` and `v1-46.report-count`; item 54's reused-review cases; item 75's cases (`v1-75.*`); item 10's run-log check. No item 62 reader is used.
-   - **New cases** use fixture repositories with real annotated and lightweight tags, a release line where a lock ships, format 3 and format 4 locks (feature and fix, with and without `reported_at` and `fixes_release`) (including a closed lock removed after its release), run logs written by the battery, a default branch reached through `origin/main` only and through local `main` only, and `--since`.
-7. **Measure and revert.**
-   - **Metric:** on this repository, `report --since v2.31.0` (the first release whose locks carry `kind`) gives `deploys`, `lead_time`, `rework_rate` and `change_failure_rate` with `missing` 0 once a release after it ships, and each item's RED→release within one minute of `metrics/dora.py`.
+   - **Shared lock reader, kept:** item 43's validity and canonical-seal rules, which `report` now applies when it reads a lock (`v1-43.seal`, `rewrite`, `legacy-close`, `mixed`, `legacy-prefixed`, `open-bare`, `open-uppercase`, `open-short`, `open-prefix`, `open-whitespace`, `closed-bare`, `closed-uppercase`, `closed-short`, `closed-prefix`, `closed-whitespace`) keep passing unchanged. Only what is done with an invalid lock differs: the gate refuses, and `report` treats it as unreadable for that lock.
+   - **New cases** use fixture repositories with real annotated and lightweight tags, a release line where a lock ships, format 3 and format 4 locks (feature and fix, with and without `reported_at` and `fixes_release`) (including a closed lock removed after its release), run logs written by the battery, a default branch reached through `origin/main` only and through local `main` only, `--since` (valid, malformed, not a release, git unavailable), a tag on a blob, and a real partial clone (`git clone --filter=blob:none` from a local origin with `uploadpack.allowFilter`) where `report` fetches nothing and writes no object.
+6. **Measure and revert.**
+   - **Metric:** on this repository, `report --since <the first release all of whose shipped locks were red as format 4>` (likely v2.32.0; v2.31.0 still ships format 3 locks red before item 75) gives `deploys`, `lead_time`, `rework_rate` and `change_failure_rate` with `missing` 0 once a release after it ships, and each item's RED→release within one minute of `metrics/dora.py`.
    - **Revert:** a release that drops the DORA object, the git reads and `--since`, and restores item 38's `open`.
-8. **Known limits.**
+7. **Known limits.**
    - One release line: tags are `vX.Y.Z` at the repository root. Monorepo or package tags (`@acme/api@2.1.0`, `services/api/v1.2.0`) are not read, and a backport to an older line is counted at its own tag time.
    - A tag's time is when it was tagged (or committed), not when it was deployed.
    - Locks from before item 75 have no kind, so `rework_rate` and `change_failure_rate` read `null` while any of them ships within the releases read; `--since` starts the window after them.
    - The waiting time stays empty for `ci = "github"` projects until item 79.
    - A run log covers one machine: locks red elsewhere have no `red` time here.
    - A stale local default branch makes merged locks look `open`; nothing is fetched.
+   - A partial clone gets no DORA readout.
 
 ### Workspace suites run from the root when the root vitest config defines the projects (item 71)
 
