@@ -181,12 +181,48 @@ fn commit_of(repo: &Repo, rev: &str) -> std::result::Result<Option<String>, Fall
     }
 }
 
-/// The paths changed since the merge base of HEAD and the base, or why they
-/// cannot be read; item 59 reads them even when the plan is not narrowed.
-pub fn changed(repo: &Repo, base: &Base) -> std::result::Result<Vec<ChangedPath>, Fallback> {
+/// The paths changed since the merge base of HEAD and the base, and that
+/// merge base (item 81 reads its tree).
+pub struct Changed {
+    pub merge_base: String,
+    pub paths: Vec<ChangedPath>,
+}
+
+/// The changed paths, or why they cannot be read; item 59 reads them even
+/// when the plan is not narrowed.
+pub fn changed(repo: &Repo, base: &Base) -> std::result::Result<Changed, Fallback> {
     let compared = base.as_ref().map_err(|why| *why)?;
     let merge_base = merge_base(repo, &compared.commit)?;
-    changed_paths(repo, &merge_base).ok_or(Fallback::GitFailed)
+    let paths = changed_paths(repo, &merge_base).ok_or(Fallback::GitFailed)?;
+    Ok(Changed { merge_base, paths })
+}
+
+/// Item 81: which of `paths` (repository paths, deduplicated by the caller)
+/// are in `merge_base`'s tree, byte for byte, read in one
+/// `git ls-tree -r -z --name-only <merge base> -- <paths>`; or, when the read
+/// fails, git's first stderr line, the exit status or the signal.
+pub fn in_base_tree(repo: &Repo, merge_base: &str, paths: &[&str]) -> std::result::Result<BTreeSet<String>, String> {
+    use std::os::unix::process::ExitStatusExt;
+    let out = std::process::Command::new("git")
+        .current_dir(repo.root())
+        .env("GIT_LITERAL_PATHSPECS", "1")
+        .args(["ls-tree", "-r", "-z", "--name-only", merge_base, "--"])
+        .args(paths)
+        .output()
+        .map_err(|e| format!("run git: {e}"))?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        if let Some(line) = stderr.lines().map(str::trim_end).find(|line| !line.is_empty()) {
+            return Err(line.to_string());
+        }
+        return Err(match (out.status.code(), out.status.signal()) {
+            (Some(code), _) => format!("exited with {code}"),
+            (None, Some(signal)) => format!("killed by signal {signal}"),
+            _ => "ended without an exit code".to_string(),
+        });
+    }
+    let entries: BTreeSet<&[u8]> = out.stdout.split(|b| *b == 0).filter(|entry| !entry.is_empty()).collect();
+    Ok(paths.iter().filter(|path| entries.contains(path.as_bytes())).map(|path| path.to_string()).collect())
 }
 
 /// The plan for `red`: `--all`, or the changed test files among `changed`;
@@ -195,14 +231,14 @@ pub fn changed(repo: &Repo, base: &Base) -> std::result::Result<Vec<ChangedPath>
 pub fn plan(
     repo: &Repo,
     config: &Config,
-    changed: &std::result::Result<Vec<ChangedPath>, Fallback>,
+    changed: &std::result::Result<Changed, Fallback>,
     all: bool,
     redo: Option<&Lock>,
 ) -> Plan {
     if all {
         return Plan::All(Fallback::All);
     }
-    let chosen = changed.as_ref().map_err(|why| *why).and_then(|changed| select(repo, config, changed));
+    let chosen = changed.as_ref().map_err(|why| *why).and_then(|changed| select(repo, config, &changed.paths));
     let (mut selected, mut files) = match chosen {
         Ok(chosen) => chosen,
         Err(why) => return Plan::All(why),

@@ -6,7 +6,7 @@ use crate::git::{Repo, Snapshot};
 use crate::glob;
 use crate::junit::{Outcome, Report};
 use crate::lock::{lock_files, new_digest, new_lock_path, Fix, Lock, LOCK_DIR};
-use crate::narrow::{self, ChangedPath, Chosen, Fallback, Plan};
+use crate::narrow::{self, Chosen, Fallback, Plan};
 use crate::refusal::{failed, refuse, short_list, Result};
 use crate::suite::{self, Narrowed};
 use std::collections::{BTreeMap, BTreeSet};
@@ -14,7 +14,42 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 
-/// The path of the lock written, and how many cases the second run dropped.
+/// Item 81: the failing cases a written lock left out because they live in a
+/// test file the RED did not change, or the base tree that could not be read.
+#[derive(Default)]
+pub struct LeftOut {
+    pub cases: Vec<String>,
+    /// Why the base tree could not be read: nothing was left out.
+    pub unread: Option<String>,
+}
+
+impl LeftOut {
+    /// `unchanged_dropped` on the `red` row: null when the base tree could not
+    /// be read, the count when above 0, and absent otherwise.
+    pub fn record(&self, row: &mut serde_json::Value) {
+        if self.unread.is_some() {
+            row["unchanged_dropped"] = serde_json::Value::Null;
+        } else if !self.cases.is_empty() {
+            row["unchanged_dropped"] = self.cases.len().into();
+        }
+    }
+
+    /// The line after item 53's and before `RED locked at`/`RED redone at`.
+    fn print(&self) {
+        if let Some(error) = &self.unread {
+            println!("shipcraft: every failing case is locked: could not read the base tree ({error})");
+        } else if !self.cases.is_empty() {
+            let shown: Vec<String> = self.cases.iter().map(|id| one_line(id)).collect();
+            println!(
+                "shipcraft: not locked, failing in test files this RED did not change: {}; CI runs them",
+                short_list(&shown)
+            );
+        }
+    }
+}
+
+/// The path of the lock written, how many cases the second run dropped, and
+/// (item 81) the cases left out.
 /// Item 55: `base` and `all` choose the first run; `chosen`, how it ran, once
 /// the selection is decided. Item 75: `fix`, the lock's fix fields.
 pub fn run(
@@ -23,7 +58,7 @@ pub fn run(
     all: bool,
     fix: Fix,
     chosen: &mut Option<Chosen>,
-) -> Result<(String, usize)> {
+) -> Result<(String, usize, LeftOut)> {
     let config = Config::load(repo)?;
     refuse_if_a_lock_is_open(repo)?;
     // Item 80: before the base and anything else.
@@ -34,6 +69,8 @@ pub fn run(
     let plan = narrow::plan(repo, &config, &changed, all, None);
     let report = red_report(repo, &config, "shipcraft red", &base, plan, chosen)?;
     let failing = failing_at_red(&report, "shipcraft red")?;
+    let left = leave_out(repo, &config, &changed, all, None, &failing)?;
+    let (cases, failing) = without(&left.cases, report.cases_run(), failing);
 
     let files = locked_files(repo, &config)?;
     refuse_a_suite_without_tests(repo, &config, &files, &failing)?;
@@ -41,7 +78,7 @@ pub fn run(
     // Item 53: hashed as the second run leaves the files.
     let files = locked_files(repo, &config)?;
 
-    let lock = Lock::open(files, report.cases_run(), failing, fix);
+    let lock = Lock::open(files, cases, failing, fix);
     let path = new_lock_path();
     let full_path = repo.path(&path);
     fs::create_dir_all(full_path.parent().expect("a lock path has a directory"))
@@ -49,6 +86,7 @@ pub fn run(
         .map_err(|e| failed(format!("write {path}: {e}")))?;
 
     print_dropped(&dropped);
+    left.print();
     println!(
         "shipcraft: RED locked at {path}: {} file(s), {} case(s), {} failing: {}",
         lock.files.len(),
@@ -59,7 +97,7 @@ pub fn run(
     println!("shipcraft: commit the lock with the tests; the hook checks the RED commit.");
     warn_absent_suites(repo, &config, &base, &lock);
     next_green(&config);
-    Ok((path, dropped.len()))
+    Ok((path, dropped.len(), left))
 }
 
 /// Item 46: `red --redo` rewrites the open lock HEAD holds, in place, as the
@@ -75,6 +113,7 @@ pub fn redo(
     path: &mut Option<String>,
     rerun_dropped: &mut Option<usize>,
     chosen: &mut Option<Chosen>,
+    unchanged: &mut Option<LeftOut>,
 ) -> Result<()> {
     let config = Config::load(repo)?;
     let (lock_path, old) = head_lock(repo, path)?;
@@ -97,6 +136,8 @@ pub fn redo(
         );
     }
     let failing = failing_at_red(&report, "shipcraft red --redo")?;
+    let left = leave_out(repo, &config, &changed, all, Some(&old), &failing)?;
+    let (run, failing) = without(&left.cases, run, failing);
     let files = locked_files(repo, &config)?;
     refuse_a_suite_without_tests(repo, &config, &files, &failing)?;
     let (failing, dropped) = confirm(repo, &config, &files, failing, "shipcraft red --redo")?;
@@ -113,6 +154,8 @@ pub fn redo(
     replace(&full_path, &lock_path, &lock.to_json())?;
     *rerun_dropped = Some(dropped.len());
     print_dropped(&dropped);
+    left.print();
+    *unchanged = Some(left);
 
     let minus = |a: &[String], b: &[String]| a.iter().filter(|case| !b.contains(case)).cloned().collect::<Vec<_>>();
     let list = |cases: Vec<String>| if cases.is_empty() { "none".to_string() } else { cases.join(", ") };
@@ -348,6 +391,89 @@ fn failing_at_red(report: &Report, again: &str) -> Result<Vec<String>> {
     Ok(failing)
 }
 
+/// Item 81: `cases` and `failing` without the cases left out.
+fn without(left: &[String], cases: Vec<String>, failing: Vec<String>) -> (Vec<String>, Vec<String>) {
+    let keep = |list: Vec<String>| list.into_iter().filter(|case| !left.contains(case)).collect();
+    (keep(cases), keep(failing))
+}
+
+/// Item 81: the failing cases outside the RED, byte-sorted: each maps, by the
+/// hook's mapper over the suite's locked files on the working tree, to one
+/// file that is not a changed path and is in the merge base's tree; none
+/// with `--all`, without changed paths, for a redo's case of HEAD's lock, or
+/// when every failing case is outside (the guard). A case shares no file with
+/// a case that stays. A failed base-tree read leaves nothing out.
+fn leave_out(
+    repo: &Repo,
+    config: &Config,
+    changed: &std::result::Result<narrow::Changed, Fallback>,
+    all: bool,
+    redo: Option<&Lock>,
+    failing: &[String],
+) -> Result<LeftOut> {
+    let Ok(changed) = changed else { return Ok(LeftOut::default()) };
+    if all {
+        return Ok(LeftOut::default());
+    }
+    let locked = config.test_files(repo)?;
+    let present = repo.files()?;
+    // Each failing case's one file (a repository path), when every suite that
+    // owns it maps it to the same file.
+    let mut file_of: BTreeMap<&str, Option<String>> = BTreeMap::new();
+    for suite in config.suites() {
+        let own: Vec<(&String, &str)> =
+            failing.iter().filter_map(|case| config.own(&suite, case).map(|id| (case, id))).collect();
+        if own.is_empty() {
+            continue;
+        }
+        let ids: Vec<&str> = own.iter().map(|(_, id)| *id).collect();
+        let held = suite::holders(repo.root(), &suite, &locked, &present, &ids);
+        let prefix = suite.prefix();
+        for (i, (case, _)) in own.iter().enumerate() {
+            let file = held.as_ref().map(|files| format!("{prefix}{}", files[i]));
+            let entry = file_of.entry(case.as_str()).or_insert_with(|| file.clone());
+            if *entry != file {
+                *entry = None;
+            }
+        }
+    }
+    let changed_paths: BTreeSet<&[u8]> = changed.paths.iter().map(|(_, path)| path.as_slice()).collect();
+    let candidates: BTreeMap<&str, &String> = file_of
+        .iter()
+        .filter(|(case, _)| redo.is_none_or(|lock| !lock.cases.iter().any(|c| c == *case)))
+        .filter_map(|(case, file)| file.as_ref().map(|file| (*case, file)))
+        .filter(|(_, file)| !changed_paths.contains(file.as_bytes()))
+        .collect();
+    if candidates.is_empty() {
+        return Ok(LeftOut::default());
+    }
+    let paths: BTreeSet<&str> = candidates.values().map(|file| file.as_str()).collect();
+    let paths: Vec<&str> = paths.into_iter().collect();
+    let in_base = match narrow::in_base_tree(repo, &changed.merge_base, &paths) {
+        Ok(in_base) => in_base,
+        Err(error) => return Ok(LeftOut { cases: Vec::new(), unread: Some(error) }),
+    };
+    let outside: BTreeSet<&str> =
+        candidates.iter().filter(|(_, file)| in_base.contains(file.as_str())).map(|(case, _)| *case).collect();
+    // The guard: at least one failing case is not outside the RED.
+    if failing.iter().all(|case| outside.contains(case.as_str())) {
+        return Ok(LeftOut::default());
+    }
+    // Same file as a case that stays: kept.
+    let staying: BTreeSet<&String> = failing
+        .iter()
+        .filter(|case| !outside.contains(case.as_str()))
+        .filter_map(|case| file_of.get(case.as_str()).and_then(Option::as_ref))
+        .collect();
+    let mut cases: Vec<String> = outside
+        .into_iter()
+        .filter(|case| !staying.contains(candidates[case]))
+        .map(str::to_string)
+        .collect();
+    cases.sort();
+    Ok(LeftOut { cases, unread: None })
+}
+
 /// Item 53: reruns once, as the hook runs them, the suites that have a case
 /// of `failing`, on the working tree, with `files` as the lock's files; a case
 /// stays failing unless its suite's second report shows it passed. The cases
@@ -494,9 +620,10 @@ fn test_named(path: &str) -> bool {
 
 /// Item 59: the changed test-named regular files that match no suite's
 /// globs, before the build; nothing when the changed paths cannot be read.
-fn warn_outside_globs(repo: &Repo, config: &Config, changed: &std::result::Result<Vec<ChangedPath>, Fallback>) {
+fn warn_outside_globs(repo: &Repo, config: &Config, changed: &std::result::Result<narrow::Changed, Fallback>) {
     let Ok(changed) = changed else { return };
     let outside: BTreeSet<&str> = changed
+        .paths
         .iter()
         .filter_map(|(_, path)| std::str::from_utf8(path).ok())
         .filter(|path| test_named(path) && !config.is_test_file(path))
