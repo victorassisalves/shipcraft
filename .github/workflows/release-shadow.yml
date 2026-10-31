@@ -1,10 +1,11 @@
 name: release-shadow
 
-# POC-023 (shadow): builds the two macOS release binaries on GitHub's macOS runners and
-# runs the whole battery against the exact arm64 binary it uploads, as release/publish.sh
-# does on the releaser's Mac. publish.sh does not use these artifacts yet; the POC compares
-# wall time, battery verdict and binary behavior over the next releases. Revert: delete
-# this file.
+# Builds the two macOS release binaries on GitHub's macOS runners and runs the whole
+# battery against the exact arm64 binary it uploads. POC-023 compared it with the local
+# release and was kept (2026-10-31): release/publish.sh now publishes this workflow's
+# artifacts by default (item 78), from the first successful push run for the release
+# commit. Revert: release/publish.sh <version> --local-build for one release, or a PR
+# restoring the previous publish.sh for good.
 on:
   push:
     branches: [main]
