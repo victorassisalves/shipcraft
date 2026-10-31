@@ -1,14 +1,24 @@
 #!/usr/bin/env bash
 # Releases shipcraft from the machine of whoever runs it (docs/spec.md, item 21.2).
 #
-# usage: release/publish.sh <version>     (1.2.0 or v1.2.0)
+# usage: release/publish.sh <version> [--local-build]     (1.2.0 or v1.2.0)
 #
 # Runs in the repository checkout (the current folder). It pins the commit at the start
 # (HEAD, equal to the remote's main, clean tree, version equal to nucleo/Cargo.toml's,
-# tag still free on the remote), and from then on everything comes from a fresh checkout
-# of that commit: it builds both macOS targets, runs the whole battery against this
-# machine's target (with acceptance/reuso.sh's per-tree reuse), packages, and creates the
-# release with gh. It does not publish to brew, crates.io or npm.
+# tag still free on the remote).
+#
+# By default (POC-023, kept 2026-10-31) it publishes the binaries the release-shadow
+# workflow built and tested on GitHub's macOS runners at that exact commit: it requires a
+# successful push run of release-shadow.yml on main for the pinned commit, downloads its
+# artifact, checks it against the artifact's SHA256SUMS and the version line, packages
+# those binaries unchanged and creates the release with gh. A missing, running or failed
+# run refuses.
+#
+# --local-build is the fallback (the previous behavior): from a fresh checkout of the
+# commit it builds both macOS targets, runs the whole battery against this machine's
+# target (with acceptance/reuso.sh's per-tree reuse) and packages those.
+#
+# It does not publish to brew, crates.io or npm.
 set -u
 
 refuse() { # refuse <what> <why> <next>: three lines, exits 1
@@ -16,7 +26,12 @@ refuse() { # refuse <what> <why> <next>: three lines, exits 1
   exit 1
 }
 
-[ $# -eq 1 ] || refuse "usage: release/publish.sh <version>" \
+LOCAL=0
+case $# in
+  1) ;;
+  2) [ "$2" = --local-build ] && LOCAL=1 ;;
+esac
+{ [ $# -eq 1 ] || [ "$LOCAL" = 1 ]; } || refuse "usage: release/publish.sh <version> [--local-build]" \
   "a release is of one version, given once" "run with the version, for example 1.2.0 or v1.2.0"
 VERSION="${1#v}"
 printf '%s\n' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || refuse \
@@ -73,57 +88,105 @@ TMPROOT="${TMPDIR:-/tmp}"; TMPROOT="${TMPROOT%/}"
 WORK=$(mktemp -d "$TMPROOT/shipcraft-publish.XXXXXX") || { echo "publish.sh: mktemp failed" >&2; exit 2; }
 trap 'rm -rf "$WORK"' EXIT
 trap 'exit 130' INT TERM
-SRC="$WORK/src"
-{ git clone -q --no-checkout "$ROOT" "$SRC" && git -C "$SRC" checkout -q --detach "$SHA"; } \
-  || refuse "could not make a fresh checkout of $SHA" \
-    "the release comes from its own checkout, which the runner's checkout does not change" \
-    "check the space in $TMPROOT and run again"
+if [ "$LOCAL" = 1 ]; then
+  SRC="$WORK/src"
+  { git clone -q --no-checkout "$ROOT" "$SRC" && git -C "$SRC" checkout -q --detach "$SHA"; } \
+    || refuse "could not make a fresh checkout of $SHA" \
+      "the release comes from its own checkout, which the runner's checkout does not change" \
+      "check the space in $TMPROOT and run again"
 
-if [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = 1 ]; then
+  if [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = 1 ]; then
+    PLATFORM=aarch64-apple-darwin; OTHER=x86_64-apple-darwin
+  else
+    PLATFORM=x86_64-apple-darwin; OTHER=aarch64-apple-darwin
+  fi
+
+  # ---------------------------------------------------------------- build and test
+  export CARGO_TARGET_DIR="$SRC/nucleo/target"
+  for target in aarch64-apple-darwin x86_64-apple-darwin; do
+    (cd "$SRC/nucleo" && nice -n 10 cargo build --release --locked -j 4 --target "$target") \
+      && [ -x "$CARGO_TARGET_DIR/$target/release/shipcraft" ] \
+      || refuse "the build for $target failed" \
+        "the release carries both macOS targets" \
+        "install the target (rustup target add $target), check the build and run again"
+  done
+  BIN="$CARGO_TARGET_DIR/$PLATFORM/release/shipcraft"
+
+  BATTERY=""
+  if [ -f "$SRC/acceptance/reuso.sh" ]; then
+    . "$SRC/acceptance/reuso.sh"
+    BATTERY=$(acceptance_cached_result "$SRC" HEAD) || BATTERY=""
+  fi
+  if [ -n "$BATTERY" ]; then
+    echo "publish.sh: battery reused for this tree: $BATTERY"
+  else
+    (cd "$SRC" && nice -n 10 bash acceptance/run.sh "$BIN" all) || refuse \
+      "the whole battery is red against $PLATFORM" \
+      "a release only comes from a commit with a green battery" \
+      "fix it on main through a PR and run again; nothing was published"
+    BATTERY="green in this run"
+  fi
+
+  # ---------------------------------------------------------------- package
+  OUT="$WORK/out"; mkdir -p "$OUT"
+  for target in aarch64-apple-darwin x86_64-apple-darwin; do
+    mkdir -p "$WORK/pkg/$target" && cp "$CARGO_TARGET_DIR/$target/release/shipcraft" "$WORK/pkg/$target/shipcraft" \
+      && chmod 755 "$WORK/pkg/$target/shipcraft" \
+      && COPYFILE_DISABLE=1 tar -czf "$OUT/shipcraft-$VERSION-$target.tar.gz" -C "$WORK/pkg/$target" shipcraft \
+      || refuse "could not package $target" "the release carries one package per target" \
+        "check the space in $TMPROOT and run again; nothing was published"
+  done
+  (cd "$OUT" && shasum -a 256 "shipcraft-$VERSION-aarch64-apple-darwin.tar.gz" \
+    "shipcraft-$VERSION-x86_64-apple-darwin.tar.gz" > SHA256SUMS) \
+    || refuse "could not write SHA256SUMS" "whoever installs checks the package's sum" \
+      "run again; nothing was published"
+else
+  # -------------------------------------------------------------- the CI binaries (POC-023)
   PLATFORM=aarch64-apple-darwin; OTHER=x86_64-apple-darwin
-else
-  PLATFORM=x86_64-apple-darwin; OTHER=aarch64-apple-darwin
+  RUN=$(gh run list --workflow release-shadow.yml --branch main --event push --commit "$SHA" \
+    --json databaseId,status,conclusion -L 20 \
+    --jq '[.[] | select(.status == "completed" and .conclusion == "success")][0].databaseId // empty' 2>/dev/null) \
+    || refuse "could not list the release-shadow runs for $SHA (gh run list)" \
+      "the release publishes the binaries the shadow run built and tested at this commit" \
+      "check gh auth and the network and run again, or run with --local-build"
+  [ -n "$RUN" ] || refuse "no successful release-shadow run for $SHA" \
+    "the published binary must be the one the whole battery passed on, at this exact commit" \
+    "wait for the release-shadow run on main to pass (gh run list --workflow release-shadow.yml), rerun it if it failed, or run with --local-build"
+  echo "publish.sh: binaries from release-shadow run $RUN"
+  CI="$WORK/ci"
+  gh run download "$RUN" -n "shipcraft-darwin-$SHA" -D "$CI" >/dev/null 2>&1 \
+    || refuse "could not download the artifact shipcraft-darwin-$SHA of run $RUN" \
+      "the release publishes those exact binaries" "check gh and the run's artifacts and run again, or run with --local-build"
+  (cd "$CI" && shasum -a 256 -c SHA256SUMS >/dev/null 2>&1) || refuse \
+    "the artifact of run $RUN does not match its SHA256SUMS" \
+    "the published binary must be byte for byte the tested one" "rerun the release-shadow workflow and run again"
+  for target in aarch64-apple-darwin x86_64-apple-darwin; do
+    [ -f "$CI/$target/shipcraft" ] || refuse "the artifact of run $RUN has no $target binary" \
+      "the release carries both macOS targets" "rerun the release-shadow workflow and run again"
+  done
+  chmod 755 "$CI"/*/shipcraft
+  if [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = 1 ]; then
+    LINE=$("$CI/aarch64-apple-darwin/shipcraft" --version 2>/dev/null)
+    case "$LINE" in
+      "shipcraft $VERSION (${SHA:0:12})"*) ;;
+      *) refuse "the CI binary says '$LINE', not shipcraft $VERSION (${SHA:0:12})" \
+        "the release's shipcraft --version must say the tag's version and commit" "rerun the release-shadow workflow and run again" ;;
+    esac
+  fi
+  BATTERY="green in release-shadow run $RUN (5 macOS shards, against this exact uploaded binary)"
+  OUT="$WORK/out"; mkdir -p "$OUT"
+  for target in aarch64-apple-darwin x86_64-apple-darwin; do
+    mkdir -p "$WORK/pkg/$target" && cp "$CI/$target/shipcraft" "$WORK/pkg/$target/shipcraft" \
+      && chmod 755 "$WORK/pkg/$target/shipcraft" \
+      && COPYFILE_DISABLE=1 tar -czf "$OUT/shipcraft-$VERSION-$target.tar.gz" -C "$WORK/pkg/$target" shipcraft \
+      || refuse "could not package $target" "the release carries one package per target" \
+        "check the space in $TMPROOT and run again; nothing was published"
+  done
+  (cd "$OUT" && shasum -a 256 "shipcraft-$VERSION-aarch64-apple-darwin.tar.gz" \
+    "shipcraft-$VERSION-x86_64-apple-darwin.tar.gz" > SHA256SUMS) \
+    || refuse "could not write SHA256SUMS" "whoever installs checks the package's sum" \
+      "run again; nothing was published"
 fi
-
-# ---------------------------------------------------------------- build and test
-export CARGO_TARGET_DIR="$SRC/nucleo/target"
-for target in aarch64-apple-darwin x86_64-apple-darwin; do
-  (cd "$SRC/nucleo" && nice -n 10 cargo build --release --locked -j 4 --target "$target") \
-    && [ -x "$CARGO_TARGET_DIR/$target/release/shipcraft" ] \
-    || refuse "the build for $target failed" \
-      "the release carries both macOS targets" \
-      "install the target (rustup target add $target), check the build and run again"
-done
-BIN="$CARGO_TARGET_DIR/$PLATFORM/release/shipcraft"
-
-BATTERY=""
-if [ -f "$SRC/acceptance/reuso.sh" ]; then
-  . "$SRC/acceptance/reuso.sh"
-  BATTERY=$(acceptance_cached_result "$SRC" HEAD) || BATTERY=""
-fi
-if [ -n "$BATTERY" ]; then
-  echo "publish.sh: battery reused for this tree: $BATTERY"
-else
-  (cd "$SRC" && nice -n 10 bash acceptance/run.sh "$BIN" all) || refuse \
-    "the whole battery is red against $PLATFORM" \
-    "a release only comes from a commit with a green battery" \
-    "fix it on main through a PR and run again; nothing was published"
-  BATTERY="green in this run"
-fi
-
-# ---------------------------------------------------------------- package
-OUT="$WORK/out"; mkdir -p "$OUT"
-for target in aarch64-apple-darwin x86_64-apple-darwin; do
-  mkdir -p "$WORK/pkg/$target" && cp "$CARGO_TARGET_DIR/$target/release/shipcraft" "$WORK/pkg/$target/shipcraft" \
-    && chmod 755 "$WORK/pkg/$target/shipcraft" \
-    && COPYFILE_DISABLE=1 tar -czf "$OUT/shipcraft-$VERSION-$target.tar.gz" -C "$WORK/pkg/$target" shipcraft \
-    || refuse "could not package $target" "the release carries one package per target" \
-      "check the space in $TMPROOT and run again; nothing was published"
-done
-(cd "$OUT" && shasum -a 256 "shipcraft-$VERSION-aarch64-apple-darwin.tar.gz" \
-  "shipcraft-$VERSION-x86_64-apple-darwin.tar.gz" > SHA256SUMS) \
-  || refuse "could not write SHA256SUMS" "whoever installs checks the package's sum" \
-    "run again; nothing was published"
 cat > "$WORK/notes.md" <<EOF
 shipcraft $VERSION, from commit $SHA.
 
