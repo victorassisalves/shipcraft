@@ -275,18 +275,18 @@ if c!='missing-log':
     if c in ('bom','bom-crlf'): content='\ufeff'+content
     p.write_bytes(content.encode())
 before=p.read_bytes() if p.exists() else None
-# Trap external command use: report must need neither Git history nor a service.
+# Git may be read; network services and agents remain forbidden.
 env=os.environ.copy(); env['TZ']='Pacific/Honolulu'
 if c=='offline':
     trap=pathlib.Path(cw)/'forbidden'; trap.mkdir()
     for tool in ('git','gh','codex','claude','gemini'):
-        q=trap/tool; q.write_text('#!/bin/sh\necho forbidden >> "'+str(pathlib.Path(cw)/'calls')+'"\nexit 97\n'); q.chmod(0o755)
+        q=trap/tool; q.write_text('#!/bin/sh\n'+('' if tool=='git' else 'echo forbidden >> "'+str(pathlib.Path(cw)/'calls')+'"\n')+'exit 97\n'); q.chmod(0o755)
     env['PATH']=str(trap)+os.pathsep+env['PATH']
 a=subprocess.run([binary,'report']+([] if c=='text' else ['--json']),capture_output=True,text=True,env=env)
 print(a.stdout); print(a.stderr,file=sys.stderr)
 assert a.returncode==0, ('report must never refuse',a.returncode)
 assert (p.read_bytes() if p.exists() else None)==before, 'report changed log'
-assert not (pathlib.Path(cw)/'calls').exists(), 'report called external service/history'
+assert not (pathlib.Path(cw)/'calls').exists(), 'report called external service/agent'
 if c=='text':
     first=a.stdout.splitlines()[0].lower()
     assert 'machine' in first or 'local' in first, first
@@ -295,14 +295,14 @@ if c=='text':
     sys.exit()
 out=[json.loads(s) for s in a.stdout.splitlines()]
 assert out and out[0].get('kind')=='meta', 'meta must be first'
-assert all(isinstance(r,dict) and r.get('kind') in ('meta','lock','day','gap') for r in out), out
+assert all(isinstance(r,dict) and r.get('kind') in ('meta','lock','day','dora','gap') for r in out), out
 # JSON field spelling follows the fixed readings in docs/spec.md (44318a0).
 meta=out[0]; locks={r['lock']:r for r in out if r['kind']=='lock'}; days=[r for r in out if r['kind']=='day']; gaps=[r for r in out if r['kind']=='gap']
 observed=[r for r in rows if not r.get('escape',False)]
 assert meta['first_at']==(min(r['at'] for r in observed) if observed else None), meta
 assert meta['last_at']==(max(r['at'] for r in observed) if observed else None), meta
 if c in ('empty','missing-log','escape-only','blank-only'):
-    assert len(out)==1, out
+    assert [r['kind'] for r in out]==['meta','dora'], out
     sys.exit()
 a=locks['lock-38-A']
 def fields(**expected):
@@ -337,7 +337,7 @@ if c in ('corrupt','corrupt-last','nonobject'):
     assert [g['line'] for g in gaps]==([2,4] if c in ('corrupt','nonobject') else [4]),gaps
     assert all(isinstance(g.get('reason'),str) and g['reason'] for g in gaps),gaps
     assert a['red_to_merge']==100,a
-    assert [r['kind'] for r in out]==sorted([r['kind'] for r in out],key=['meta','lock','day','gap'].index),out
+    assert [r['kind'] for r in out]==sorted([r['kind'] for r in out],key=['meta','lock','day','dora','gap'].index),out
 if c in ('blank-lines','bom','crlf','bom-crlf','ignored-escape'):
     fields(red_at=100,close_at=140,merge_at=200,red_to_merge=100)
     assert not gaps and set(locks)=={'lock-38-A'},out
