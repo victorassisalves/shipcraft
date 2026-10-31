@@ -234,7 +234,7 @@ PY
       want="red not set (the orchestrator's choice); green not set (the orchestrator's choice); review codex"
       case "$c" in
         status-default) i64_config '' absent ;;
-        status-off) tset execution review '"off"' ;;
+        status-off) tset execution review '"off"';want="red not set (the orchestrator's choice); green not set (the orchestrator's choice); review off" ;;
         status-strings) i64_config $'[roles]\nred = "gemini"\ngreen = "claude"\nreview = "codex"';want='red gemini; green claude; review codex' ;;
         status-inline) i64_config $'[roles]\nred = {agent="codex",model="r64",effort="minimal"}\ngreen = {agent="claude",model="g64",effort="max"}\nreview = {agent="gemini",model="v64"}';want='red codex (r64, effort minimal); green claude (g64, effort max); review gemini (v64)' ;;
         status-section) i64_config $'[roles.review]\nagent="claude"\nmodel="m64"\neffort="xhigh"';want="red not set (the orchestrator's choice); green not set (the orchestrator's choice); review claude (m64, effort xhigh)" ;;
