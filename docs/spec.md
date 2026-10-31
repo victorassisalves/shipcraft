@@ -718,6 +718,44 @@ Our own items 70 to 73 (2026-10-31): the Codex RED ran in its `workspace-write` 
    - The steps are handed over as text: the user, not Shipcraft, decides which step already succeeded, reads the lock path `red` prints, and resolves a staged-content mismatch after a refused commit (a formatter that rewrote a file); the hook and `shipcraft/ci` still judge the result.
    - The session that hands the command over does not verify the commit; the session the user talks to checks it before the next phase, as item 70's line says.
 
+### The release publishes the binaries CI tested (item 78)
+
+POC-023 ran `release-shadow.yml` beside `release/publish.sh` on two releases. On 2.25.0 the CI path was ready 12.6 min earlier, and on 2.30.0 20.0 min earlier. The battery verdicts were identical (2488/2488 and 2694/2694), with the same version line and the same smoke run. Its automatic rule says keep (2026-10-31). Today `publish.sh` builds both targets on the releaser's Mac and runs the whole battery there (item 21's release cases, `v1-21.release-*`). This item makes it publish the binaries the shadow workflow built and tested at the tagged commit. The local path stays as an explicit fallback.
+
+1. **The CI path, by default.** `release/publish.sh <version>` keeps every check item 21 makes before building: the version syntax, macOS, the tools on `PATH`, HEAD equal to the remote's `main`, a clean tree, the version equal to `nucleo/Cargo.toml`'s, and the tag still free on the remote. Then, instead of the fresh checkout, the build and the battery:
+   - **The run.** It lists the runs of the `release-shadow.yml` workflow for branch `main`, event `push` and the pinned commit: `gh run list --workflow release-shadow.yml --branch main --event push --commit <sha> --json databaseId,status,conclusion`. It takes the most recent one whose `status` is `completed` and `conclusion` is `success`. If `gh` fails, refuse (`could not list the release-shadow runs`). If no such run exists (missing, still running or failed), refuse (`no successful release-shadow run for <sha>`), with a Next that names waiting, rerunning and `--local-build`. Nothing is published.
+   - **The artifact.** It downloads the artifact `shipcraft-darwin-<sha>` of that run (`gh run download <id> -n shipcraft-darwin-<sha>`). It holds `aarch64-apple-darwin/shipcraft`, `x86_64-apple-darwin/shipcraft` and `SHA256SUMS`, the files the workflow uploads. It requires both binaries to be present and `shasum -a 256 -c SHA256SUMS` to pass. A failed download, a missing binary or a checksum mismatch refuses, naming the run, and nothing is published.
+   - **The version line.** On an arm64 Mac, `aarch64-apple-darwin/shipcraft --version` must start with `shipcraft <version> (<first 12 characters of the pinned commit>)`; anything else refuses. On an Intel Mac this check is skipped, since the arm64 binary cannot run.
+   - **Packaging and publishing.** As item 21 does today: one `tar.gz` per target holding only the executable `shipcraft`, a `SHA256SUMS` over the two archives, `gh release create` with the same rollback on a failure after creation. The release notes say the battery ran green in release-shadow run `<id>` (5 macOS shards, against the uploaded arm64 binary), and that the x86_64 binary was only built.
+2. **`--local-build`.** `release/publish.sh <version> --local-build` is item 21's path, unchanged: a fresh checkout of the pinned commit, both builds, the whole battery against this machine's target (with `acceptance/reuso.sh`'s reuse), packaging and publishing, with today's notes. Any other second argument, or more than two, is the usage refusal.
+3. **Current behavior** on the paths this item touches (rule 14):
+   - The checks before building, their three-line refusals, and that a refused run publishes nothing: keep.
+   - With one argument, the fresh checkout, both local builds and the local battery: change, as point 1 says. With `--local-build`: keep.
+   - Packaging (only the executable, one archive per target, `SHA256SUMS`), `gh release create`, deleting a half-made release whose URL came back, the three-line guidance when no URL came back, and the final `publish.sh: <tag> published at commit <sha>: <url>` line: keep.
+   - It publishes nothing to brew, crates.io or npm: keep. `release/npm.sh` reads the GitHub release, so it is unchanged.
+   - `install.sh` and the installation cases (`v1-21.instala-*`, `v1-21.remove`): keep.
+   - `release-shadow.yml`: keep its jobs, artifact name and layout. Only its header comment changes.
+4. **Touches.**
+   - **Assertions that change:** item 21's release cases that run `publish.sh` and assert the local build or the local battery (`v1-21.release-comum`, `release-prefixo`, `release-bateria`, `release-build`, `release-preso`, `release-rollback`, `release-incerto`, and any other `release-*` case that reaches the build). They now run with `--local-build`, and every assertion stays. The RED lists each one it changes. The cases that refuse before the build (`release-formato`, `release-suja`, `release-versao`, `release-head`, `release-tag`, `release-remoto`, `release-tags-falha`) stay unchanged, without the flag.
+   - **Must keep passing unchanged:** `v1-21.versao-fora`, `v1-21.versao-min-numerica`, every `v1-21.instala-*` case and `v1-21.remove`.
+   - **New cases:** the CI path with a fake `gh` that answers `run list` and `run download` with the real JSON and artifact shapes:
+     - a successful run is published;
+     - no run, a running run and a failed run refuse;
+     - a `gh` failure refuses;
+     - a missing binary and a checksum mismatch refuse;
+     - a version line naming another commit refuses;
+     - the Intel host skips the version check;
+     - `--local-build` takes item 21's path;
+     - a wrong second argument gets the usage refusal.
+     Every refusal publishes nothing.
+5. **Measure and revert.**
+   - **Metric:** release ready (the tag published) at most 15 min after the merge to main, on the next 3 releases.
+   - **Revert:** `--local-build` for one release; a PR that restores the previous `publish.sh` for good.
+6. **Known limits.**
+   - The battery runs against the arm64 binary only, as it did locally on an arm64 Mac. The x86_64 binary is built in CI and not tested.
+   - Artifacts expire after GitHub's retention (90 days by default). An older commit needs the workflow rerun, or `--local-build`.
+   - The binaries are not reproducible builds: the published bytes are CI's, not a local rebuild's.
+
 ### Workspace suites run from the root when the root vitest config defines the projects (item 71)
 
 Wrong-verdict note: since item 9 (2.0.0), `init` writes each Node workspace suite to run inside its package. Found on the Forge, the second adopter (2.25.0, deluge-forge-platform PR #805, 2026-10-31): its root `vitest.config.ts` carries the worker caps (pool options vitest reads only from the root config), a `globalSetup` that points `TMPDIR` at one folder per run and a guard against writes to the real home folder, and its `vitest.workspace.ts` lists one project per package. A run from inside a package skips all of them. The Forge rewrote every suite by hand to run from the root with `--project <name>`. The battery should have caught it: item 51's fixtures have a root workspace file, but they write `.shipcraft.toml` before `init`, so no case ran `init` on such a layout.
