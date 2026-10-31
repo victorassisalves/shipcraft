@@ -347,7 +347,7 @@ Each command is `shipcraft <command>`. Exit codes, unless the row says otherwise
 | `review` | Reviews local HEAD and prints the verdict; publishes nothing. Exit `0` on approval; refuses `review-changes-requested`, `review-error`, `review-off`. |
 | `review --pr <n>` | Reviews any PR in an isolated copy and publishes `shipcraft/review` and a comment. Refuses `pr-from-fork`. |
 | `merge <pr> [--no-review "<reason>"]` | The merge gate (section 5). Refuses `pr-not-open`, `merge-without-ci`, `merge-without-review`, `no-review-without-reason`. |
-| `status` | Prints the layers, review agent, hook state, open locks, and one line with the real branch protection level. |
+| `status` | Prints the layers, review agent (none when review is off, item 73), hook state, open locks, and one line with the real branch protection level. |
 | `report [--json]` | Prints the flow's numbers per lock and per day from the run log (section 8, item 38). Reads only; never refuses. |
 
 `init` writes no run-log row; `red` and `close` write one each (item 38).
@@ -627,21 +627,24 @@ Two small field findings. The Forge (2.25.0, `review = "off"`, no `[roles] revie
 1. **`status` with review off.** When `[execution] review` is `"off"`:
    - the layers line ends `; review off`, with no `(agent ...)`;
    - the roles line's review entry is `review off`, whatever `[roles] review` holds.
-   With review `"local"` (or any other value that is not `"off"`) both lines stay as today. Nothing else in `status` changes.
+   With review `"local"` (or any other value that is not `"off"`) both lines stay as today. Nothing else in `status` changes. This supersedes item 64's display of the review role when review is off; item 64's validation and defaults of `[roles] review` are unchanged, and `pr`, `review` and `merge` still read it as today.
 2. **`pr`'s GitHub CI wait.** While `pr` waits for GitHub CI (`ci = "github"` with review local, the `waiting for ... at <sha> (up to N s)` line of today), it prints one line on stdout each time what it reads changes, including the first read:
    `shipcraft: CI at <elapsed> s: shipcraft/ci <state>[; <check> <word>]...`
    - `<elapsed>` is the whole seconds since the wait started, rounded down;
-   - `<state>` is the `shipcraft/ci` status state GitHub returns (`pending`, `success`, `failure`, `error`), or `no status` when there is none;
+   - `<state>` is the `shipcraft/ci` state as today's reader (`gh::statuses`) returns it (`pending`, `success`, `failure`, `error`, or any other string GitHub sends, as read), `no status` when that reader finds no `shipcraft/ci` entry, and `no state` when it returns an empty string; a `gh` failure in that reader ends `pr` as today (exit 2, no line);
    - then one `; <check> <word>` per name in `[execution] suite_checks`, in config order, `<word>` one of `green`, `failed`, `pending`, `missing`, `unreadable` as the wait reads them today;
-   - the line is printed only when this text, without `<elapsed>`, differs from the last one printed; reads that see the same states print nothing.
+   - when `<state>` is `failure` or `error`, the wait stops today before reading any check: the line then has no check entries, and no check is read;
+   - `<elapsed>` is sampled once per read, after all of that read's calls return and just before printing; a slow read may print a value above the limit;
+   - a line is printed only when the read's state vector (the `shipcraft/ci` state or its absence, then each check's word in config order) differs from the last one printed; status descriptions, run ids and ordering never trigger a line, and an unreadable check is the word `unreadable` whatever the reason.
    The lines that end the wait (CI failed, a check failed, the limit passed) and the wait's outcome, its exit code, its run-log row and its polling interval stay as today. The line is printed before the wait acts on what it read, so the read that ends the wait also prints its line when its states changed.
 3. **Current behavior** on the paths this item touches (rule 14):
    - `status`: the branch line, the layers line with `ci ...` (and item 62's suite checks), the roles line with item 64's red and green entries, the hook line, the open-locks line, the protection line, exit codes, no file written, no run-log row: keep. The review part of both lines when review is `"off"`: change, as in point 1.
    - `pr`'s wait: the `waiting for` line, polling every 2 s up to `ci_timeout`, stopping on `failure` or `error` of `shipcraft/ci` or a failed check, the `ci-github` and `ci-github-no-status` outcomes and their text, the review running only after CI is green, and everything `pr` prints before and after the wait: keep. New lines during the wait: change, as in point 2.
    - `pr` with `ci = "local"` or `"off"`, `review`, `merge` and `ci`: keep; they get no new line.
+   - A `gh` error while reading `shipcraft/ci` during the wait: `shipcraft: error: ...` on stderr, exit 2, no review and no summary comment; the push and the PR created or updated before stay; a `pr` row with `code: "error"` is appended to `.git/shipcraft/runs.jsonl` (a logging failure is ignored), and nothing is rolled back: keep.
 4. **Touches.**
    - **Assertions that change:** `v1-64.status-off` (`acceptance/lib/item64.sh`), which expects the roles line's review entry `review codex` with review off: it now expects `review off`.
-   - **Must keep passing unchanged:** every other `v1-64.status-*` case; `v1-62.status`, `v1-62.status-empty`, `v1-5.4-status-nivel-de-protecao`; item 62's GitHub wait cases (`v1-62.*`) and item 3's wait cases in `acceptance/lib/v1.sh` (the review runs once after the status arrives; the wait's limit), whose assertions on the wait's outcome and lines stay; item 41's local CI queue cases.
+   - **Must keep passing unchanged:** every other `v1-64.status-*` case; `v1-64.min-valid`, `v1-64.min-patch`, `v1-64.min-leading-zero`, `v1-64.min-legacy`, `v1-64.min-no-roles`; the hook-state status cases `v1-20.status.*`, `v1-15c.status-sem-exec-borda`, `v1-25.husky.status-completo`, `v1-25.pre.status-completo` and the other item 20 and 25 status variants; `v1-62.status`, `v1-62.status-empty`, `v1-5.4-status-nivel-de-protecao`; item 62's GitHub wait cases (`v1-62.*`) and item 3's wait cases in `acceptance/lib/v1.sh` (the review runs once after the status arrives; the wait's limit), whose assertions on the wait's outcome and lines stay; item 41's local CI queue cases.
 5. **Measure and revert.**
    - **Metric:** no adopter report of a reviewer named while review is off; on this repository's next 5 `pr` runs, each CI wait prints at least one state line before its outcome.
    - **Revert:** a release drops the lines.
