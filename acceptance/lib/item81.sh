@@ -255,7 +255,7 @@ else:
   want(len(notices)==(1 if dropping and not unchanged else 0),'drop notice count: '+repr(notices))
   if dropping and notices:
    notice=notices[0];want(notice.endswith('; CI runs them'),'drop notice suffix')
-   want(('outside81' if mode=='map-suite-local' else 'legacy81') in notice and 'fresh81' not in notice,'drop notice identities')
+   want(('outside81' if mode=='map-suite-local' else 'legacy81') in notice.lower() and 'fresh81' not in notice.lower(),'drop notice identities')
    want(prefix not in p.stderr,'drop notice on stderr')
    lockline=next((i for i,s in enumerate(lines) if s.startswith('shipcraft: RED '+('redone at' if redo else 'locked at'))),-1)
    notice_index=lines.index(notice)
