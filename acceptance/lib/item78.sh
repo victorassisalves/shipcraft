@@ -4,7 +4,7 @@ item78_cases() {
     no-run running failed list-fails download-fails expired no-retry \
     json-text json-object json-null json-row json-id-zero json-id-negative json-id-bool json-id-float json-id-string json-status json-conclusion json-missing json-late-invalid \
     missing-arm missing-intel directory-arm directory-intel symlink-arm symlink-intel checksum-arm checksum-intel sums-missing sums-line-missing sums-extra sums-duplicate sums-uppercase sums-star sums-space sums-path sums-blank \
-    version-commit version-number version-extra version-no-newline version-fails version-stderr \
+    version-commit version-number version-extra version-nul version-no-newline version-fails version-stderr \
     origin-local origin-other-host origin-lookalike origin-http \
     rollback uncertain package-fails sums-write-fails local-build local-rollback \
     usage-wrong usage-third; do
@@ -91,6 +91,7 @@ for target in targets:
     if scenario == 'version-commit': version = 'shipcraft 1.2.10 (ffffffffffff)\n'
     if scenario == 'version-number': version = 'shipcraft 1.2.11 ('+pinned[:12]+')\n'
     if scenario == 'version-extra': version += 'extra\n'
+    if scenario == 'version-nul' and target == targets[0]: version = version.replace('shipcraft', 'ship\x00craft')
     if scenario == 'version-no-newline': version = version.rstrip('\n')
     # Executable payload is an OS-independent Python script. Download drops mode.
     body = ('#!'+sys.executable+'\nimport json,os,sys\n'
@@ -209,7 +210,7 @@ assert 'publish.sh: v1.2.10 from commit '+pinned in out, 'start line lost'
 refusal = scenario in ('no-run','running','failed','list-fails','download-fails','expired','no-retry',
                        'package-fails','sums-write-fails','rollback','uncertain','local-rollback') or scenario in bad or scenario.startswith(
                            ('missing-','directory-','symlink-','checksum-','sums-')) or scenario in (
-                               'version-commit','version-number','version-extra','version-no-newline','version-fails')
+                               'version-commit','version-number','version-extra','version-nul','version-no-newline','version-fails')
 downloads = [c for c in calls('gh') if c['args'][:2] == ['run','download']]
 if refusal:
     refused(p); assert p.returncode == 1, p.returncode
