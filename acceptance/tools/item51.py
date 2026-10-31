@@ -6,11 +6,17 @@ from pathlib import Path
 import shlex
 import subprocess
 import sys
+import time
+
+# A network step (npm install from the registry) gets its own, longer limit: GitHub's macOS
+# runners took more than 120 s on it once (POC-023). Each run prints its duration.
+NET_TIMEOUT = int(os.environ.get('SHIPCRAFT_ACCEPTANCE_NET_TIMEOUT', '600'))
 
 
-def run(*args, ok=True):
-    p = subprocess.run(args, capture_output=True, text=True, timeout=120)
-    print('$', shlex.join(args), '\n', p.stdout, p.stderr, flush=True)
+def run(*args, ok=True, timeout=120):
+    start = time.monotonic()
+    p = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+    print('$', shlex.join(args), f'[{time.monotonic() - start:.1f} s of {timeout}]', '\n', p.stdout, p.stderr, flush=True)
     if ok:
         assert p.returncode == 0, (args, p.returncode)
     return p
@@ -38,7 +44,7 @@ def main(case, binary):
     git('config', 'user.name', 'Acceptance RED')
     git('config', 'user.email', 'red@example.invalid')
     put('package.json', '{"private":true,"type":"module","devDependencies":{"vitest":"2.1.9"}}\n')
-    run('npm', 'install', '--no-audit', '--no-fund', '--loglevel=error')
+    run('npm', 'install', '--no-audit', '--no-fund', '--loglevel=error', timeout=NET_TIMEOUT)
     os.environ['ITEM51_REAL'] = str(root / 'node_modules/vitest/vitest.mjs')
     # The public command is still `vitest run ...`; the wrapper records actual
     # shell-split argv then delegates unchanged to the installed runner.
