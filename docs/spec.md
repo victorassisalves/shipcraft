@@ -684,6 +684,38 @@ POC-021's after runs on 2.25.0 (2026-10-31): Codex, running in its `workspace-wr
    - The user starts the phase by hand, so the session that asked cannot check the phase was run with the role `status` names.
    - The command carries the folder, not the shell environment (a virtualenv, a Node version manager, `GOWORK`): the line asks for a terminal where the project's tests run, and a wrong one makes the phase fail or refuse, not pass.
    - A project that edited its block keeps its own text.
+### `red` and the commit run outside an agent's sandbox (item 74)
+
+Our own items 70 to 73 (2026-10-31): the Codex RED ran in its `workspace-write` sandbox. There `shipcraft red` took 2919 s for 113 cases, against 42 to 213 s outside it. The sandbox forbids `nice`, and git could not write its index lock in a linked worktree, so the RED could not commit. Item 70's line covers a phase session that cannot be started, not a session that runs but sits in a sandbox. An adopter's sandboxed agent hits the same wall at `red` or at the commit, whose hook runs the locked tests. This item adds the path to the block.
+
+1. **The new line.** The current variants of item 70's block (the `shipcraft` and `npx -- shipcraft` forms) gain one line, right after item 70's line (the one that starts `- If you cannot start a phase's session`). Every other line stays, byte for byte, in its order. In the machine variant the line is:
+
+   ``- If you run in a sandbox (for example Codex's `workspace-write`), run `shipcraft red`, `shipcraft red --redo` and `git commit` (its hook runs the locked tests) outside it: inside, they can take many times longer, or fail when git cannot write its index. If you cannot leave the sandbox, write and check the tests or the code, then stop and give the user the exact commands to paste: `cd` to this checkout's absolute path, then the `shipcraft red` (or `shipcraft red --redo`) and `git add` and `git commit` with the files you changed and the lock, each argument you fill in written in single quotes as above. Change nothing after handing them over; continue when the user says they finished and the commit is on this branch.``
+
+   The outer double backticks only quote the line; the block holds it from `- If you run` to `on this branch.`, one line, ending with `\n`. The local variant is built by item 61's rule unchanged: every `` `shipcraft `` becomes `` `npx -- shipcraft ``, so the line names `npx -- shipcraft red` and `npx -- shipcraft red --redo` there; `git` is not changed. Item 61's root line stays where that rule puts it.
+2. **Known blocks.** The two current variants of item 70's block join the known blocks: the exact bytes `init` writes at commit e642432 (item 70's merge, version 2.26.0, unchanged through 2.29.0), machine and local. `init` replaces them with the new block under item 61's rules: kept bytes before and after, mode kept, the temporary-file write. The v2.25.0, v2.22.0 and 2.14.0 blocks stay known and are now upgraded to the new block. Every other case is unchanged (an edited block is kept with the differs notice). `CLAUDE.md`'s block does not change.
+3. **The briefs do not change.** `.shipcraft/briefs/red.md` and `green.md` keep item 68's body and rules, and their last line keeps naming the running version, as item 70 says.
+4. **Current behavior** on the paths this item touches (rule 14): item 70's list, point 4, unchanged in every entry, with these two readings:
+   - the block's text: change, as in point 1;
+   - the set of known blocks: change, as in point 2.
+5. **Touches.**
+   - **Assertions that change, and nothing else:** the expected current block text, which gains the line of point 1 in both variants, wherever an earlier case builds it:
+     - item 61's exact-text checks (`v1-61.block`, `v1-61.local-block`);
+     - item 68's block, upgrade and legacy cases (`v1-68.block`, `block-local`, `block-append`, `block-local-append`, `upgrade-{bare,local}-{bare,local}`, `legacy`, `legacy-local`);
+     - item 70's block and upgrade cases (`v1-70.block-{bare,local}`, `upgrade-{bare,local}-{bare,local}`, `upgrade-brief-fails-{bare,local}`, `write-fails-{bare,local}`, `write-partial-{bare,local}`) and its fixed points.
+     The RED adjusts only the expected text: `acceptance/lib/item61.sh`, `item68.sh`, `item70.sh` and their `pontos`.
+   - **The version:** `v1-62.version` and the other version cases item 69 lists read §11's contract, now 2.30.0; the release raises `nucleo/Cargo.toml` to 2.30.0.
+   - **New cases:** upgrades from item 70's variants in both directions (bare and local input, bare and local install), keeping item 68's and item 70's checks on prefix and suffix bytes, mode and the `CLAUDE.md` import.
+   - **Must keep passing unchanged:** every other `v1-70.*` case (`edited-*`, `refused-*`, `status-*`), and everything item 70's Touches list keeps.
+6. **Measure and revert.**
+   - **Metric:** in POC-021's next after runs, no sandboxed agent runs `shipcraft red` or a hooked commit inside its sandbox without saying so: each one runs them outside or hands the commands to the user.
+   - **Threshold:** 0 RED phases over 600 s caused by a sandbox, in those runs and in our own next 5 items.
+   - **Revert:** a release drops the line. Its block joins the known blocks so `init` upgrades it back.
+7. **Known limits.**
+   - The battery checks the text written, not whether an agent follows it.
+   - Shipcraft does not detect a sandbox; the agent has to know it is in one.
+   - A user who runs the handed-over commands is trusted to run them unchanged; the hook and `shipcraft/ci` still check the lock.
+
 ### Workspace suites run from the root when the root vitest config defines the projects (item 71)
 
 Wrong-verdict note: since item 9 (2.0.0), `init` writes each Node workspace suite to run inside its package. Found on the Forge, the second adopter (2.25.0, deluge-forge-platform PR #805, 2026-10-31): its root `vitest.config.ts` carries the worker caps (pool options vitest reads only from the root config), a `globalSetup` that points `TMPDIR` at one folder per run and a guard against writes to the real home folder, and its `vitest.workspace.ts` lists one project per package. A run from inside a package skips all of them. The Forge rewrote every suite by hand to run from the root with `--project <name>`. The battery should have caught it: item 51's fixtures have a root workspace file, but they write `.shipcraft.toml` before `init`, so no case ran `init` on such a layout.
@@ -1177,4 +1209,4 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.29.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.30.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
