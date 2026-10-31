@@ -132,8 +132,8 @@ fn run(args: &[&str]) -> Result<()> {
             let mut chosen = None;
             if redo {
                 // Item 46: every redo is a `red` row with `redo: true` and HEAD's lock id.
-                let (mut path, mut dropped) = (None, None);
-                let result = red::redo(&repo, base, all, &mut path, &mut dropped, &mut chosen);
+                let (mut path, mut dropped, mut left) = (None, None, None);
+                let result = red::redo(&repo, base, all, &mut path, &mut dropped, &mut chosen, &mut left);
                 let mut row = medicao::row(&repo, "red", started, &result);
                 row["redo"] = true.into();
                 if let Some(path) = &path {
@@ -141,6 +141,10 @@ fn run(args: &[&str]) -> Result<()> {
                 }
                 if let Some(dropped) = dropped {
                     row["rerun_dropped"] = dropped.into();
+                }
+                // Item 81: only when the lock was written.
+                if let Some(left) = &left {
+                    left.record(&mut row);
                 }
                 if let Some(chosen) = &chosen {
                     chosen.record(&mut row);
@@ -159,10 +163,12 @@ fn run(args: &[&str]) -> Result<()> {
             for (key, value) in fields {
                 row[key] = value;
             }
-            if let Ok((path, dropped)) = &result {
+            if let Ok((path, dropped, left)) = &result {
                 row["lock"] = medicao::lock_id(path).into();
                 // Item 53: how many cases the second run did not lock.
                 row["rerun_dropped"] = (*dropped).into();
+                // Item 81: the cases left out, or null when the base tree was unread.
+                left.record(&mut row);
             }
             // Item 55: how the first run was chosen, once it was decided.
             if let Some(chosen) = &chosen {
