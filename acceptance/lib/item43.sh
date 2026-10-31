@@ -12,11 +12,13 @@ i43_json() {
 import json,sys,hashlib,pathlib,re
 mode,path,*args=sys.argv[1:]; p=pathlib.Path(path); d=json.loads(p.read_text())
 def canonical(d):
- return dict(format=d['format'],state=d['state'],files=dict(sorted(d['files'].items())),cases=d['cases'],failing_at_red=d['failing_at_red'],seal='')
+ c=dict(format=d['format'],state=d['state'],files=dict(sorted(d['files'].items())),cases=d['cases'],failing_at_red=d['failing_at_red'])
+ if d['format']==4: c.update((k,d[k]) for k in ('kind','reported_at','fixes_release'))
+ c['seal']=''; return c
 def seal(d):
  return hashlib.sha256(json.dumps(canonical(d),ensure_ascii=False,separators=(',',':')).encode()).hexdigest()
 if mode=='verify':
- assert d['format']==3,d
+ assert d['format']==4,d
  for f in ['.shipcraft.toml','tests/test_slug.py','conftest.py','tests/helpers/util.py','tests/fixtures/expected.txt','pytest.ini','tests/fixtures/auth-data.txt']:
   assert f in d['files'],(f,d)
  for f,v in d['files'].items():
@@ -25,7 +27,7 @@ if mode=='verify':
  assert d['seal']==seal(d),(d['seal'],seal(d))
  sys.exit()
 if mode=='seal':
- assert d['format']==3,d
+ assert d['format']==4,d
  assert d['seal']==seal(d),(d['seal'],seal(d)); sys.exit()
 if mode=='same':
  old=json.loads(pathlib.Path(args[0]).read_text())
@@ -34,7 +36,10 @@ if mode=='same':
  assert d['seal']==seal(d),d
  sys.exit()
 if mode=='fixture':
- d['format']=int(args[0]); d['files']={f:('sha256:' if d['format']==3 else '')+v.removeprefix('sha256:') for f,v in d['files'].items()}
+ d['format']=int(args[0]);
+ if d['format'] in (2,3):
+  for k in ('kind','reported_at','fixes_release'): d.pop(k,None)
+ d['files']={f:('sha256:' if d['format']==3 else '')+v.removeprefix('sha256:') for f,v in d['files'].items()}
 if mode=='bad':
  f=sorted(d['files'])[0]; v=d['files'][f].removeprefix('sha256:'); kind=args[0]
  d['files'][f]={'bare':v,'uppercase':'sha256:'+v.upper(),'short':'sha256:'+v[:63],'prefix':'sha512:'+v,'whitespace':'sha256:'+v+' ','legacy-prefixed':'sha256:'+v}[kind]

@@ -238,7 +238,9 @@ PY
 import json,hashlib,pathlib,sys
 p=pathlib.Path(sys.argv[1]); d=json.loads(p.read_text())
 d['files']['tests/test_repair.py']='sha256:'+hashlib.sha256(pathlib.Path('tests/test_repair.py').read_bytes()).hexdigest()
-d['seal']=''; d['seal']=hashlib.sha256(json.dumps(dict(format=d['format'],state=d['state'],files=dict(sorted(d['files'].items())),cases=d['cases'],failing_at_red=d['failing_at_red'],seal=''),ensure_ascii=False,separators=(',',':')).encode()).hexdigest()
+c=dict(format=d['format'],state=d['state'],files=dict(sorted(d['files'].items())),cases=d['cases'],failing_at_red=d['failing_at_red'])
+if d['format']==4: c.update((k,d[k]) for k in ('kind','reported_at','fixes_release'))
+c['seal']=''; d['seal']=hashlib.sha256(json.dumps(c,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()
 p.write_text(json.dumps(d)+'\n')
 PY
   else i46_candidate; fi

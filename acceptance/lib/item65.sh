@@ -71,8 +71,9 @@ expected='shipcraft: red did not run the tests that may use the changed support 
 assert lines[i+1]==expected,(lines,expected)
 assert text.count('shipcraft: red did not run')==1,text
 r=[json.loads(x) for x in open('.git/shipcraft/runs.jsonl') if json.loads(x).get('layer')=='red']; assert len(r)==1,r
-r=r[0]; assert (r['selection'],r['selected_files'],r['fallback'])==('changed',len(paths)+1,None),r
-assert set(r)=={'at','branch','code','commit','fallback','layer','lock','result','secs','selected_files','selection','rerun_dropped'},r
+r=r[0]; assert (r.get('kind'),r.get('reported_at'),r.get('fixes_release'))==('feature',None,None),r
+assert (r['selection'],r['selected_files'],r['fallback'])==('changed',len(paths)+1,None),r
+assert set(r)=={'at','branch','code','commit','fallback','layer','lock','result','secs','selected_files','selection','rerun_dropped','kind','reported_at','fixes_release'},r
 version=re.search(r'^version = "([^"]+)"',Path(manifest).read_text(),re.M)[1]
 assert subprocess.check_output([binary,'--version'],text=True).strip().startswith('shipcraft '+version),version
 PYNATIVE
@@ -228,6 +229,8 @@ if mode!='log-fails':
  if code: keys.add('reason')
  else: keys.add('rerun_dropped')
  if redo: keys.add('redo')
+ else: keys.update(('kind','reported_at','fixes_release'))
+ if not redo: want((r.get('kind'),r.get('reported_at'),r.get('fixes_release'))==('feature',None,None),'fix row values')
  want(set(r)==keys,'red row gained/lost fields: '+repr(r))
  want(r.get('result')==('refused' if code else 'passed'),'row result')
  if redo: want(r.get('redo') is True,'redo flag')

@@ -46,7 +46,7 @@ def state(expected=1):
  ls=locks(); assert len(ls)==expected,ls
  if not ls: return
  d=json.loads(ls[0].read_text()); assert d['state']=='open',d
- assert set(d)=={'format','state','files','cases','failing_at_red','seal'},d
+ assert set(d)=={'format','state','files','cases','failing_at_red','kind','reported_at','fixes_release','seal'},d
  for f,h in d['files'].items(): assert h=='sha256:'+hashlib.sha256(Path(f).read_bytes()).hexdigest(),(f,h)
  assert d['cases'] and d['failing_at_red'],d
  expected_files={'.shipcraft.toml'}|{str(p) for _,root in current for p in Path(root+'/tests').glob('*') if p.is_file()}
@@ -76,6 +76,7 @@ def event(before,code='',redo=False):
  if code=='shipcraft-min': keys-={'selection','selected_files','fallback'}
  if code: keys.add('reason')
  if redo: keys.add('redo')
+ else: keys.update(('kind','reported_at','fixes_release'))
  assert set(r)==keys,(set(r),keys,r)
  if redo: assert r['redo'] is True,r
  assert r['branch']=='feature/item59' and r['commit']==git('rev-parse','HEAD') and r['secs']>=0,r
