@@ -1,7 +1,7 @@
 [package]
 license = "Apache-2.0"
 name = "shipcraft"
-version = "2.31.0"
+version = "2.33.0"
 edition = "2021"
 publish = false
 description = "Shipcraft v2 core: the GREEN cannot pass the suite by changing, deleting or skipping the RED's tests."
