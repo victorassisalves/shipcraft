@@ -270,7 +270,8 @@ if mode=='real':
  assert 'vitest.config.ts' not in lock['files'] and 'vitest.workspace.ts' not in lock['files'],lock
 if mode.startswith('check-fails-'):
  commit('chore: generated init71');base=git('rev-parse','HEAD');put('value71','changed\n');commit('feat: change71')
- if mode.endswith('log-fails'):Path('.git/shipcraft/runs.jsonl').mkdir()
+ if mode.endswith('log-fails'):
+  log=Path('.git/shipcraft/runs.jsonl');log.unlink(missing_ok=True);log.mkdir()
  phase='red' if mode.endswith('-red') else 'ci';before=len(rows())
  refused=run(binary,phase,*(['--base',base] if phase=='ci' else []),env=env,ok=False)
  assert refused.returncode==1

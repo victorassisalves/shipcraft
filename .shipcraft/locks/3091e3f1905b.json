@@ -59,7 +59,7 @@
     "acceptance/lib/item68.sh": "sha256:05ec6b339419c28aa8bc607adcf445fe101effed3b7ecf321faef12284075a31",
     "acceptance/lib/item69.sh": "sha256:fe091b461cb0e9e06e88cad20c72a831d768234590ad76146e51398fa6aea684",
     "acceptance/lib/item70.sh": "sha256:6a8ff3f1a2e0dc6f4e4a518e6cef30ece4f1c6c084b377bc4f6f55137337e429",
-    "acceptance/lib/item71.sh": "sha256:51c7fd1b23befe378ab4b82f152550017b3963f364e8c4f13eaaac2a018e4165",
+    "acceptance/lib/item71.sh": "sha256:73244a21edfc527ee600f67aa4154b0a09db09ca2bcad50319e0ed5d8dd2edea",
     "acceptance/lib/rename.sh": "sha256:a6ac8f0def7da9c3bd4f55793c12d19067e66841179cfa47fdb78bd6bdc6860a",
     "acceptance/lib/v1.sh": "sha256:0ce6e96ef2975138128b3ee3a922912d30dffdbc3c663fb1a280555e89a953aa",
     "acceptance/pontos/15a.md": "sha256:f1480266606c0a01f815315cb04ddea9544438df9dda618e06cf167ca9f971b2",
@@ -112,7 +112,7 @@
     "acceptance/pontos/68.md": "sha256:c0050d465be495c39d747038019072cb94a30d2e8cd761e17f364d90ca4fdadf",
     "acceptance/pontos/69.md": "sha256:2bb5f05197467af6d736ba54db3d912b9c90ff44529fb7c119f90f539867264e",
     "acceptance/pontos/70.md": "sha256:44ef886f6bda6450c47334dddd0741c8c31bee57af8f28d1a3ec16155b5277fe",
-    "acceptance/pontos/71.md": "sha256:359d3ccc15d88cc3b4619907310a24a0ce696658006de7e77a624415dc6c383c",
+    "acceptance/pontos/71.md": "sha256:4ef3802f03b4ee9deb38c6aa5d9e081675dfc464d2f63b7f6fa9c9c9ca9a4fc1",
     "acceptance/pontos/item25.md": "sha256:94107f93cd65f71ffacfa768d4924e3bcb6b3a9037d24086d8e4825ae9bc0f57",
     "acceptance/reuso.sh": "sha256:6a2bc0851b3170c442400bb0d0246c237380f392041448b4943afc76fd50d4c3",
     "acceptance/run.sh": "sha256:ef8431b29e8da9122a88fa13d4596594ef203644ded15208606e8859ebf3fe84",
@@ -360,5 +360,5 @@
     "acceptance:acceptance/lib/item71.sh::node::v1-71.unsafe-unicode",
     "acceptance:acceptance/lib/item71.sh::node::v1-71.wrong-field"
   ],
-  "seal": "14499b612ae26666c0949b27ca5493c94209051a4dcb4b3a64bcb02e4418a852"
+  "seal": "5fe2505d5320015cd986576e3d7da9ea2b832f7607aa60336ccd8557362451b3"
 }
