@@ -190,6 +190,14 @@ pub fn holding(
     cases.iter().map(|case| map.holder(case).ok_or(Fallback::CaseWithoutFile)).collect()
 }
 
+/// Item 81: the file (from the suite's root) that holds each of `cases`, in
+/// order, mapped once as `covered` maps over the `locked` files; None when the
+/// mapper finds no single map or any case maps to no file or to more than one.
+pub fn holders(dir: &Path, suite: &Suite, locked: &[String], present: &[String], cases: &[&str]) -> Option<Vec<String>> {
+    let map = coverage_map(dir, suite, locked, present, cases)?;
+    cases.iter().map(|case| map.holder(case)).collect()
+}
+
 /// Item 55: the hook's mapper for `cases` over the suite's `locked` files,
 /// reading the tree in `dir`; None when it finds no single map.
 fn coverage_map(dir: &Path, suite: &Suite, locked: &[String], present: &[String], cases: &[&str]) -> Option<Map> {

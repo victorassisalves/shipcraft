@@ -228,10 +228,12 @@ if mode!='log-fails':
  keys={'at','branch','code','commit','fallback','layer','lock','result','secs','selected_files','selection'}
  if code: keys.add('reason')
  else: keys.add('rerun_dropped')
+ if mode in ('monorepo-helper','overlap-uncovered','unmapped'): keys.add('unchanged_dropped')
  if redo: keys.add('redo')
  else: keys.update(('kind','reported_at','fixes_release'))
  if not redo: want((r.get('kind'),r.get('reported_at'),r.get('fixes_release'))==('feature',None,None),'fix row values')
  want(set(r)==keys,'red row gained/lost fields: '+repr(r))
+ if mode in ('monorepo-helper','overlap-uncovered','unmapped'): want(r.get('unchanged_dropped')==(2 if mode=='monorepo-helper' else 1),'unchanged drop count')
  want(r.get('result')==('refused' if code else 'passed'),'row result')
  if redo: want(r.get('redo') is True,'redo flag')
 if code:
@@ -255,6 +257,9 @@ else:
      ident=name+':tests.'+f.stem+'::'+function
      if '@pytest.mark.skip' not in text: expected.add(ident)
      if '@pytest.mark.skip' not in text and 'assert True' not in body: failing.add(ident)
+  if mode in ('monorepo-helper','overlap-uncovered','unmapped'):
+   dropped={c for c in failing if 'test_legacy65::test_legacy65' in c}
+   expected-=dropped; failing-=dropped
   want(set(d['cases'])==expected,'kept cases: '+repr(d['cases'])+' expected '+repr(expected))
   want(set(d['failing_at_red'])==failing,'kept failures: '+repr(d['failing_at_red']))
 entries=json.loads(record.read_text())

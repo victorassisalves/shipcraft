@@ -33,7 +33,7 @@ for key in ('cases','failing_at_red'):
  if not reason: assert len(ids)==1,(key,ids)
  if reason and key=='cases': assert any('module_imports' in x or 'module imports' in x for x in ids),ids
  assert any('fresh55' in x for x in ids) or mode in ('support','committed','removed') or (mode=='support-test' and key=='failing_at_red'),ids
- assert any('legacy55' in x for x in ids)==bool(reason), (key,ids,reason)
+ assert any('legacy55' in x for x in ids)==(bool(reason) and mode not in ('config','removed')), (key,ids,reason)
 line=('shipcraft: red ran every suite: '+reason if reason else f'shipcraft: red ran the changed test files: {n} of {len(d["files"])}')
 assert s.count(line)==1,(line,s)
 if mode not in ('log-fails','all-log-fails'):
