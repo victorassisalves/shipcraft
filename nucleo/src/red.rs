@@ -26,6 +26,8 @@ pub fn run(
 ) -> Result<(String, usize)> {
     let config = Config::load(repo)?;
     refuse_if_a_lock_is_open(repo)?;
+    // Item 80: before the base and anything else.
+    crate::install::refuse_if_not_committed(repo, false)?;
     let base = narrow::base(repo, base);
     let changed = narrow::changed(repo, &base);
     warn_outside_globs(repo, &config, &changed);
@@ -76,6 +78,8 @@ pub fn redo(
 ) -> Result<()> {
     let config = Config::load(repo)?;
     let (lock_path, old) = head_lock(repo, path)?;
+    // Item 80: after HEAD's lock, before the base and anything else.
+    crate::install::refuse_if_not_committed(repo, true)?;
     // Item 66: the redo resolves its base as `red` does.
     let base = narrow::base(repo, base);
     let changed = narrow::changed(repo, &base);
