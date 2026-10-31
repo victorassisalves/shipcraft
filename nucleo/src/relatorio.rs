@@ -885,7 +885,8 @@ fn dora_text(meta: &Value, dora: &Value) -> String {
     out += &match git["default_branch"].as_str() {
         Some(branch) => format!(
             "git: default branch {branch}; {} release(s){since}; lock rows without log times come from the branch tip.\n",
-            git["releases"]
+            // The releases read: all of them, or those at or after `--since` (deploys' `n`).
+            dora["deploys"]["n"]
         ),
         None => format!(
             "git: no evidence ({}){since}; lock rows without log times come from the branch tip when git reads.\n",
