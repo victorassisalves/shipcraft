@@ -57,7 +57,7 @@ def expected_block(local=False):
   text=text.replace(b'`shipcraft ',b'`npx -- shipcraft ')
   head,rest=text.split(b'\n- ',1);text=head+b'\n'+ROOT_LINE+b'- '+rest
  return text
-HINT='shipcraft: not set up in this repository: run shipcraft init (from a package install: pnpm exec shipcraft init, or npx shipcraft init)'
+HINT='shipcraft: next step (required): run `shipcraft init` at the repository root to set up Shipcraft; until init runs, Shipcraft checks none of your commits; if init refuses, follow its Next line'
 SKIP="shipcraft: CLAUDE.md not written: AGENTS.md does not hold this version's shipcraft block"
 DIFF="; it differs from this version's: edit it by hand to match docs/spec.md"
 def want(v,msg):
@@ -139,7 +139,7 @@ if case.startswith('hint-'):
    want((p.stdout,p.stderr,p.returncode)==(base.stdout,base.stderr,base.returncode),'failed git lookup added hint/changed usage')
  else:
   for a in args.values():
-   p=run(binary,*a,cwd=outside,env=env,ok=False); want(HINT.encode() not in p.stderr,'outside repo printed hint')
+   p=run(binary,*a,cwd=outside,env=env,ok=False); want(all(h not in p.stderr for h in (HINT.encode(), b'shipcraft: not set up in this repository: run shipcraft init (from a package install: pnpm exec shipcraft init, or npx shipcraft init)')),'outside repo printed hint')
  want(log.read_bytes()==before,'usage wrote a run-log row')
 elif case in ('refused','refused-late'):
  if case=='refused': write('.git/hooks/commit-msg','#!/bin/sh\necho foreign61\n',0o755)

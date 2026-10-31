@@ -574,6 +574,52 @@ Victor's instruction for the dogfood was "the rules in the product, not in memor
    - A project that edited its block or its briefs keeps its own text.
    - Briefs written by an older version are not upgraded, because there is only one version so far.
 
+### `init` is the required next step after install (item 69)
+
+POC-021's after runs on 2.24.0 (2026-10-30): `init` ran in 3 of 4 runs, against 1 of 4 before item 61. In the fourth, Codex added the package with `pnpm add -D shipcraft`, checked it, reported "setup is available via pnpm exec shipcraft init", and stopped. Item 61's hint names `init` as a possibility, with two commands to choose from and an `npx` without `--` (fixed point 39). This item makes it one command, said as the required next step.
+
+1. **The hint.** The conditions are item 61's, unchanged: `shipcraft --version` and the usage (no arguments, `help`, `-h`, `--help`), inside a git work tree whose root has no `.shipcraft.toml` (`lstat` fails with not-found). The root is read as today's hint reads it: the bytes of `git rev-parse --show-toplevel`, less exactly one final newline, as a Unix path; a failed or empty output prints no hint. The line stays one line on stderr, after the usual output. Its text changes to:
+
+   `shipcraft: next step (required): run `<command>` at the repository root to set up Shipcraft; until init runs, Shipcraft checks none of your commits; if init refuses, follow its Next line`
+
+   with one pair of backticks around `<command>`, which is chosen as follows:
+   - when the running binary is the project's install, by item 58's rule as `init` applies it (the binary and the root canonicalized; the binary under `<root>/node_modules/`, a pnpm store path under it included; `<root>/node_modules/.bin/shipcraft` an executable regular file, its link followed):
+     - `pnpm exec shipcraft init` when `<root>/pnpm-lock.yaml` is a regular file (`lstat`, never followed, never read) and `pnpm` is found on `PATH` by the lookup `init` uses for review agents;
+     - `npx -- shipcraft init` otherwise;
+   - `shipcraft init` in every other case: a machine install, a binary inside a package's own `node_modules` or outside the root, or any failure to resolve the binary or the root.
+
+   A failure while deciding whether the binary is the project's install selects the `shipcraft init` form. Once it is the project's install, a missing, non-regular or unreadable `pnpm-lock.yaml`, or `pnpm` not found (a lookup error counts as not found), selects the `npx -- shipcraft init` form. None of this prints a notice, creates a file or folder, runs a test, check, build or reviewer, or changes stdout or the exit code.
+2. **No install script.** The npm packages keep running nothing at install time. pnpm runs no dependency scripts unless they are allowed, and `--ignore-scripts` is common, so a message printed from a script would reach only some installs. The hint and the docs are the touch points.
+3. **Docs.**
+   - The README's quick start says step 2 is required, right after step 1: `init` sets up Shipcraft and wires its hooks, and until it runs Shipcraft checks none of your commits. Its commands use `pnpm exec shipcraft init` or `npx -- shipcraft init`.
+   - `npm/README.md` says the same, and its `npx` gains `--`. The npm package keeps carrying the root `README.md`, as `release/npm.sh` packages it today.
+4. **Current behavior** on the paths this item touches (rule 14):
+   - `--version` prints `shipcraft X.Y.Z (<hash>)` to stdout and exits 0: keep.
+   - The usage prints to stdout and exits 0: keep.
+   - The hint's conditions, its root reader, its one line on stderr after the output, no config read, no run-log row, and no file written: keep. Its text: change, as in point 1.
+   - Outside a work tree, when git fails, or when `.shipcraft.toml` exists in any form (a symlink, a folder, an invalid file), no hint is printed: keep.
+   - Invalid arguments print `shipcraft: error: invalid arguments: ...` with the usage, with no hint, and exit 2: keep.
+   - The npm packages declare no install script: keep.
+   - The Node launcher: it prints nothing of its own when the native binary runs; a missing platform package prints its platform diagnostic and exits 2; a spawn failure prints `could not run ...` and exits 2; a native signal is passed on, and any other status returned (a missing status exits 1): keep. The hint is printed by the native binary only, so a launcher that fails before running it prints no hint.
+   - `init`'s own output, its refusals (item 67's `lang-unrecognized` and `lang-multiple` included), item 58's install detection and the commands the hooks call: keep.
+5. **Touches.**
+   - **Assertions that change:**
+     - item 61's expected hint text (`HINT` in `acceptance/lib/item61.sh`) and its fixed point (`acceptance/pontos/61.md`), for `v1-61.hint-version`, `hint-noargs`, `hint-help`, `hint-h` and `hint-longhelp`. Their binary runs from outside `node_modules`, so the expected text is the `shipcraft init` form;
+     - `v1-61.hint-outside`, which today checks that `HINT` is absent: it checks that neither the old text nor the new form is printed.
+   - **Must keep passing unchanged:**
+     - `v1-61.hint-config`, `v1-61.hint-git-fails`;
+     - the version line, read from `nucleo/Cargo.toml`: `v1-21.versao-fora`, `v1-21.versao-min-numerica`, `v1-62.version`, `v1-63.version`, `v1-64.version`, `v1-67.version`, `v1-65.main` and `v1-65.many` (every profile), and item 66's cases (the shared `--version` check at the end of their driver);
+     - item 58's install cases (`v1-58.*`): the same rule decides the install.
+6. **Measure and revert.**
+   - **Metric:** in POC-021's next after runs, every run executes `init` (4 of 4).
+   - **Revert:** a release that restores item 61's text.
+7. **Known limits.**
+   - Yarn and Bun projects get the `npx -- shipcraft init` form, which also works there when Node is installed.
+   - The `pnpm exec` form is chosen from a lockfile and a `PATH` lookup; it does not prove this contributor installed Shipcraft with pnpm.
+   - In a layout plain `init` cannot recognize (item 67), the command starts setup and `init` refuses with the flags to add.
+   - A binary installed inside a package's own `node_modules` gets `shipcraft init`, which may not be on `PATH`. `init` itself says how that install is wired.
+   - An agent that never runs `--version` or `--help`, and never reads the README, is not reached.
+
 ## 4. Configuration
 
 `.shipcraft.toml` lives at the project root.
@@ -985,4 +1031,4 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.24.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.25.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.

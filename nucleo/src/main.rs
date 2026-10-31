@@ -189,8 +189,9 @@ fn version_line() -> String {
     format!("shipcraft {} ({})", config::VERSION, env!("SHIPCRAFT_COMMIT"))
 }
 
-/// Item 61: inside a git work tree whose root has no `.shipcraft.toml` (lstat
-/// not-found only), one stderr line says to run `init`; it reads no config.
+/// Items 61 and 69: inside a git work tree whose root has no `.shipcraft.toml`
+/// (lstat not-found only), one stderr line says `init` is the required next step;
+/// it reads no config.
 fn setup_hint() {
     let Ok(cwd) = std::env::current_dir() else { return };
     let Ok(out) = git::git_in(&cwd, &["rev-parse", "--show-toplevel"]) else { return };
@@ -205,7 +206,26 @@ fn setup_hint() {
         .symlink_metadata()
         .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
     {
-        eprintln!("shipcraft: not set up in this repository: run shipcraft init (from a package install: pnpm exec shipcraft init, or npx shipcraft init)");
+        let root = std::path::Path::new(root);
+        eprintln!(
+            "shipcraft: next step (required): run `{}` at the repository root to set up Shipcraft; until init runs, Shipcraft checks none of your commits; if init refuses, follow its Next line",
+            init_command(root)
+        );
+    }
+}
+
+/// Item 69: the one `init` command the hint names. The project's install (item
+/// 58's rule) gets `pnpm exec` when a regular `pnpm-lock.yaml` sits at the root
+/// and `pnpm` is on `PATH`, `npx --` otherwise; anything else is `shipcraft init`.
+fn init_command(root: &std::path::Path) -> &'static str {
+    if !matches!(init::install_at(root), init::Install::Project) {
+        return "shipcraft init";
+    }
+    let lock = root.join("pnpm-lock.yaml").symlink_metadata().is_ok_and(|m| m.file_type().is_file());
+    if lock && init::on_path("pnpm") {
+        "pnpm exec shipcraft init"
+    } else {
+        "npx -- shipcraft init"
     }
 }
 
