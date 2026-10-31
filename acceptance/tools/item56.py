@@ -13,9 +13,10 @@ if len(sys.argv) > 2:
     suites=d.get('suite', [d])
     affected=mode in ('solution','empty-include','jsonc','jsonc-cr','jsonc-ls','jsonc-ps','untracked','workspace','control','build-fails','missing-reference')
     failed=mode in ('build-fails','missing-reference','untracked')
+    covered_other=mode in ('extends','files','files-absent','files-null','include','include-null')
     for s in suites:
         solution=affected and (mode not in ('workspace','control') or s['root'] != 'packages/normal')
-        if solution and not failed:
+        if (solution and not failed) or covered_other:
             assert 'check' not in s, s
         else:
             assert s.get('check','').endswith('tsc --noEmit'), s
@@ -30,7 +31,15 @@ if len(sys.argv) > 2:
         build_lines=[i for i,line in enumerate(out.splitlines()) if '[build]' in line and 'checks no file;' not in line]
         if mode != 'untracked': assert build_lines, out
         assert all(i<out.splitlines().index(notices[0]) for i in build_lines), out
-    else: assert not notices, notices
+    else:
+        assert not notices, notices
+        if covered_other:
+            expected='shipcraft: no check written for suite default: [build] type-checks tsconfig.json'
+            assert 'build' in d, d
+            assert [line for line in out.splitlines() if 'no check written for suite ' in line]==[expected], out
+            lines=out.splitlines()
+            build_at=next(i for i,line in enumerate(lines) if '[build]' in line and 'no check written' not in line)
+            assert lines[build_at+1]==expected, out
     sys.exit()
 root={'files':[], 'references':[{'path':'projects/real'}]}
 real={'compilerOptions':{'composite':True,'types':[],'skipLibCheck':True,'outDir':'dist'},'files':['value.ts']}
