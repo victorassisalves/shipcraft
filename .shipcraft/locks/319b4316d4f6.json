@@ -1,6 +1,6 @@
 {
   "format": 3,
-  "state": "open",
+  "state": "closed",
   "files": {
     ".shipcraft.toml": "sha256:aacfa60051cf17102fbbd90ddf5537a68e9e1b4f2e6e5251f0aebf3efc823d61",
     "acceptance/fixtures/item30/go/config.toml": "sha256:cc23597859839f6906f615a217400a817863eb15d8e7957c5ca6acf833e73f8c",
@@ -281,5 +281,5 @@
     "acceptance:acceptance/lib/item70.sh::core::v1-70.write-partial-bare",
     "acceptance:acceptance/lib/item70.sh::core::v1-70.write-partial-local"
   ],
-  "seal": "6c79d7899a3610570c0cb5b262544543f7f23a64c034eb51240c482491256961"
+  "seal": "85667aaf97f51e60ce42eb67e338e2eba081df88ea1a2437c05c2fc7d90e9459"
 }
