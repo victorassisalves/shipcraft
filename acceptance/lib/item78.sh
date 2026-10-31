@@ -3,6 +3,7 @@ item78_cases() {
   for c in success ordered json-pretty json-extra-fields ssh scp https-no-suffix ssh-no-suffix scp-no-suffix intel intel-query-fails \
     no-run running failed list-fails download-fails expired no-retry \
     json-text json-object json-null json-row json-id-zero json-id-negative json-id-bool json-id-float json-id-string json-status json-conclusion json-missing json-late-invalid \
+    json-id-long json-id-huge json-id-leading-zero json-id-exponent \
     missing-arm missing-intel directory-arm directory-intel symlink-arm symlink-intel checksum-arm checksum-intel sums-missing sums-line-missing sums-extra sums-duplicate sums-uppercase sums-star sums-space sums-path sums-blank \
     version-commit version-number version-extra version-nul version-no-newline version-fails version-stderr \
     origin-local origin-other-host origin-lookalike origin-http \
@@ -124,6 +125,11 @@ if scenario == 'sums-blank': lines.append('')
 if scenario != 'sums-missing': (artifact / 'SHA256SUMS').write_text('\n'.join(lines)+'\n')
 row = dict(databaseId=731, status='completed', conclusion='success')
 rows = [row]
+long_ids = {
+    'json-id-long': '1000000000000000000',
+    'json-id-huge': '1234567890123456789012345678901234567890',
+}
+if scenario in long_ids: rows = [dict(row,databaseId=int(long_ids[scenario]))]
 if scenario == 'ordered':
     rows = [dict(databaseId=900,status='in_progress',conclusion=''),
             dict(databaseId=850,status='completed',conclusion='failure'),
@@ -139,6 +145,8 @@ bad = {
     'json-id-negative': json.dumps([dict(row,databaseId=-1)]),
     'json-id-bool': json.dumps([dict(row,databaseId=True)]),
     'json-id-float': json.dumps([dict(row,databaseId=1.5)]),
+    'json-id-leading-zero': '[{"databaseId":0123,"status":"completed","conclusion":"success"}]',
+    'json-id-exponent': '[{"databaseId":1e3,"status":"completed","conclusion":"success"}]',
     'json-id-string': json.dumps([dict(row,databaseId='731')]),
     'json-status': json.dumps([dict(row,status=None)]),
     'json-conclusion': json.dumps([dict(row,conclusion=False)]),
@@ -158,7 +166,7 @@ origin = {
 d = data()
 d.update(case='release-rollback' if scenario in ('rollback','local-rollback') else
          'release-incerto' if scenario == 'uncertain' else 'release-comum',
-         origin_url=origin, artifact=str(artifact), chosen=611 if scenario == 'ordered' else 731,
+         origin_url=origin, artifact=str(artifact), chosen=long_ids.get(scenario,611 if scenario == 'ordered' else 731),
          run_output=bad.get(scenario,json.dumps(rows, indent=2 if scenario == 'json-pretty' else None)), list_fails=scenario == 'list-fails',
          download_fails=scenario in ('download-fails','expired','no-retry'),
          intel=scenario == 'intel', intel_query_fails=scenario == 'intel-query-fails')
@@ -249,6 +257,8 @@ else:
     notes = data()['notes'].lower()
     if scenario != 'local-build':
         assert len(downloads) == 1, 'artifact not selected once'
+        if scenario in long_ids:
+            assert downloads[0]['args'][2] == long_ids[scenario], 'download run ID digit string changed'
         checks = [c for c in packaging if c['tool'] == 'shasum' and c['args'] == ['-a','256','-c','SHA256SUMS']]
         assert len(checks) == 1 and Path(checks[0]['cwd']).name == 'ci', 'artifact not checked with shasum -a 256 -c in CI folder'
         assert all(w in notes for w in ('release-shadow',str(d['chosen']),'green','5','macos','arm64','x86_64')), notes
