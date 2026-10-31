@@ -5,6 +5,7 @@ item76_cases() {
   for c in metrics removed since since-order since-empty since-unavailable since-not-release since-offline-tag \
     text text-empty since-text-coverage rows states kinds-tip kinds-release kinds-head kinds-red kinds-legacy kinds-legacy2 invalid-seal invalid-schema \
     invalid-format invalid-format-zero invalid-format-string invalid-format-float \
+    unavailable-red-kind unavailable-red-kind-shallow unavailable-red-kind-partial \
     lead-missing lead-nonpositive lead-redo recover-missing recover-nonpositive recover-offset \
     rework-unknown failure-unknown failure-absent failure-null failure-scoped first-shipment \
     tags tag-blob tag-no-tagger tie tie-huge origin-main local-main origin-head master no-default \
@@ -77,12 +78,13 @@ r3=save(T3-1000);tag('v2.0.0',T3)
 rs=[row('D',T3-800),row('A',T1-100),row('B',T2-200),row('C',T2-400),row('A',T1+1,'merge')]
 args=['--json'];env=dict(baseenv);cwd=root;unavailable=None;want_branch='refs/heads/main'
 # Separate real repositories, without a service or network dependency.
-if case in ('shallow','partial','since-partial'):
+clone_case=case.removeprefix('unavailable-red-kind-')
+if clone_case in ('shallow','partial','since-partial'):
  origin=cw/'origin76.git';git('clone','--bare',root,origin);git('-C',origin,'config','uploadpack.allowFilter','true')
  clone=cw/'clone76'
- git('clone','--no-local',*(['--depth=1'] if case=='shallow' else ['--filter=blob:none','--no-checkout']),origin.as_uri(),clone)
+ git('clone','--no-local',*(['--depth=1'] if clone_case=='shallow' else ['--filter=blob:none','--no-checkout']),origin.as_uri(),clone)
  root=clone;cwd=root
- if case=='shallow':assert git('rev-parse','--is-shallow-repository')=='true';unavailable='shallow clone: history incomplete'
+ if clone_case=='shallow':assert git('rev-parse','--is-shallow-repository')=='true';unavailable='shallow clone: history incomplete'
  else:
   assert git('config','--get','remote.origin.promisor')=='true';unavailable='partial clone: report reads no network'
   # No promised blob is read in fixture setup; deleting the origin makes any fetch fail.
@@ -186,6 +188,10 @@ if case=='removed-no-log':rs=[r for r in rs if r['lock']!='A']
 if case=='no-releases':
  for t in ('v1.0.0','v1.1.0','v2.0.0'):git('tag','-d',t)
 if case=='since-partial':args+=['--since','v99.0.0']
+if case.startswith('unavailable-red-kind'):
+ if case=='unavailable-red-kind':git('branch','-m','topic76');unavailable='no default branch'
+ # Only passed, non-redo RED rows qualify; choose by time, not log order.
+ rs += [row('abc',5,result='refused',kind='feature'),row('abc',6,redo=True,kind='feature'),row('abc',20,kind='feature'),row('abc',10,kind='fix',reported_at=reported(T1),fixes_release='v1.0.0')]
 if case.startswith('promisor-'):
  mode=case[9:];value={'true':'true','yes':'yes','on':'on','one':'1','mixed':'TrUe','false':'false','zero':'0','legacy':'origin'}[mode]
  git('config','extensions.partialclone' if mode=='legacy' else 'remote.backup.promisor',value)
@@ -286,10 +292,13 @@ if unavailable or case in ('git-absent','git-failure','git-late-failure','git-ba
  assert locks['D']['red_at']==T3-800 and locks['D']['merge_at'] is None,locks
  if case=='git-late-failure':
   gaps=[r for r in output if r['kind']=='gap'];assert len(gaps)==1 and gaps[0]['line']==6,gaps
- if case in ('partial','shallow','since-partial') or (case.startswith('promisor-') and unavailable):
+ if clone_case in ('partial','shallow','since-partial') or (case.startswith('promisor-') and unavailable):
   reads=[json.loads(s)['args'][2:] for s in calls.read_text().splitlines()]
-  assert reads==[['config','--get-regexp',r'^(extensions\.partialclone|remote\..*\.promisor)$']]+([['rev-parse','--is-shallow-repository']] if case=='shallow' else []),reads
+  assert reads==[['config','--get-regexp',r'^(extensions\.partialclone|remote\..*\.promisor)$']]+([['rev-parse','--is-shallow-repository']] if clone_case=='shallow' else []),reads
  if case in ('since-unavailable','since-partial'):assert d['since']=='v99.0.0',d
+ if case.startswith('unavailable-red-kind'):
+  r=locks['abc']
+  assert (r['change_kind'],r['reported_at'],r['fixes_release'])==('fix',reported(T1),'v1.0.0'),(case,r)
  sys.exit()
 assert d['git']['reason'] is None and d['git']['default_branch']==want_branch,d
 if case in ('nested','environment'):
