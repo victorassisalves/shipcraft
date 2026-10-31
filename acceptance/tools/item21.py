@@ -172,7 +172,9 @@ if RELEASE:
         for invalid in ('1.2', '1.2.10-rc1', 'v1.2.10.0', 'vv1.2.10', '1.x.10'):
             refused(invoke(invalid)); no_publish()
         sys.exit(0)
-    p = invoke(arg)
+    local_build = CASE in ('release-comum','release-prefixo','release-preso','release-build',
+                           'release-bateria','release-rollback','release-incerto')
+    p = invoke(arg, *(['--local-build'] if local_build else []))
     negative = CASE in ('release-formato','release-suja','release-versao','release-head','release-tag','release-remoto','release-tags-falha','release-bateria','release-build')
     if negative:
         refused(p); no_publish()
