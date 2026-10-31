@@ -948,10 +948,14 @@ So the failure comes from the full run. With item 80 the field run would have na
    - item 55's base and changed paths were read: the run is not `no base`, `no merge base` or `git failed`;
    - for `--redo`, the case is not in HEAD's lock `cases`;
    - the hook's mapper (§6, `coverage_map`, as item 55 uses it to judge coverage), applied once per suite to that suite's cases of `F` over its locked files on the working tree, finds a single map, and it maps the case to exactly one file. When any case of the suite's `F` has no holder, the mapper finds no map, and no case of that suite is outside the RED;
-   - that file is in the merge base's tree (`git ls-tree` at the merge base item 55 computed) and is not one of item 55's changed paths.
-   
+   - that file is not one of item 55's changed paths, and it is in the merge base's tree, as read below.
+
    A case that does not map, a case of a suite whose map fails, and a case in an added, changed or untracked file are never outside the RED.
-2. **The guard.** The cases outside the RED are left out only when at least one case of `F` is not outside the RED. When every case of `F` is outside the RED, nothing is left out, and `red` locks them as today. That covers a RED whose tests were committed before `red` ran, the item 66 known limit, and its battery fixtures.
+
+   **The base tree.** The files the other conditions leave are read in one call, `git ls-tree -r -z --name-only <merge base> -- <paths>`. `<merge base>` is the commit item 55 computed. `<paths>` are those files' repository-relative paths (the suite's root prefix plus the mapped path), deduplicated and passed as they are. A file is in the base tree only when an output entry equals its path byte for byte; output is NUL-terminated, so no quoting applies. The call is not made when no file is left to read. If the read fails (an exit status other than 0, a signal, a failure to start git), `red` retains conservatively: no case is left out in this run, and the lock is today's. When `red` writes the lock, it prints one line on stdout, where point 4's line would go: `shipcraft: every failing case is locked: could not read the base tree (<error>)`. `<error>` is git's first stderr line, or the exit status or signal. The row then has `unchanged_dropped: null`, which no other row has, so the log can count these runs. This is a stdout line, not an item 59 warning, because it says what the lock holds.
+
+   **Same file as a locked case.** The hook runs the test files that hold `failing_at_red` cases, and it blocks on every failure in those files, whether or not the case is locked (`Selection::blocks` in `suite.rs`, `judge_suite` in `contract.rs`, README fixed points 49 and 50). So a case outside the RED is left out only when no case that stays in `failing_at_red` maps to the same file. Otherwise it stays locked, as today, because the hook would refuse it anyway (`case-broke`) and the lock could never close. "Stays" is judged on `F` less the cases outside the RED, before item 53's second run. One pass is enough: a case kept by this rule lives in a file that already holds a locked case. This matters most with the redo exemption. HEAD's lock holds a case of an unchanged file, and another case of that file was skipped at RED (so it is not in `cases`) and fails now. That second case stays locked.
+2. **The guard.** After the same-file rule, the cases outside the RED are left out only when at least one case of `F` is not outside the RED. When every case of `F` is outside the RED, nothing is left out, and `red` locks them as today. That covers a RED whose tests were committed before `red` ran, the item 66 known limit, and its battery fixtures.
 3. **What is locked.** The cases left out are removed from `failing_at_red`, and also from `cases`. Item 46's `redo-drops-case` compares the lock's `cases` with later runs, and CI refuses `case-broke` for a case in `cases` that fails without being in `failing_at_red`, so a failing case cannot stay in `cases` alone. Then, on the cases that remain:
    - item 30.2's `suite-without-tests` is judged on them;
    - item 53's second run reruns only their suites and judges only them, so `red-not-reproduced` means every remaining case passed;
@@ -984,6 +988,10 @@ So the failure comes from the full run. With item 80 the field run would have na
    - The `red` row: `result`, `code`, `secs` (still the whole command), `selection`, `selected_files`, `fallback`, `rerun_dropped`, `redo`, item 75's fields: keep. `unchanged_dropped` is added as point 4 says.
    - The hook, CI, `close`, `status`, `report`, `pr` and `merge`: keep. CI still runs every suite at HEAD: a case left out that still fails makes `ci` refuse `suite-red` once no cycle is open, as it does today for any failure outside the lock.
    - Locks already written: keep.
+   - `red --redo` when the new lock reads the same as HEAD's: it prints `shipcraft: RED unchanged: lock <path> already reads the same; nothing written.` and returns. It prints no `RED redone at` line, no three lists, no item 53 line and no GREEN guidance, and its row has no `rerun_dropped`: keep. Point 4's line is printed only when a lock is written, so it is not printed here, and that row has no `unchanged_dropped`. Cases left out still count in the comparison, so a redo that only leaves out cases HEAD's lock did not hold reads as unchanged.
+   - The run-log row is best effort (`medicao::record`): it creates the common git directory's `shipcraft/` folder if missing, appends one line, and ignores any failure to create, open or write. One `red` row per command, whatever happens to it, and the exit code never depends on it: keep, also with `unchanged_dropped`.
+   - Suite commands inherit `red`'s environment, `TMPDIR` included, and whatever they write in the working tree stays there. `red` creates each temporary JUnit report (`shipcraft-junit-<pid>-<nanos>.xml` under the temporary folder) and item 22's list files under `.git/shipcraft/tmp` (a folder it created is removed if empty), and removes them after each run: keep. The new base-tree read is one git call that writes nothing.
+   - After a GREEN commit closes the lock, the post-commit hook (`close`) adds the closing commit `chore(shipcraft): close lock <id>` and writes its own run-log row. The battery's GREEN-commit cases see both the commit and the extra row: keep. A lock with fewer cases can close in an earlier commit, but how it closes does not change.
 8. **Section changes.** Item 53's "a test already failing on the branch is still the RED's to fix" now holds only when it is in a file the RED changed, or when every failing case is outside the RED (point 2). Item 55's known limit "a failure already on the branch that lives in a selected file is still locked" stays as written.
 9. **Touches.**
    - **Assertions that change, and nothing else:**
@@ -1005,6 +1013,7 @@ So the failure comes from the full run. With item 80 the field run would have na
        - `v1-13.1-mesmo-nome-em-dois-arquivos`, `v1-13.1-mesmo-arquivo-em-duas-pastas`, the two jest `v1-13.1` cases, `v1-12.1-npx-tsc-com-traco`, `v1-9.1-monorepo-casos-por-suite`.
      - **A suite whose map fails** (an unmapped failing case): every `v1-22.*` case (`parcial`, `bytes-borda`, `bash` and `sem-mapa` included) and every `v1-51.*` case (`fallback` included). These are also item 53's wrapper cases (`v1-22.ambiente-red`, `v1-22.ambiente-build`, `v1-22.bash`, `v1-16a.1-red-build`).
      - **Narrowed runs**, which keep only changed files' cases: item 55's `main`, `no-base`, `support-test`, `base`, `ignored`, `redo`, `error`, `environment`, `log-fails`, `missing-base`, `repeated-all` and Go's `package`; items 59, 65 and 66's other cases; item 53's other cases.
+     - The hook's judgment of every failure in a file it runs: `v1-13.1-caso-pulado-no-red-que-passa-a-falhar-bloqueia` and README fixed points 49 and 50.
      - The row-key checks of items 59, 65, 66 and 75 on every case where nothing is left out, `v1-38.*` and `v1-10.1-execucoes-jsonl` (extra keys are accepted), and every hook, CI, `close` and `status` case.
    - **New cases** include:
      - the field shape: an untracked new failing test beside a committed failing test of another suite, on a full run;
@@ -1015,7 +1024,10 @@ So the failure comes from the full run. With item 80 the field run would have na
      - a case left out of `cases` and `failing_at_red`, with `files` still hashing its file;
      - a GREEN commit that edits the test file of a case left out is refused `test-changed`, and one that deletes it `locked-file-deleted`, also in `shipcraft ci`;
      - the second run not rerunning a suite whose only failing cases were left out;
-     - the row field present only when cases are left out.
+     - the row field present only when cases are left out;
+     - a failing `git ls-tree` at the merge base (a git shim): nothing left out, the stdout line, `unchanged_dropped: null`;
+     - a path whose base-tree entry is a folder of the same name, or a longer path with the same prefix: not in the base tree;
+     - the same-file rule: a pytest `red --redo` whose HEAD lock holds a failing case of an unchanged file, and another case of that file was skipped at RED and fails now. The second case stays in `failing_at_red`, and the redo commit is judged as today. A `red` whose untracked test fails, and an unchanged file holds a failing case beside a case of `F` that is not outside the RED (an unmapped one), keeps that case too.
 10. **Measure and revert.**
    - **Metric:**
      - in POC-021's next after runs, locks that hold a case of a test file the RED did not change (1 in the 2.31.0 `after2-claude-existing` run);
