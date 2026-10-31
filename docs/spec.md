@@ -434,28 +434,30 @@ Before item 56, `init` wrote `check = "tsc --noEmit"` for every Node suite with 
 
 Wrong-verdict note: since item 16b (2.0.0), `init` writes `[build]` (`tsc -b` on every folder whose tracked `tsconfig.json` has `references` or `composite: true`) and still writes `check = "tsc --noEmit"` for each Node suite with a `tsconfig.json`. Item 56 removed the check only where the tsconfig checks no file. Found on the Forge, the second adopter (2.25.0, deluge-forge-platform PR #805, 2026-10-31): its packages' tsconfigs are composite projects with references, and `tsc --noEmit` there is refused with TS6310 (a referenced project may not disable emit), so every `red` and `ci` would refuse on the check. The Forge removed every check by hand. Item 56's spec review should have caught it: it judged the solution tsconfig only.
 
-1. **The rule.** After `[build]` is decided, as today, a Node suite whose folder is one of the folders `[build]` names (the list item 16b writes after `tsc -b`, the root as `.`) gets no `check` key, whatever its `tsconfig.json` holds. Those folders are exactly the ones whose tsconfig has `references` or `composite: true`, and `[build]` type-checks them whenever it runs, before any suite.
-2. **What `init` prints.** One line per such suite, in suite order, after the `[build]` lines, on stdout:
-   - when item 56 already judged the tsconfig as checking no file: item 56's line, unchanged (`shipcraft: <path> checks no file; no check written for suite <name>: [build] type-checks its references`);
-   - otherwise: `shipcraft: no check written for suite <name>: [build] type-checks <path>`.
+1. **The rule.** The only input is the folder list item 16b's inference returns when it writes `[build]` (the root as `.`): the folders its own reader selected (tracked `tsconfig.json` read from the index, workspace manifests and globs as item 16b reads them) and its proof run accepted. No tsconfig is read again for this rule, and a folder with the signal that inference did not name (outside the workspace globs, untracked, or in the working tree only) does not count. A Node suite whose root is one of those folders gets no `check` key, whatever its `tsconfig.json` holds.
+2. **What `init` prints.** One line per such suite, in suite order, on stdout, buffered and printed where item 56's lines are printed today (after the core writes succeed, after the `[build]` lines, in the same position), never on a refused or rolled-back `init`:
+   - when item 56's reader judges the suite's tsconfig as checking no file: item 56's line, unchanged (`shipcraft: <path> checks no file; no check written for suite <name>: [build] type-checks its references`);
+   - for every other shape of the file (a project with sources, an `extends`, a file item 56 does not judge): `shipcraft: no check written for suite <name>: [build] type-checks <path>`.
    `<path>` and `<name>` are item 56's (the tsconfig's path from the repository root, `default` for the top-level suite, control characters escaped).
-3. **When `[build]` is not written** (its `tsc -b` failed, or a manifest could not be read, as item 16b says), every suite keeps today's behavior: `tsc --noEmit` where a `tsconfig.json` exists, and item 56's second line where it checks no file. No gate is lost.
-4. **Current behavior** on the paths this item touches (rule 14):
-   - `[build]` inference, its proof run, its lines and the folders it lists: keep.
-   - `check = "<bin>tsc --noEmit"` for a Node suite with a `tsconfig.json` whose folder `[build]` does not name: keep.
-   - Item 56's judgement and both its lines: keep. Its first case (no check, its line) is now also covered by point 1.
-   - A suite whose folder `[build]` names and whose tsconfig is a regular project: gets `tsc --noEmit` today; change, as in point 1.
-   - Python, Go, `--lang other`, jest and vitest commands, the globs, an existing `.shipcraft.toml` (not rewritten, no line): keep.
-   - `init`'s exit code `0`, the closing guidance, the hooks, the block and the briefs: keep.
-5. **Touches.**
-   - **Assertions that may change:** item 16b's cases (`v1-16b.1-*`) where a suite's own folder is a `[build]` folder with a check expected; item 12's and 13's TypeScript init cases (`v1-12.1-*`, `v1-13.1-init-escreve-verifica`, `v1-13.1-init-verifica-com-traco`) only if their fixtures give a suite folder `references` or `composite`. The RED lists each one it changes; the README fixed points 40 and 57 (a check wherever a tsconfig exists) gain this exception next to item 56's.
-   - **Must keep passing unchanged:** item 56's cases (`v1-56.*`); item 9's workspace cases; item 25's closing lines; item 67's and 68's init cases.
-6. **Measure and revert.**
-   - **Metric:** on the Forge's layout, `init` writes no per-suite check and `[build]` covers every package; on an adopter's next init, 0 suites refused with TS6310.
+3. **When `[build]` is not written** (the proof run failed, a manifest or tsconfig did not read, a glob was not understood, as item 16b says), every suite keeps today's behavior: `tsc --noEmit` where a `tsconfig.json` exists, and item 56's second line where it checks no file.
+4. **Where `[build]` runs.** As today: in `red`'s first run and in `ci`, before any suite. The hook and `red`'s confirmation run do not run `[build]` or checks; this item does not change that.
+5. **Current behavior** on the paths this item touches (rule 14):
+   - `[build]` inference: its readers (index, JSONC, manifests, globs), its proof run with real `tsc -b`, whose output (`dist/`, declarations, `.tsbuildinfo`, partial output on failure) stays in the working tree on success, on a failed proof and on a later failed `init`; its one-line JSONC diagnostic, its three-line warnings for manifests, globs and a failing compiler, after which `init` still succeeds without `[build]`; a git or process I/O error, which fails `init` as today: keep.
+   - `check = "<bin>tsc --noEmit"` for a Node suite with a `tsconfig.json` whose root `[build]` does not name: keep.
+   - Item 56's reader, its judgement and both its lines: keep.
+   - A Node suite whose root `[build]` names and whose tsconfig item 56 does not judge as checking no file: gets `tsc --noEmit` today; change, as in point 1, with point 2's new line.
+   - The rollback on a failed core write (only paths this run created, `shipcraft: undid what this run created`, the underlying error), no run-log row, `.git/shipcraft` untouched: keep.
+   - Python, Go, `--lang other`, jest and vitest commands, the globs, an existing `.shipcraft.toml` (not rewritten, no line), `init`'s exit code, the closing guidance, the hooks, the block and the briefs: keep.
+6. **Touches.**
+   - **Assertions that change:** item 56's cases whose fixture gets a written `[build]` that names the suite's folder while item 56 does not judge the tsconfig as checking no file: today they require `check` ending in `tsc --noEmit`; they now require no check and point 2's second line. The review names at least `v1-56.extends` and `v1-56.files`; the RED runs every `v1-56.*` mode against today's binary, lists each mode where `[build]` names the suite folder, and changes exactly those (`acceptance/tools/item56.py`), keeping every assertion of item 56's solution modes. README fixed points 40 and 57 (a check wherever a tsconfig exists) gain this exception next to item 56's. Item 16b's cases (`v1-16b.1-*`) where a suite's own folder is a `[build]` folder with a check expected change the same way; the RED lists them.
+   - **Must keep passing unchanged:** every other `v1-56.*` and `v1-16b.1-*` case; item 12's and 13's TypeScript init cases (`v1-12.1-*`, `v1-13.1-init-escreve-verifica`, `v1-13.1-init-verifica-com-traco`, `v1-13.1-verifica-fora-do-hook`) unless the RED shows their fixture's folder is a `[build]` folder; item 16a's hook cases (`v1-16a.1-hook-saida-ignorada`, `v1-16a.1-hook-sem-saida`) and README fixed point 59; item 9's workspace cases; `init-files`; `v1-15a.1-decide-antes-e-desfaz-escrita-no-meio`, `v1-15a.1-falha-preserva-config-simbolica`; `v1-58.plain`, `v1-58.kept`, `v1-58.rollback`; `v1-64.init-codex`, `v1-64.init-claude`, `v1-64.init-gemini`, `v1-64.init-none`, `v1-64.init-preserve`; item 25's closing lines; item 67's and 68's init cases.
+7. **Measure and revert.**
+   - **Metric:** on the Forge's layout, `init` writes no per-suite check and `[build]` covers every package; 0 adopter suites refused with TS6310 over the next 5 adopter inits.
    - **Revert:** a release restores the check; projects keep their config.
-7. **Known limits.**
-   - A project whose `[build]` is written but later changed by hand to cover fewer folders keeps no check for the folders it dropped; `init` does not rewrite an existing config.
-   - A suite folder whose tsconfig is a plain project, inside a `[build]` that does not name it, keeps `tsc --noEmit` even when a referencing project would also check it.
+8. **Known limits.**
+   - Without a written `[build]`, the kept `tsc --noEmit` on a solution tsconfig checks nothing (item 56's second line says so); the user sets the project's own type-check command. This item does not change that.
+   - The hook does not run `[build]`, so a type-only error in a covered folder is caught by `red`'s first run or `ci`, not at commit, as for any `[build]` today.
+   - A project whose `[build]` is later edited by hand to cover fewer folders keeps no check for the folders it dropped; `init` does not rewrite an existing config.
 
 ### `init` for a project-local install (item 58)
 
