@@ -752,7 +752,7 @@ pub fn hook_status(repo: &Repo) -> String {
 }
 
 /// Item 58: where the running binary is installed, both paths canonical.
-enum Install {
+pub(crate) enum Install {
     Machine,
     Project,
     /// A package's `node_modules` under the root.
@@ -762,8 +762,13 @@ enum Install {
 /// Item 58: the project's install is a binary under `<root>/node_modules/`, with
 /// `<root>/node_modules/.bin/shipcraft` an executable regular file; any doubt is the machine's.
 fn install(repo: &Repo) -> Install {
+    install_at(repo.root())
+}
+
+/// Item 58's rule for any working-tree root; item 69's hint applies it too.
+pub(crate) fn install_at(root: &Path) -> Install {
     let exe = std::env::current_exe().and_then(fs::canonicalize);
-    let (Ok(exe), Ok(root)) = (exe, fs::canonicalize(repo.root())) else { return Install::Machine };
+    let (Ok(exe), Ok(root)) = (exe, fs::canonicalize(root)) else { return Install::Machine };
     let modules = root.join("node_modules");
     if exe.starts_with(&modules) {
         return if is_executable(&modules.join(".bin/shipcraft")) { Install::Project } else { Install::Machine };

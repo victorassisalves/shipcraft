@@ -54,12 +54,12 @@ Every refusal is three lines: **what happened, why it matters, and the next step
 
 ## Quick start
 
-Installing is two steps: add the package (or the binary), then run `shipcraft init` in the project. Until `init` runs, nothing checks your commits.
+Installing is two steps, and step 2 is required: add the package (or the binary), then run `init` at the repository root. `init` sets up Shipcraft and wires its hooks; until it runs, Shipcraft checks none of your commits. From the npm package, step 2 is `pnpm exec shipcraft init` or `npx -- shipcraft init`.
 
 ```bash
 # A Node/TypeScript project (macOS): pin Shipcraft in the project, like any dev dependency
 pnpm add -D shipcraft          # step 1, or: npm i -D shipcraft
-pnpm exec shipcraft init       # step 2, or: npx -- shipcraft init; the hooks call this project's install
+pnpm exec shipcraft init       # step 2 (required), or: npx -- shipcraft init; the hooks call this project's install
 
 # macOS (Apple silicon or Intel), any language: the latest release, checksum-verified, into ~/.local/bin
 gh repo clone victorassisalves/shipcraft && bash shipcraft/install.sh
@@ -199,7 +199,7 @@ Agents don't need a plugin, an MCP server or a skill. They find Shipcraft the sa
 - `git commit` runs the hook, and refusals say exactly what to do next;
 - `shipcraft init` writes a short block in `AGENTS.md` that tells agents the cycle: write the failing test and stub, run `shipcraft red`, commit the tests with the lock, then implement. In our trials (four runs per arm, a small sample) the earlier block took agents from 0/4 to 4/4 running `shipcraft red` before the first commit.
 - Since 2.17, the block also asks for the RED and the GREEN in separate sessions (a subagent per phase in Claude Code, a new `codex exec` per phase in Codex), and `init` adds an import of it to `CLAUDE.md` when Claude Code is installed or the file exists, since Claude Code reads `CLAUDE.md`. `init` upgrades a block it wrote earlier and keeps one you edited; while `AGENTS.md` holds an edited or older block, `CLAUDE.md` is left alone and `init` says so.
-- `shipcraft --version` and `shipcraft --help` say when the repository has no `.shipcraft.toml` yet, so an agent that checks the install is told to run `init`.
+- `shipcraft --version` and `shipcraft --help` say when the repository has no `.shipcraft.toml` yet: one line names `init` as the required next step, with the one command to run (`pnpm exec shipcraft init`, `npx -- shipcraft init` or `shipcraft init`, by how Shipcraft is installed).
 
 Give the RED and the GREEN to different sessions. They can be the same model; separate context is what matters.
 
