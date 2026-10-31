@@ -122,19 +122,25 @@ pub fn status(repo: &Repo) -> Result<()> {
         [] => layer(&config.execucao.ci),
         names => format!("{} (suite in GitHub checks: {})", layer(&config.execucao.ci), names.join(", ")),
     };
-    println!(
-        "shipcraft: layers: ci {}; review {} (agent {})",
-        ci,
-        layer(&config.execucao.revisao),
-        config.papeis.revisao.agent
-    );
+    // Item 73: review off names no agent.
+    let review_off = config.execucao.revisao == "off";
+    if review_off {
+        println!("shipcraft: layers: ci {ci}; review off");
+    } else {
+        println!(
+            "shipcraft: layers: ci {}; review {} (agent {})",
+            ci,
+            layer(&config.execucao.revisao),
+            config.papeis.revisao.agent
+        );
+    }
     // Item 64: the roles, right after the layers line.
     let unset = || "not set (the orchestrator's choice)".to_string();
     println!(
         "shipcraft: roles: red {}; green {}; review {}",
         config.papeis.red.as_ref().map_or_else(unset, |p| p.shown()),
         config.papeis.green.as_ref().map_or_else(unset, |p| p.shown()),
-        config.papeis.revisao.shown()
+        if review_off { "off".to_string() } else { config.papeis.revisao.shown() }
     );
     println!("{}", crate::init::hook_status(repo));
     let open: Vec<String> = lock_files(repo, &Snapshot::Tree)?
