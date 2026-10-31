@@ -297,8 +297,10 @@ if case.startswith('kinds-'):
   assert r['reported_at']==expected_time and r['fixes_release']==('v1.1.0' if case=='kinds-tip' else 'v1.0.0'),r
  if expected=='feature':assert r['reported_at'] is None and r['fixes_release'] is None,r
  if expected is None:assert r['reported_at'] is None and r['fixes_release'] is None,r
-if case.startswith('invalid-'):
+if case in ('invalid-seal','invalid-schema'):
  assert locks['B']['change_kind'] is None,locks
+if case=='invalid-config':
+ assert locks['B']['change_kind']=='fix',locks
 if case in ('metrics','removed','nested','environment','readonly','invalid-config','worktree','origin-main','local-main','origin-head','master','tags','tag-blob','lead-redo'):
  assert d['since'] is None and d['git']['releases']==3,d
  metric('deploys',dict(count=3,first=T1,last=T3,per_day=1.0),3)

@@ -64,7 +64,7 @@
     "acceptance/lib/item73.sh": "sha256:899c6e338775dfaa550a1b630d9af8b282a8eb4414d566837399c9ca34889924",
     "acceptance/lib/item74.sh": "sha256:880677f183f90d4d7df820bbd60f9f4b4d6bdc85d46d6e3acc385c940b36d8cc",
     "acceptance/lib/item75.sh": "sha256:f59b4ae2564751ce970a54bb3eb89e5d5196dbbe3b93726670bf6201d8877981",
-    "acceptance/lib/item76.sh": "sha256:54cf4b4c75ef0905b5ee4875ef12d394de351a7f070c5e9eb319732e8e124a84",
+    "acceptance/lib/item76.sh": "sha256:c45c973cf87f6e58bc58d6e588b97c62e6f9a0e12bd45de39f362981f7cadd4b",
     "acceptance/lib/item78.sh": "sha256:503ebcdd2ee87dbd92cca3bd4a110b30d08ce166d98e7f1526c83a29d0bd4296",
     "acceptance/lib/rename.sh": "sha256:a6ac8f0def7da9c3bd4f55793c12d19067e66841179cfa47fdb78bd6bdc6860a",
     "acceptance/lib/v1.sh": "sha256:76c5e087fc1fc685a1dfd87605cb5d0b78fb8de9c1a73cc52c1f49e4a3ef8470",
@@ -354,5 +354,5 @@
     "acceptance:acceptance/lib/item76.sh::core::v1-76.tie-huge",
     "acceptance:acceptance/lib/item76.sh::core::v1-76.worktree"
   ],
-  "seal": "7ef17cf2016202ef61666db94ecd05c0c9787fc3bad6c75f1c095d875f0631b4"
+  "seal": "cc2eea97fae1a3e79ab4eaf7d69e3af97dd34a19961cf1ac5c9008f244a6e39b"
 }
