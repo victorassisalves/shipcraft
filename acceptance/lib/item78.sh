@@ -207,8 +207,8 @@ for c in calls('gh'):
 assert sum(c['args'] == ['remote','get-url','origin'] for c in calls('git')) == 1, 'origin not resolved exactly once'
 assert 'publish.sh: v1.2.10 from commit '+pinned in out, 'start line lost'
 refusal = scenario in ('no-run','running','failed','list-fails','download-fails','expired','no-retry',
-                       'package-fails','sums-write-fails','rollback','uncertain','local-rollback') or scenario.startswith(
-                           ('json-','missing-','directory-','symlink-','checksum-','sums-')) or scenario in (
+                       'package-fails','sums-write-fails','rollback','uncertain','local-rollback') or scenario in bad or scenario.startswith(
+                           ('missing-','directory-','symlink-','checksum-','sums-')) or scenario in (
                                'version-commit','version-number','version-extra','version-no-newline','version-fails')
 downloads = [c for c in calls('gh') if c['args'][:2] == ['run','download']]
 if refusal:

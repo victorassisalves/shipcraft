@@ -63,7 +63,7 @@
     "acceptance/lib/item72.sh": "sha256:ab73765489eea0a46c1cc7e059a850be703121fcf02a10df881fe279b6dfe15f",
     "acceptance/lib/item73.sh": "sha256:899c6e338775dfaa550a1b630d9af8b282a8eb4414d566837399c9ca34889924",
     "acceptance/lib/item74.sh": "sha256:5b3d7fd3bc08746097be3fe4a4de1a4f7051d4a96a478e43225550db344d5241",
-    "acceptance/lib/item78.sh": "sha256:f3c625799b74c96a2fe7e1f56b80fff78101ddd355f29fe66578046a769a2afb",
+    "acceptance/lib/item78.sh": "sha256:a503974b630f7c3d9d19e1b4f171cbe47725dfe25489e25c5e0b8fba914ced43",
     "acceptance/lib/rename.sh": "sha256:a6ac8f0def7da9c3bd4f55793c12d19067e66841179cfa47fdb78bd6bdc6860a",
     "acceptance/lib/v1.sh": "sha256:0ce6e96ef2975138128b3ee3a922912d30dffdbc3c663fb1a280555e89a953aa",
     "acceptance/pontos/15a.md": "sha256:f1480266606c0a01f815315cb04ddea9544438df9dda618e06cf167ca9f971b2",
@@ -284,5 +284,5 @@
     "acceptance:acceptance/lib/item78.sh::core::v1-78.version-number",
     "acceptance:acceptance/lib/item78.sh::core::v1-78.version-stderr"
   ],
-  "seal": "4642b3140b79c82d002d48f65e6677592cb00eee66f921ae97c2aa942bf7acd0"
+  "seal": "376402abb5334034bcace3242f4d73fbc0ba9b1407b9e713fc6d2879a087674a"
 }
