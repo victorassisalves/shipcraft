@@ -46,7 +46,7 @@ const SIGKILL: i32 = 9;
 const ESRCH: i32 = 3;
 
 /// SIGKILL to the process group `pgid`. A group that is already gone is not an error.
-fn kill_group(pgid: u32) -> std::io::Result<()> {
+pub(crate) fn kill_group(pgid: u32) -> std::io::Result<()> {
     // SAFETY: killpg only reads its two integer arguments.
     if unsafe { killpg(pgid as i32, SIGKILL) } == 0 {
         return Ok(());

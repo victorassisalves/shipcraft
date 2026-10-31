@@ -95,17 +95,25 @@ pub fn run(repo: &Repo, options: &Options) -> Result<()> {
     };
     let unchecked =
         if kept || lang != Some(Lang::Node) { Vec::new() } else { drop_empty_checks(repo, &mut suites, &built) };
-    match (lang, suites.as_slice()) {
-        (None, _) => println!("shipcraft: test command run as written (filter = \"command\")"),
-        (Some(lang), [(_, raiz, profile)]) if raiz == "." => {
-            println!("shipcraft: language {} (runner {})", lang.name(), profile.runner)
-        }
-        (Some(lang), _) => println!("shipcraft: workspace {} with {} suite(s)", lang.name(), suites.len()),
+    let workspace = !matches!(suites.as_slice(), [(_, raiz, _)] if raiz == ".");
+    // Item 71: after [build] and item 56's judgement, before anything is written.
+    let (probed, named) = if !kept && lang == Some(Lang::Node) && workspace {
+        crate::init_probe::convert(repo.root(), &mut suites)
+    } else {
+        (Vec::new(), false)
+    };
+    match lang {
+        None => println!("shipcraft: test command run as written (filter = \"command\")"),
+        Some(lang) if !workspace => println!("shipcraft: language {} (runner {})", lang.name(), suites[0].2.runner),
+        Some(lang) => println!("shipcraft: workspace {} with {} suite(s)", lang.name(), suites.len()),
+    }
+    for line in &probed {
+        println!("{line}");
     }
     let reviewer = reviewer();
     // Item 15a: a write that fails in the middle undoes what this run created.
     let mut created = Vec::new();
-    let written = write_once(repo, &mut created, CONFIG_FILE, &config_text(lang, custom.as_ref(), &suites, &reviewer, build.as_deref()))
+    let written = write_once(repo, &mut created, CONFIG_FILE, &config_text(lang, custom.as_ref(), &suites, named, &reviewer, build.as_deref()))
         .and_then(|()| write_once(repo, &mut created, &format!("{LOCK_DIR}/.gitkeep"), ""))
         .and_then(|()| match &hook {
             Hook::Own(hooks) => install_hooks(hooks, local, &mut created),
@@ -407,6 +415,7 @@ fn config_text(
     lang: Option<Lang>,
     custom: Option<&Custom>,
     suites: &[(String, String, Profile)],
+    named: bool,
     reviewer: &Option<String>,
     build: Option<&str>,
 ) -> String {
@@ -428,7 +437,7 @@ fn config_text(
         );
     }
     if let [(_, raiz, profile)] = suites {
-        if raiz == "." {
+        if raiz == "." && !named {
             text += &format!(
                 "runner = {}\n{}test_command = {}\ntest_globs = {}\n",
                 quoted(profile.runner),
@@ -459,7 +468,8 @@ fn config_text(
             quoted(command)
         );
     }
-    if suites.len() > 1 || suites.first().is_some_and(|s| s.1 != ".") {
+    // Item 71: a converted suite keeps the [[suite]] form, even alone at root ".".
+    if named || suites.len() > 1 || suites.first().is_some_and(|s| s.1 != ".") {
         for (nome, raiz, profile) in suites {
             text += &format!(
                 "\n[[suite]]\nname = {}\nroot = {}\n{}command = {}\nglobs = {}\n",

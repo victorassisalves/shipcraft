@@ -18,6 +18,7 @@ mod glob;
 mod init;
 mod init_briefs;
 mod init_msg;
+mod init_probe;
 mod init_tool;
 mod jsonc;
 mod junit;

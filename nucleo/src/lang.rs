@@ -20,7 +20,7 @@ pub struct Profile {
     pub command: String,
     /// The check of the whole project (`verifica`): the CI's, never the hook's.
     pub check: Option<String>,
-    pub globs: &'static [&'static str],
+    pub globs: Vec<String>,
 }
 
 impl Lang {
@@ -63,7 +63,7 @@ impl Lang {
                 runner: "pytest",
                 command: "python3 -m pytest -p no:cacheprovider --junitxml={junit}".to_string(),
                 check: None,
-                globs: &[
+                globs: strings(&[
                     "**/test_*.py",
                     "**/*_test.py",
                     "**/conftest.py",
@@ -71,7 +71,7 @@ impl Lang {
                     "**/tests/**/helpers/**",
                     "**/test/**/fixtures/**",
                     "**/test/**/helpers/**",
-                ],
+                ]),
             },
             Lang::Node => {
                 let runner = node_runner(dir).unwrap_or("vitest");
@@ -88,14 +88,14 @@ impl Lang {
                     runner,
                     command: run,
                     check,
-                    globs: &["**/*.test.*", "**/*.spec.*", "**/__tests__/**", "**/vitest.config.*", "**/jest.config.*"],
+                    globs: strings(&["**/*.test.*", "**/*.spec.*", "**/__tests__/**", "**/vitest.config.*", "**/jest.config.*"]),
                 }
             }
             Lang::Go => Profile {
                 runner: "gotestsum",
                 command: "gotestsum --junitfile {junit} -- ./...".to_string(),
                 check: Some("go vet ./...".to_string()),
-                globs: &["**/*_test.go", "**/testdata/**"],
+                globs: strings(&["**/*_test.go", "**/testdata/**"]),
             },
         }
     }
@@ -110,6 +110,10 @@ impl Lang {
             Lang::Go => "create the stub: the function exists with the right signature and returns the zero value",
         }
     }
+}
+
+fn strings(globs: &[&str]) -> Vec<String> {
+    globs.iter().map(|g| g.to_string()).collect()
 }
 
 fn has_requirements_file(root: &Path) -> bool {
