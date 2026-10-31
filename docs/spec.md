@@ -450,14 +450,6 @@ Wrong-verdict note: since item 16b (2.0.0), `init` writes `[build]` (`tsc -b` on
    - Python, Go, `--lang other`, jest and vitest commands, the globs, an existing `.shipcraft.toml` (not rewritten, no line), `init`'s exit code, the closing guidance, the hooks, the block and the briefs: keep.
 6. **Touches.**
    - **Assertions that change:** item 56's cases whose fixture gets a written `[build]` that names the suite's folder while item 56 does not judge the tsconfig as checking no file: today they require `check` ending in `tsc --noEmit`; they now require no check and point 2's second line. The review names at least `v1-56.extends` and `v1-56.files`; the RED runs every `v1-56.*` mode against today's binary, lists each mode where `[build]` names the suite folder, and changes exactly those (`acceptance/tools/item56.py`), keeping every assertion of item 56's solution modes. README fixed points 40 and 57 (a check wherever a tsconfig exists) gain this exception next to item 56's. Item 16b's cases (`v1-16b.1-*`) where a suite's own folder is a `[build]` folder with a check expected change the same way; the RED lists them.
-   - **Assertions that change, for the new lock and row shape, and nothing else in them:**
-     - `v1-9.2-formato-da-trava`: the generated lock's format becomes 4. Its legacy and unknown-format refusal checks stay.
-     - item 43's helper `i43_json` and the cases that use it (`v1-43.*`): a lock this binary writes is format 4, with a seal over the nine fields. A fixture built to be format 2 or 3 is built without the three new keys, so each digest or seal refusal is still caused by what the case is testing.
-     - item 46's `draken`, `lists` and `log-fails` (through `i43_json`) and `passes-hook`, whose hand reseal now covers the nine fields, keeping its `red-already-passes` refusal.
-     - item 59's `state()` and `event()` key sets (`v1-59.files*`, `v1-59.suites*`, `v1-59.stderr-closed`, `v1-59.ci*`) gain exactly the three new keys on a non-redo `red` lock and row.
-     - item 65's exact non-redo `red` row key set (`v1-65.*`) and item 66's exact non-redo row and lock shapes (`v1-66.*`) gain exactly the three new keys with their values.
-
-     Redo row shapes, selection, hashes, case counts, refusal precedence and row counts stay as they are.
 
    - **Must keep passing unchanged:** every other `v1-56.*` and `v1-16b.1-*` case; item 12's and 13's TypeScript init cases (`v1-12.1-*`, `v1-13.1-init-escreve-verifica`, `v1-13.1-init-verifica-com-traco`, `v1-13.1-verifica-fora-do-hook`) unless the RED shows their fixture's folder is a `[build]` folder; item 16a's hook cases (`v1-16a.1-hook-saida-ignorada`, `v1-16a.1-hook-sem-saida`) and README fixed point 59; item 9's workspace cases; `init-files`; `v1-15a.1-decide-antes-e-desfaz-escrita-no-meio`, `v1-15a.1-falha-preserva-config-simbolica`; `v1-58.plain`, `v1-58.kept`, `v1-58.rollback`; `v1-64.init-codex`, `v1-64.init-claude`, `v1-64.init-gemini`, `v1-64.init-none`, `v1-64.init-preserve`; item 25's closing lines; item 67's and 68's init cases.
 7. **Measure and revert.**
@@ -766,6 +758,14 @@ DORA's change failure rate and time to recover need two facts per item: whether 
    - `init`'s block handling: keep, with point 2's new line and known block.
 4. **Touches.**
    - **Assertions that change, and nothing else:** the expected current block text, which gains point 2's line, wherever an earlier case builds it. That is item 61's `v1-61.block` and `v1-61.local-block`, item 68's block, upgrade and legacy cases, item 70's block and upgrade cases, and item 74's block, append, upgrade, brief-fails, write-fails and write-partial cases, with their `pontos`. It also covers the structural checks of `item70.sh` and `item74.sh`, which now also remove this item's line. Historical fixture bytes and the mode, prefix and suffix checks stay.
+   - **Assertions that change, for the new lock and row shape, and nothing else in them:**
+     - `v1-9.2-formato-da-trava`: the generated lock's format becomes 4. Its legacy and unknown-format refusal checks stay.
+     - item 43's helper `i43_json` and the cases that use it (`v1-43.*`): a lock this binary writes is format 4, with a seal over the nine fields. A fixture built to be format 2 or 3 is built without the three new keys, so each digest or seal refusal is still caused by what the case is testing.
+     - item 46's `draken`, `lists` and `log-fails` (through `i43_json`) and `passes-hook`, whose hand reseal now covers the nine fields, keeping its `red-already-passes` refusal.
+     - item 59's `state()` and `event()` key sets (`v1-59.files*`, `v1-59.suites*`, `v1-59.stderr-closed`, `v1-59.ci*`) gain exactly the three new keys on a non-redo `red` lock and row.
+     - item 65's exact non-redo `red` row key set (`v1-65.*`) and item 66's exact non-redo row and lock shapes (`v1-66.*`) gain exactly the three new keys with their values.
+
+     Redo row shapes, selection, hashes, case counts, refusal precedence and row counts stay as they are.
    - **The version:** 2.31.0 in §11, `v1-62.version` and the other version cases item 69 lists.
    - **Must keep passing unchanged:**
      - `v1-30.2-antiga-hook` and `v1-30.2-antiga-ci`, and every assertion of the cases above other than the shapes named there;
