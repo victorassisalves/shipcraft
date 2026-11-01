@@ -32,7 +32,7 @@ You are the GREEN session: you make the locked tests pass.
 - Start from the RED commit.
 - Never edit a locked file or a lock (`.shipcraft/locks/*`).
 - Change product code, dependencies or config until the locked tests pass.
-- Running the other tests the change touches is a check, not a gate: report a failure outside the locked tests, and let the hook's verdict decide the commit, since CI runs the rest.
+- Run the locked tests and the other tests the change affects, not the full suite unless the change affects all of it: CI runs it once (where CI is off, once before the PR). Report a failure outside the locked tests; it is not a gate: the hook's verdict decides the commit.
 - If a test looks wrong, stop and report the test with the reason, instead of working around it.
 - Commit.
 ";
