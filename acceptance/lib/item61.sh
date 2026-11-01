@@ -53,6 +53,7 @@ def expected_block(local=False):
   if line.startswith(b'- The GREEN session '):
    line=line.replace(b'A test it finds wrong is reported back, and a RED session fixes it with `shipcraft red --redo`.',REPAIR)
   result.append(line)
+  if line.startswith(b'- Cycle:'): result.append(b"- Pick the lane first: a mechanical change, one that changes no behavior (text, config, data, content, a rename, docs), is committed directly once the tests it affects pass in one run, with no RED or GREEN; a behavior change takes the cycle.\n- A change that needs more than about 40 new test cases is split before its RED.\n- A review of the RED's tests before the lock takes at most one round and fixes contract bugs only (a test that asserts the wrong behavior).\n- Locally, the GREEN runs only the tests the change affects; the full suite runs once, in CI (where CI is off, once before the PR).\n- In PR review, only Blocking findings open another round; the others go to notes.\n- Small fixes from one request go in one PR.\n")
   if line.startswith(b'- A behavior change:'): result.append(FIX_DATA); result.append(READ_TESTS)
   if line.startswith(b'- A session told it is '): result.append(ROLES); result.append(FALLBACK); result.append(SANDBOX)
  text=b''.join(result)

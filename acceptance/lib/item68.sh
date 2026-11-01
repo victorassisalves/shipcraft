@@ -84,7 +84,7 @@ def brief_contract(data,name,local):
  # Deliberately check concepts/phrases, not a complete editorial template.
  patterns={
  'red.md':[r'intent',r'never.*?implementation',r'two cases',r'ordinary',r'boundary',r'(?:read|existing).*?tests',r'(?:before|first)',r'never contradict',r'(?:intent|change).*?changes',r'fail.*?right reason',re.escape(cmd)+r' red',r'passing control',r'lock.*?control',r'(?:fake|external).*?real output',r'commit.*?tests',r'stubs',r'lock',r'stop',r'ambiguit'],
- 'green.md':[r'(?:start|from).*?RED commit',r'never.*?edit.*?locked file',r'(?:or|and).*?lock',r'product code',r'dependencies',r'config',r'locked tests.*?pass',r'other tests.*?(?:check|gate)',r'(?:not a gate|not.*?gate)',r'report.*?fail',r'hook.*?(?:verdict|decide)',r'CI.*?rest',r'stop.*?report.*?test',r'reason',r'(?:instead|rather|never).*?(?:work.*?around|workaround)',r'commit']}
+ 'green.md':[r'(?:start|from).*?RED commit',r'never.*?edit.*?locked file',r'(?:or|and).*?lock',r'product code',r'dependencies',r'config',r'locked tests.*?pass',r'other tests.*?(?:check|gate)',r'(?:not a gate|not.*?gate)',r'report.*?fail',r'hook.*?(?:verdict|decide)',r'CI runs it once',r'stop.*?report.*?test',r'reason',r'(?:instead|rather|never).*?(?:work.*?around|workaround)',r'commit']}
  for pattern in patterns[name]:assert re.search(pattern,s,re.I|re.S),name+' missing brief concept: '+pattern
  if local:
   assert not re.search(r'(?<!npx -- )\bshipcraft\s+(?:red|status|check|close)\b',s),'bare command in local brief'
