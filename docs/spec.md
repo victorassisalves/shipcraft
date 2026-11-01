@@ -1268,6 +1268,15 @@ Item 76 left one gap open. With `ci = "github"` there is no local `ci` row, so e
 8. **Readings fixed after the spec review (round 4).**
    - After a timeout, every selected lock processed later counts as `gh timed out`, also one that would fail at step 1 with no call; this overrides point 2's first-failure rule.
    - An OS or pipe error while reading `gh`'s output is `gh failed`; bytes read in full and then rejected (not UTF-8, not JSON, wrong shape) are `unreadable answer from gh`, whatever library call reads them.
+9. **Open, no case (the GREEN's audit, 2026-10-31).** Readings the spec leaves open; the code's choice stands, and no case pins it:
+   - A `gh` call that succeeds is not killed; its process group is killed only on a failure or the limit.
+   - A local `merge_at` with a fraction, minus GitHub's whole-second CI time, gives a fractional `waiting`.
+   - A green match whose `created_at` or `completed_at` is absent is not a time: `unreadable answer from gh`.
+   - A `merged` lock's `mergeCommit` shape is still checked (`null`, or an object with a string `oid`); its hex form and ancestry are not.
+   - `ci = "local"` is asked like `"github"`; only `"off"` gives `ci off`.
+   - In text, `; from github: ...` ends the lock line, after `; not observed here: ...`.
+   - The text `github:` line is printed also when nothing is selected (`selected 0, ...; missing none`).
+   - The config is read once per run, whether or not it reads.
 
 ## 4. Configuration
 
