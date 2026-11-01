@@ -1348,13 +1348,13 @@ Field data from the Draken session (2026-11-01): from 11:29 to 16:15 (4 h 46 min
 
 1. **The new lines.** The current variants of item 75's block gain six lines, right after the line that starts `- Cycle:`, in this order, before the line that starts `- A behavior change:`. Every other line stays, byte for byte, in its order. Each is one line ending with `\n`:
 
-   ``- Pick the lane first: a mechanical change (text, config, data, content, a rename, docs) is committed directly after one run of the tests it affects, with no RED or GREEN; a behavior change takes the cycle.``
+   ``- Pick the lane first: a mechanical change, one that changes no behavior (text, config, data, content, a rename, docs), is committed directly once the tests it affects pass in one run, with no RED or GREEN; a behavior change takes the cycle.``
 
    ``- A change that needs more than about 40 new test cases is split before its RED.``
 
    ``- A review of the RED's tests before the lock takes at most one round and fixes contract bugs only (a test that asserts the wrong behavior).``
 
-   ``- Locally, the GREEN runs only the tests the change affects; the full suite runs once, in CI.``
+   ``- Locally, the GREEN runs only the tests the change affects; the full suite runs once, in CI (where CI is off, once before the PR).``
 
    ``- In PR review, only Blocking findings open another round; the others go to notes.``
 
@@ -1364,13 +1364,14 @@ Field data from the Draken session (2026-11-01): from 11:29 to 16:15 (4 h 46 min
 2. **Known blocks.** Item 75's block joins the known blocks: both variants, exactly as `init` writes them from item 75's merge (`c3a919d`, version 2.31.0) through 2.38.0, unchanged in that range. In the code it is the old block named for that range (for example `AGENTS_BLOCK_2_31`). `init` replaces it with the new block under item 61's rules: kept bytes before and after, mode kept, the temporary-file write. Every block that was known before this item (item 74's, item 70's, v2.25.0's, v2.22.0's, 2.14.0's) stays known and is now upgraded to the new block. A block that matches none of them (an edited block) is kept with the differs notice, as today. `CLAUDE.md`'s block does not change.
 3. **The GREEN brief.** `.shipcraft/briefs/green.md`'s line that starts `- Running the other tests the change touches` is replaced, in place, by:
 
-   ``- Run only the locked tests and the other tests the change affects, never the full suite: CI runs it once. A failure outside the locked tests is reported, not a gate: the hook's verdict decides the commit.``
+   ``- Run the locked tests and the other tests the change affects, not the full suite unless the change affects all of it: CI runs it once. A failure outside the locked tests is reported, not a gate: the hook's verdict decides the commit.``
 
-   Every other line of `green.md` stays, and its last line keeps naming the running version (item 70). `red.md` does not change: none of its lines disagrees with the new block. `init`'s brief handling is unchanged: a missing brief is written; an existing brief equal to this version's (either variant) is kept silently; any other existing brief, including one an older version wrote, is kept with the differs notice (item 68). So an existing install keeps its old `green.md`, and the block, which wins where a brief disagrees, carries the rule.
+   Every other line of `green.md` stays, and its last line keeps naming the running version (item 70). `red.md`'s body does not change (none of its lines disagrees with the new block); a fresh `init` stamps it with the running version, 2.39.0, like `green.md`. `init`'s brief handling is unchanged: a missing brief is written; an existing brief equal to this version's (either variant) is kept silently; any other existing brief, including one an older version wrote, is kept with the differs notice (item 68). So an existing install keeps its old `green.md`, and the block, which wins where a brief disagrees, carries the rule.
 4. **Current behavior** on the paths this item touches (rule 14):
    - `init`'s block handling (item 61, 68, 70, 74, 75): create, append once, replace a known block, keep an edited block with the differs notice, leave a symlink or non-regular file alone, the temporary-file write, kept prefix, suffix and mode, `CLAUDE.md` written only when `AGENTS.md` holds this version's block, and a failure that never undoes the init: keep. Two readings change: the block's text (point 1) and the set of known blocks (point 2).
    - `init`'s brief handling (item 68): the folder checks, the per-brief notices, the closing line naming only written briefs, the version stamp: keep. One reading changes: `green.md`'s text (point 3).
    - Item 70's point 4 list and item 74's point 4 list, every entry: keep.
+   - Item 71's probe: with an npm workspace config, `init` runs the project's runner (`npx --no -- vitest list --filesOnly --json`) at the root before it writes the onboarding files, with the caller's environment and `TMPDIR`, waits up to 60 s, kills the process group on failure and prints its conversion or fallback notice; the runner may leave its own output or cache files, which are not in `init`'s rollback set. A core write failure rolls back what `init` recorded; an onboarding or brief failure never does. Keep.
    - The standing effects the spec-review brief lists (run-log rows, including the hook's row on every commit; lock files; the post-commit closing commit; `TMPDIR`; a suite on a copy or in the working tree): keep. The fixtures meet them.
    - Nothing else changes: no command, refusal, hook verdict, lock or run-log row. The lines tell agents how to choose and size work; Shipcraft enforces none of them.
 5. **Touches.**
@@ -1381,13 +1382,15 @@ Field data from the Draken session (2026-11-01): from 11:29 to 16:15 (4 h 46 min
      - `BRIEF_BODIES['green.md']` (both variants) in `item70.sh`, `item74.sh` and `item75.sh`, which assert this version's brief after `init`: it gains point 3's line in place of the old one. Where those files write `BRIEF_BODIES` bytes stamped `2.25.0` as an older version's briefs, the old body stays (that is what 2.25.0 wrote).
      - item 68's `brief_contract` concept patterns for `green.md` (`acceptance/lib/item68.sh`): `other tests.*?(?:check|gate)` and `CI.*?rest` become patterns point 3's line meets (`other tests.*?affects`, `not a gate`, `CI runs it once`); every other pattern stays.
      - their `pontos` where they quote the block or the brief.
-   - **Must keep passing unchanged:** every other case of items 61, 68, 70, 74 and 75 (the `edited-*`, `refused-*`, `status-*`, `folder-*`, `write-fails*`, `write-partial*`, `core-*` cases among them), and everything item 74's and item 75's Touches lists keep; item 71's and item 72's init cases, whose successful paths require `AGENTS.md`, `CLAUDE.md` and both briefs, and whose rollback cases (`v1-71.rollback`, `v1-71.rollback-cache`, `v1-72.rollback-file`, `v1-72.rollback-hooks`) require no onboarding file after a core failure.
+
+     In `item70.sh`, `item74.sh` and `item75.sh` one `BRIEF_BODIES` dictionary serves both this version's expected briefs and the briefs a fixture writes stamped `2.25.0`: split it into a current and a historical body before changing the current one, so no historical fixture changes.
+   - **Must keep passing unchanged:** item 80's install-guard cases that read the onboarding files (`v1-80.red-brief`, `green-brief`, `unborn-one`, `index-once`, `absent-briefs`, `excluded`); every other case of items 61, 68, 70, 74 and 75 (the `edited-*`, `refused-*`, `status-*`, `folder-*`, `write-fails*`, `write-partial*`, `core-*` cases among them), and everything item 74's and item 75's Touches lists keep; item 71's and item 72's init cases, whose successful paths require `AGENTS.md`, `CLAUDE.md` and both briefs, and whose rollback cases (`v1-71.rollback`, `v1-71.rollback-cache`, `v1-72.rollback-file`, `v1-72.rollback-hooks`) require no onboarding file after a core failure.
    - **New cases** (cap: 40):
      - the current block's exact text after `init` on a fresh repository, machine and local;
      - upgrades from item 75's block in all four directions (bare or local input, bare or local install), checking the exact new block, the prefix and suffix bytes, the mode and the `CLAUDE.md` import;
      - an edited item 75 block kept with the differs notice and no `CLAUDE.md` import;
      - one older known block (item 74's) upgraded straight to the new block;
-     - `green.md`'s exact text after `init` (machine and local), `red.md` unchanged, and an existing 2.38.0 `green.md` kept with the differs notice;
+     - `green.md`'s exact text after `init` (machine and local), `red.md`'s body unchanged with the 2.39.0 stamp, and an existing 2.38.0 `green.md` kept with the differs notice;
      - a control: `init` on a repository already holding the new block keeps it with the "already has" notice.
 6. **Measure and revert.**
    - **Metric:** in the first adopter sessions that run with this block (Draken's next 8 PRs after it moves to 2.39.0 or later), the share of session time spent outside Shipcraft commands drops from 56% (the 2026-11-01 sample), no mechanical change runs the RED/GREEN cycle, and no PR opens a review round for a non-Blocking finding.
@@ -1395,7 +1398,7 @@ Field data from the Draken session (2026-11-01): from 11:29 to 16:15 (4 h 46 min
    - **Revert:** a release restores item 75's block and the old `green.md` line; the new block joins the known blocks so `init` upgrades it back.
 7. **Known limits.**
    - The battery checks the text written, not whether an agent follows it.
-   - "Mechanical" is the agent's judgment; Shipcraft does not classify a change, and the hook still allows a commit with no open lock as today.
+   - "Mechanical", "the tests it affects", "Blocking" and "about 40 new cases" are the agent's judgment (spec review round 1 raised each; they stay planning rules, not checks); Shipcraft does not classify a change, and the hook still allows a commit with no open lock as today.
    - An existing install keeps its old `green.md` (point 3); only the block reaches it on `init`.
    - Draken stays on 2.31.0 until the coordinator moves it, so the metric starts then.
 
