@@ -255,14 +255,14 @@ if case in ('text','text-empty','since-text-coverage'):
  text=p.stdout.decode();lines=text.splitlines()
  # Item 38's report opening stays separate from the new DORA block.
  assert lines and re.search('machine|local',lines[0],re.I),lines
- if case=='text':assert all(str(x) in lines[0] for x in (T1-100,T3-800)),lines
+ if case=='text':assert all(reported(x) in lines[0] for x in (T1-100,T3-800)),lines
  start=next((i for i,line in enumerate(lines) if re.search(r'\bDORA\b',line)),None)
  assert start is not None,('missing DORA block',lines)
  block=[line for line in lines[start:] if line.strip()]
  # Permit either a standalone heading or DORA on the first coverage line.
  coverage=block if re.search('machine|local',block[0],re.I) else block[1:]
  assert len(coverage)>=2 and re.search('machine|local',coverage[0],re.I),block
- if case=='text':assert all(str(x) in coverage[0] for x in (T1-100,T3-800)),coverage
+ if case=='text':assert all(reported(x) in coverage[0] for x in (T1-100,T3-800)),coverage
  count=1 if case=='since-text-coverage' else 3
  assert re.search(r'\bmain\b',coverage[1]) and re.search(r'\b'+str(count)+r'\b',coverage[1]),coverage
  if case=='since-text-coverage':assert 'v2.0.0' in coverage[1] and not re.search(r'\b3\b',coverage[1]),coverage
