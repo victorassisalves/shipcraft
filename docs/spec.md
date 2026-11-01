@@ -1342,6 +1342,63 @@ On this repository, `report`'s text output prints machine values. Times are Unix
    - **Metric:** on this repository, every time, duration, latency and share in `shipcraft report`'s text reads as above (no Unix seconds, no float with more than the fixed decimals in those positions). The 2.37.0 and 2.38.0 binaries, run on the same frozen checkout and run log, print identical `--json` bytes.
    - **Revert:** a release that restores the old text form; `--json` is untouched either way.
 
+### The flow rules `init` writes are matched to risk (item 84)
+
+Field data from the Draken session (2026-11-01): from 11:29 to 16:15 (4 h 46 min) it shipped 8 small PRs, and a Shipcraft command ran during only 44% of that time. The rest was flow its agents invented, because the block `init` writes and the shipped briefs describe only the RED/GREEN cycle. Every change took the full cycle, even a name change (2 redos, 2 review rounds, 65 min). A test review before the lock applied every finding (rounds of 9, 12 and 21 findings). The full suite ran 3 times per change (the GREEN's ~2,000 tests, the hook, CI). Every PR review finding was applied, so non-blocking points opened new rounds. Our own flow already fixed all four (items up to 40 cases: median 13 min, p90 23 min). Victor's decision (2026-11-01): the block and the GREEN brief carry that flow, in as few words as carry it, because an adopter's agents read every line on every session.
+
+1. **The new lines.** The current variants of item 75's block gain six lines, right after the line that starts `- Cycle:`, in this order, before the line that starts `- A behavior change:`. Every other line stays, byte for byte, in its order. Each is one line ending with `\n`:
+
+   ``- Pick the lane first: a mechanical change (text, config, data, content, a rename, docs) is committed directly after one run of the tests it affects, with no RED or GREEN; a behavior change takes the cycle.``
+
+   ``- A change that needs more than about 40 new test cases is split before its RED.``
+
+   ``- A review of the RED's tests before the lock takes at most one round and fixes contract bugs only (a test that asserts the wrong behavior).``
+
+   ``- Locally, the GREEN runs only the tests the change affects; the full suite runs once, in CI.``
+
+   ``- In PR review, only Blocking findings open another round; the others go to notes.``
+
+   ``- Small fixes from one request go in one PR.``
+
+   The outer double backticks only quote each line. None of the six names a `shipcraft` command, so item 61's rule leaves them the same in the local variant; item 61's root line stays where that rule puts it (right after the heading, before `- Cycle:`).
+2. **Known blocks.** Item 75's block joins the known blocks: both variants, exactly as `init` writes them from item 75's merge (`c3a919d`, version 2.31.0) through 2.38.0, unchanged in that range. In the code it is the old block named for that range (for example `AGENTS_BLOCK_2_31`). `init` replaces it with the new block under item 61's rules: kept bytes before and after, mode kept, the temporary-file write. Every block that was known before this item (item 74's, item 70's, v2.25.0's, v2.22.0's, 2.14.0's) stays known and is now upgraded to the new block. A block that matches none of them (an edited block) is kept with the differs notice, as today. `CLAUDE.md`'s block does not change.
+3. **The GREEN brief.** `.shipcraft/briefs/green.md`'s line that starts `- Running the other tests the change touches` is replaced, in place, by:
+
+   ``- Run only the locked tests and the other tests the change affects, never the full suite: CI runs it once. A failure outside the locked tests is reported, not a gate: the hook's verdict decides the commit.``
+
+   Every other line of `green.md` stays, and its last line keeps naming the running version (item 70). `red.md` does not change: none of its lines disagrees with the new block. `init`'s brief handling is unchanged: a missing brief is written; an existing brief equal to this version's (either variant) is kept silently; any other existing brief, including one an older version wrote, is kept with the differs notice (item 68). So an existing install keeps its old `green.md`, and the block, which wins where a brief disagrees, carries the rule.
+4. **Current behavior** on the paths this item touches (rule 14):
+   - `init`'s block handling (item 61, 68, 70, 74, 75): create, append once, replace a known block, keep an edited block with the differs notice, leave a symlink or non-regular file alone, the temporary-file write, kept prefix, suffix and mode, `CLAUDE.md` written only when `AGENTS.md` holds this version's block, and a failure that never undoes the init: keep. Two readings change: the block's text (point 1) and the set of known blocks (point 2).
+   - `init`'s brief handling (item 68): the folder checks, the per-brief notices, the closing line naming only written briefs, the version stamp: keep. One reading changes: `green.md`'s text (point 3).
+   - Item 70's point 4 list and item 74's point 4 list, every entry: keep.
+   - The standing effects the spec-review brief lists (run-log rows, including the hook's row on every commit; lock files; the post-commit closing commit; `TMPDIR`; a suite on a copy or in the working tree): keep. The fixtures meet them.
+   - Nothing else changes: no command, refusal, hook verdict, lock or run-log row. The lines tell agents how to choose and size work; Shipcraft enforces none of them.
+5. **Touches.**
+   - **The version:** 2.39.0 in §11, `v1-62.version` and the other version cases item 69 lists.
+   - **Assertions that change, and nothing else in them:**
+     - the expected current block text, which gains point 1's six lines in both variants: item 61's `expected_block` (`acceptance/lib/item61.sh`), used by `v1-61.block`, `v1-61.local-block` and by every case of items 68, 70, 74 and 75 that builds the current block;
+     - the structural checks `exact_block` in `item70.sh`, `item74.sh` and `item75.sh`, which remove the lines later items added to reach their historical block: each now also removes point 1's six lines, and its historical baseline stays as it is;
+     - `BRIEF_BODIES['green.md']` (both variants) in `item70.sh`, `item74.sh` and `item75.sh`, which assert this version's brief after `init`: it gains point 3's line in place of the old one. Where those files write `BRIEF_BODIES` bytes stamped `2.25.0` as an older version's briefs, the old body stays (that is what 2.25.0 wrote).
+     - item 68's `brief_contract` concept patterns for `green.md` (`acceptance/lib/item68.sh`): `other tests.*?(?:check|gate)` and `CI.*?rest` become patterns point 3's line meets (`other tests.*?affects`, `not a gate`, `CI runs it once`); every other pattern stays.
+     - their `pontos` where they quote the block or the brief.
+   - **Must keep passing unchanged:** every other case of items 61, 68, 70, 74 and 75 (the `edited-*`, `refused-*`, `status-*`, `folder-*`, `write-fails*`, `write-partial*`, `core-*` cases among them), and everything item 74's and item 75's Touches lists keep; item 71's and item 72's init cases, whose successful paths require `AGENTS.md`, `CLAUDE.md` and both briefs, and whose rollback cases (`v1-71.rollback`, `v1-71.rollback-cache`, `v1-72.rollback-file`, `v1-72.rollback-hooks`) require no onboarding file after a core failure.
+   - **New cases** (cap: 40):
+     - the current block's exact text after `init` on a fresh repository, machine and local;
+     - upgrades from item 75's block in all four directions (bare or local input, bare or local install), checking the exact new block, the prefix and suffix bytes, the mode and the `CLAUDE.md` import;
+     - an edited item 75 block kept with the differs notice and no `CLAUDE.md` import;
+     - one older known block (item 74's) upgraded straight to the new block;
+     - `green.md`'s exact text after `init` (machine and local), `red.md` unchanged, and an existing 2.38.0 `green.md` kept with the differs notice;
+     - a control: `init` on a repository already holding the new block keeps it with the "already has" notice.
+6. **Measure and revert.**
+   - **Metric:** in the first adopter sessions that run with this block (Draken's next 8 PRs after it moves to 2.39.0 or later), the share of session time spent outside Shipcraft commands drops from 56% (the 2026-11-01 sample), no mechanical change runs the RED/GREEN cycle, and no PR opens a review round for a non-Blocking finding.
+   - **Threshold:** median wall time per small PR at most half of the sample's (4 h 46 min over 8 PRs, about 36 min).
+   - **Revert:** a release restores item 75's block and the old `green.md` line; the new block joins the known blocks so `init` upgrades it back.
+7. **Known limits.**
+   - The battery checks the text written, not whether an agent follows it.
+   - "Mechanical" is the agent's judgment; Shipcraft does not classify a change, and the hook still allows a commit with no open lock as today.
+   - An existing install keeps its old `green.md` (point 3); only the block reaches it on `init`.
+   - Draken stays on 2.31.0 until the coordinator moves it, so the metric starts then.
+
 ## 4. Configuration
 
 `.shipcraft.toml` lives at the project root.
@@ -1754,4 +1811,4 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.38.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.39.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
