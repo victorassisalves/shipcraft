@@ -208,7 +208,7 @@ if case=='readonly':
   if p.is_file():p.chmod(0o444)
 if case.startswith('arguments-'):
  mode=case[10:]
- args={'missing':['--since'],'repeat-json':['--json','--json'],'repeat-since':['--since','v1.0.0','--since','v1.1.0'],'unknown':['--github'],'extra':['word'],'leading-zero':['--since','v01.0.0'],'unicode':['--since','v１.0.0'],'suffix':['--since','v1.0.0-rc1'],'empty':['--since',''],'flag-value':['--since','--json']}[mode]
+ args={'missing':['--since'],'repeat-json':['--json','--json'],'repeat-since':['--since','v1.0.0','--since','v1.1.0'],'unknown':['--gitlab'],'extra':['word'],'leading-zero':['--since','v01.0.0'],'unicode':['--since','v１.0.0'],'suffix':['--since','v1.0.0-rc1'],'empty':['--since',''],'flag-value':['--since','--json']}[mode]
 # Record all report git calls while delegating to real git. Failure injection happens
 # only at the named public read boundary; no fabricated log/tag output is used.
 tools=cw/'tools76';tools.mkdir();calls=cw/'git-calls76.jsonl'
