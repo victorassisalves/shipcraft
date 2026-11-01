@@ -1278,6 +1278,70 @@ Item 76 left one gap open. With `ci = "github"` there is no local `ci` row, so e
    - The text `github:` line is printed also when nothing is selected (`selected 0, ...; missing none`).
    - The config is read once per run, whether or not it reads.
 
+### `report`'s text output is readable (item 83)
+
+On this repository, `report`'s text output prints machine values. Times are Unix seconds (`first row at 1793218604, ... (Unix seconds)`, `red at 1793220313`). Hook latencies are raw floats (`p50 12.331499999999998 s`), and so are shares (`approved on first review 0.6666666666666666`). Every duration is in seconds (`red to merge 4226 s`). Victor's decision (2026-11-01): the text output prints these values for people. `--json` stays the machine format, byte for byte.
+
+1. **Times.** These times print in UTC as `YYYY-MM-DDTHH:MM:SSZ`, for example `2026-10-29T14:16:44Z`:
+   - the run log's first and last row, on item 38's opening line and on the DORA block's first coverage line (item 76);
+   - a lock's `red at`, `close at` and `merge at`, including a `merge at` filled by `--github`;
+   - the DORA `deploys` line's `first at` and `last at`.
+
+   A time with a fraction prints its whole second, rounded down: 100.9 prints `1970-01-01T00:01:40Z`. The machine's time zone (`TZ`) never changes the output. Where both coverage sentences say `(Unix seconds)`, they now say `(UTC)`. A time outside years 0000 to 9999 is not pinned.
+2. **Durations.** These durations print as `<h> h <m> min <s> s`:
+   - a lock's red to close, close to merge, red to merge and waiting;
+   - a day row's median red to merge and median waiting;
+   - DORA's lead time and time to recover, median and p90.
+
+   The value is first rounded to the nearest whole second; a value exactly halfway is not pinned. Leading zero units are left out, and inner ones are kept: `0 s`, `59 s`, `1 min 0 s`, `59 min 59 s`, `1 h 0 min 0 s`, `1 h 10 min 26 s`, `27 h 3 min 4 s`. Hours never roll into days. A negative duration that does not round to 0 prints `-` and then the form of its absolute value, for example `-1 min 5 s`.
+3. **Hook and CI latencies.** Each p50 and p90, on the `totals:` line and in each lock's `hook` and `ci`, prints in seconds with exactly one decimal: `p50 0.6 s`, `p90 54.5 s`, `p50 9.0 s`, `p90 1245.3 s`. The value is rounded to the nearest tenth; a value exactly halfway is not pinned. They stay in seconds because each is one step's run time, not a span between steps.
+4. **Shares and rates.**
+   - These shares print as a whole percent, rounded to the nearest; a value exactly halfway is not pinned. Examples: `0%`, `67%`, `71%`, `100%`. The shares are a day row's `approved on first review`, DORA's `rework rate` and DORA's `change failure rate`.
+   - DORA's `per day` prints with exactly two decimals, for example `0.33` or `2.00`, rounded to the nearest hundredth; a value exactly halfway is not pinned.
+5. **Unchanged.** Everything else in the text output stays as it is today:
+   - the lines, their order and their wording outside the values above;
+   - counts, and `-` for an empty value;
+   - `first approved true`/`false`;
+   - the refusal maps (`refusals {"no-report":2}`);
+   - `; not observed here: ...` and `; from github: ...`;
+   - the `github:` line;
+   - the DORA lines' `(n ..., missing ...; reason)` tails;
+   - `gap:` lines.
+
+   `--json` is unchanged, byte for byte, with every value still Unix seconds, seconds and raw shares. Exit codes, the usage refusal, `--since`'s refusal and stderr are unchanged. `--since` and `--github` select and fill exactly what they do today; only the text form of the values changes.
+6. **Current behavior** on the paths this item touches (rule 14):
+   - `relatorio.rs`'s `text` and `dora_text` print every value with `serde_json`'s number form. Times, durations, latencies, shares and `per day` change as points 1 to 4 say. Everything else they print is kept.
+   - The `--json` output and every computed value (`meta`, `lock`, `day`, `dora`, `github`, `gap`): keep.
+   - `report`'s reads, its exit 0 and its refusals: keep. That covers the run-log reader (item 38: `serde_json`, a field of the wrong type read as empty, never a gap), repository discovery and git reads (item 76), and `--github`'s config read, `gh` calls and their environment (item 79, point 4, every verdict there kept). The formatting adds no validation or coercion of its own. It writes nothing, appends no run-log row, and makes no network call without `--github`.
+   - The standing effects the spec-review brief lists, met by the fixtures: keep.
+7. **Touches.**
+   - **The version:** 2.38.0 in §11, `v1-62.version` and the other version cases item 69 lists.
+   - **Assertions that change, and nothing else in them:**
+     - `v1-38.text` (`acceptance/lib/item38.sh`) checks that the first line holds `100` and `200`. It now checks for `1970-01-01T00:01:40Z` and `1970-01-01T00:03:20Z`, and still checks `machine` or `local` and the `lock-38-A` row.
+     - `v1-76.text` (`acceptance/lib/item76.sh`) has two assertions: `T1-100` and `T3-800` appear as numbers on the opening line, and again on the DORA coverage line. Both now check their UTC forms.
+   - **Must keep passing unchanged:**
+     - every other `v1-38.*` and `v1-76.*` case, including `v1-76.text-empty` and `since-text-coverage`, which check counts and words, not values;
+     - item 79's text cases, `v1-79.text`, `text-unobserved`, `text-missing`, `summary-sorted` and `no-github-text`, which check only the `github:` line and the `; from github: ...` ending;
+     - every `--json` case of items 38, 46, 76 and 79 (`v1-46.report-zero`, `report-count` among them);
+     - item 75's cases (`v1-75.*`);
+     - every case item 79's Touches list marks "must keep passing unchanged" (its config reader, item 43's lock reader, item 22's environment and item 10's run-log check among them).
+   - **New cases** use run logs written by the battery after the fixture's last commit (replacing any hook rows), as item 38's do, and item 76's release fixtures for the DORA lines. Each runs with `TZ` set to a zone other than UTC. They cover:
+     - each time position;
+     - a fractional time;
+     - each duration boundary above;
+     - a negative duration;
+     - one-decimal latencies, including a whole number (`9.0 s`);
+     - each share as a percent, including `0%` and `100%`;
+     - `per day` at two decimals;
+     - `--github`'s filled `merge at` and waiting in the new forms;
+     - `--json` against the same fixture: the exact line text, with today's number spelling (a whole number without `.0`, for example `"red_at":100`);
+     - `-` still printed for an empty value.
+
+     Cap: 40 new cases.
+8. **Measure and revert.**
+   - **Metric:** on this repository, every time, duration, latency and share in `shipcraft report`'s text reads as above (no Unix seconds, no float with more than the fixed decimals in those positions). The 2.37.0 and 2.38.0 binaries, run on the same frozen checkout and run log, print identical `--json` bytes.
+   - **Revert:** a release that restores the old text form; `--json` is untouched either way.
+
 ## 4. Configuration
 
 `.shipcraft.toml` lives at the project root.
@@ -1690,4 +1754,4 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.37.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.38.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.

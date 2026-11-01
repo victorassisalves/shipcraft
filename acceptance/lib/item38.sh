@@ -290,7 +290,7 @@ assert not (pathlib.Path(cw)/'calls').exists(), 'report called external service/
 if c=='text':
     first=a.stdout.splitlines()[0].lower()
     assert 'machine' in first or 'local' in first, first
-    assert '100' in first and '200' in first, first
+    assert '1970-01-01T00:01:40Z'.lower() in first and '1970-01-01T00:03:20Z'.lower() in first, first
     assert 'lock-38-A' in a.stdout, 'no per-lock row'
     sys.exit()
 out=[json.loads(s) for s in a.stdout.splitlines()]

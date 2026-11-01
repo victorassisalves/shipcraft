@@ -871,8 +871,43 @@ pub(crate) fn num(x: f64) -> Value {
 
 /// The UTC day (YYYY-MM-DD) of a Unix time.
 fn day(t: f64) -> String {
-    let days = (t / 86_400.0).floor() as i64;
-    // Howard Hinnant's civil_from_days.
+    civil((t / 86_400.0).floor() as i64)
+}
+
+/// Item 83: a Unix time as UTC `YYYY-MM-DDTHH:MM:SSZ`, its whole second rounded down.
+fn utc(t: f64) -> String {
+    let secs = t.floor() as i64;
+    let rest = secs.rem_euclid(86_400);
+    format!("{}T{:02}:{:02}:{:02}Z", civil(secs.div_euclid(86_400)), rest / 3600, rest % 3600 / 60, rest % 60)
+}
+
+/// Item 83: a duration in seconds as `<h> h <m> min <s> s`, rounded to the nearest second.
+fn duration(x: f64) -> String {
+    let total = x.round() as i64;
+    let sign = if total < 0 { "-" } else { "" };
+    let a = total.unsigned_abs();
+    let (h, m, s) = (a / 3600, a % 3600 / 60, a % 60);
+    if h > 0 {
+        format!("{sign}{h} h {m} min {s} s")
+    } else if m > 0 {
+        format!("{sign}{m} min {s} s")
+    } else {
+        format!("{sign}{s} s")
+    }
+}
+
+/// Item 83: a share as a whole percent.
+fn percent(x: f64) -> String {
+    format!("{}%", (x * 100.0).round() as i64)
+}
+
+/// Item 83's text forms of a value; `-` when it is empty (or not a number).
+fn show_with(v: &Value, f: impl Fn(f64) -> String) -> String {
+    v.as_f64().map_or_else(|| "-".to_string(), f)
+}
+
+/// Howard Hinnant's civil_from_days, as YYYY-MM-DD.
+fn civil(days: i64) -> String {
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z.rem_euclid(146_097);
@@ -887,9 +922,11 @@ fn day(t: f64) -> String {
 
 fn text(lines: &[Value]) -> String {
     let show = |v: &Value| if v.is_null() { "-".to_string() } else { v.to_string() };
-    let secs = |v: &Value| if v.is_null() { "-".to_string() } else { format!("{v} s") };
+    let time = |v: &Value| show_with(v, utc);
+    let span = |v: &Value| show_with(v, duration);
+    let latency = |v: &Value| show_with(v, |x| format!("{x:.1} s"));
     let stat = |s: &Value| {
-        format!("{} (p50 {}, p90 {}, refusals {})", s["count"], secs(&s["p50"]), secs(&s["p90"]), s["refusals"])
+        format!("{} (p50 {}, p90 {}, refusals {})", s["count"], latency(&s["p50"]), latency(&s["p90"]), s["refusals"])
     };
     let mut out = String::new();
     let mut meta = &Value::Null;
@@ -903,8 +940,8 @@ fn text(lines: &[Value]) -> String {
             }
             "meta" => {
                 out += &format!(
-                    "shipcraft report: runs recorded on this machine only (local run log), first row at {}, last row at {} (Unix seconds); reviews or CI that ran elsewhere are not counted.\n",
-                    line["first_at"], line["last_at"]
+                    "shipcraft report: runs recorded on this machine only (local run log), first row at {}, last row at {} (UTC); reviews or CI that ran elsewhere are not counted.\n",
+                    time(&line["first_at"]), time(&line["last_at"])
                 );
                 out += &format!("totals: hook {}; ci {}\n", stat(&line["hook"]), stat(&line["ci"]));
             }
@@ -916,9 +953,9 @@ fn text(lines: &[Value]) -> String {
                     "lock {}: {}; red at {}, close at {}, merge at {}; red to close {}, close to merge {}, red to merge {}; waiting {}; reviews passed {}, refused {}, error {}, first approved {}; redos {}; refusals {}, errors {}; hook {}; ci {}{}{}\n",
                     line["lock"].as_str().unwrap_or_default(),
                     line["state"].as_str().unwrap_or_default(),
-                    show(&line["red_at"]), show(&line["close_at"]), show(&line["merge_at"]),
-                    secs(&line["red_to_close"]), secs(&line["close_to_merge"]), secs(&line["red_to_merge"]),
-                    secs(&line["waiting"]),
+                    time(&line["red_at"]), time(&line["close_at"]), time(&line["merge_at"]),
+                    span(&line["red_to_close"]), span(&line["close_to_merge"]), span(&line["red_to_merge"]),
+                    span(&line["waiting"]),
                     line["reviews"]["passed"], line["reviews"]["refused"], line["reviews"]["error"],
                     show(&line["first_review_approved"]), line["redos"], line["refusals"], line["errors"],
                     stat(&line["hook"]), stat(&line["ci"]),
@@ -938,9 +975,9 @@ fn text(lines: &[Value]) -> String {
                     "day {}: {} merged lock(s); median red to merge {}, median waiting {}, approved on first review {}\n",
                     line["day"].as_str().unwrap_or_default(),
                     line["merged_locks"],
-                    secs(&line["red_to_merge_median"]),
-                    secs(&line["waiting_median"]),
-                    show(&line["first_review_approved_share"])
+                    span(&line["red_to_merge_median"]),
+                    span(&line["waiting_median"]),
+                    show_with(&line["first_review_approved_share"], percent)
                 );
             }
             "dora" => out += &dora_text(meta, line),
@@ -967,15 +1004,16 @@ fn text(lines: &[Value]) -> String {
 
 /// Item 76: the DORA block, with the same content as the `dora` line.
 fn dora_text(meta: &Value, dora: &Value) -> String {
-    let show = |v: &Value| if v.is_null() { "-".to_string() } else { v.to_string() };
-    let secs = |v: &Value| if v.is_null() { "-".to_string() } else { format!("{v} s") };
+    let time = |v: &Value| show_with(v, utc);
+    let span = |v: &Value| show_with(v, duration);
+    let share = |v: &Value| show_with(v, percent);
     let mut out = "DORA\n".to_string();
     out += &if meta["first_at"].is_null() {
         "run log: no rows yet; it holds this machine's runs only (local run log).\n".to_string()
     } else {
         format!(
-            "run log: first row at {}, last row at {} (Unix seconds); it holds this machine's runs only (local run log).\n",
-            meta["first_at"], meta["last_at"]
+            "run log: first row at {}, last row at {} (UTC); it holds this machine's runs only (local run log).\n",
+            time(&meta["first_at"]), time(&meta["last_at"])
         )
     };
     let git = &dora["git"];
@@ -1000,7 +1038,7 @@ fn dora_text(meta: &Value, dora: &Value) -> String {
         if v.is_null() {
             "-".to_string()
         } else {
-            format!("median {}, p90 {}", secs(&v["median"]), secs(&v["p90"]))
+            format!("median {}, p90 {}", span(&v["median"]), span(&v["p90"]))
         }
     };
     let d = &dora["deploys"];
@@ -1011,18 +1049,18 @@ fn dora_text(meta: &Value, dora: &Value) -> String {
         format!(
             "deploys: {} release(s), first at {}, last at {}, per day {}{}",
             v["count"],
-            v["first"],
-            v["last"],
-            show(&v["per_day"]),
+            time(&v["first"]),
+            time(&v["last"]),
+            show_with(&v["per_day"], |x| format!("{x:.2}")),
             tail(d)
         )
     };
     out += &format!("lead time: {}{}", spread(&dora["lead_time"]), tail(&dora["lead_time"]));
-    out += &format!("rework rate: {}{}", show(&dora["rework_rate"]["value"]), tail(&dora["rework_rate"]));
+    out += &format!("rework rate: {}{}", share(&dora["rework_rate"]["value"]), tail(&dora["rework_rate"]));
     out += &format!("time to recover: {}{}", spread(&dora["time_to_recover"]), tail(&dora["time_to_recover"]));
     out += &format!(
         "change failure rate: {}{}",
-        show(&dora["change_failure_rate"]["value"]),
+        share(&dora["change_failure_rate"]["value"]),
         tail(&dora["change_failure_rate"])
     );
     out
@@ -1045,6 +1083,19 @@ mod tests {
         assert_eq!(day(86_399.0), "1970-01-01");
         assert_eq!(day(86_400.0), "1970-01-02");
         assert_eq!(day(1_792_972_800.0), "2026-10-26");
+    }
+
+    #[test]
+    fn readable_text_forms() {
+        assert_eq!(utc(100.9), "1970-01-01T00:01:40Z");
+        assert_eq!(utc(-1.0), "1969-12-31T23:59:59Z");
+        for (x, want) in [(0.0, "0 s"), (59.0, "59 s"), (60.0, "1 min 0 s"), (3599.0, "59 min 59 s"),
+            (3600.0, "1 h 0 min 0 s"), (4226.0, "1 h 10 min 26 s"), (97_384.0, "27 h 3 min 4 s"),
+            (-65.0, "-1 min 5 s"), (-0.4, "0 s")] {
+            assert_eq!(duration(x), want);
+        }
+        assert_eq!(percent(2.0 / 3.0), "67%");
+        assert_eq!(percent(0.0), "0%");
     }
 
     #[test]
