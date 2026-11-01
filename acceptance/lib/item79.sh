@@ -150,7 +150,7 @@ if case.startswith('config-') and case not in ('config-symlink','config-nested')
  elif mode=='directory':(root/'.shipcraft.toml').unlink();(root/'.shipcraft.toml').mkdir()
  else:write(Path('.shipcraft.toml'),bad[mode])
  missing('config unreadable',[P])
-if case.startswith('pr-'):
+if case.startswith('pr-') and case!='pr-array-only':
  mode=case[3:];missing('unreadable answer from gh',[P]);mergefill.clear()
  if mode in ('number','absent','state','mergedAt','head','mergeCommit','oid'):
   if mode=='absent':pr.pop('number')
@@ -188,7 +188,7 @@ if case.startswith(('status-','check-')) and case!='status-later':
  elif mode in ('unrelated-shape','unrelated-time'):
   other=dict(context='other',state='pending',created_at='bad') if reader=='status' else dict(name='other',status='queued',conclusion=None,completed_at='bad')
   if mode=='unrelated-shape':other['state' if reader=='status' else 'conclusion']=4
-  else:reasons.pop('A');waitfill.append('A')
+  else:reasons.pop('A');waitfill.append('A');expected_calls[:]=[P,S,C()]
   pages[0][field].append(other);pages[0]['total_count']+=1
  elif mode=='empty-pages':pages.clear()
  elif mode=='object-page':pages[:]=[[]]
@@ -201,7 +201,7 @@ if case.startswith(('status-','check-')) and case!='status-later':
   faults[reader]=mode
   if mode=='nonzero':missing('gh failed')
  elif mode=='duplicate-keys':
-  reasons.pop('A');waitfill.append('A');raw[reader]=json.dumps(pages).replace('"total_count":','"total_count": -1, "total_count":',1).encode()
+  reasons.pop('A');waitfill.append('A');expected_calls[:]=[P,S,C()];raw[reader]=json.dumps(pages).replace('"total_count":','"total_count": -1, "total_count":',1).encode()
 if case.startswith('time-'):
  mode=case[5:];valid={'leap':'2000-02-29T23:59:59Z','minimum':'0001-01-01T00:00:00Z','maximum':'9999-12-31T23:59:59Z'}
  invalid={'century':'1900-02-29T00:00:00Z','month':'2023-13-01T00:00:00Z','day':'2023-04-31T00:00:00Z','hour':'2023-01-01T24:00:00Z','minute':'2023-01-01T00:60:00Z','second':'2023-01-01T00:00:60Z','fraction':'2023-01-01T00:00:00.0Z','offset':'2023-01-01T00:00:00+00:00','lower':'2023-01-01t00:00:00z','short':'023-01-01T00:00:00Z','unicode':'２０２３-01-01T00:00:00Z','trailing':'2023-01-01T00:00:00Z\n'}
@@ -282,7 +282,7 @@ def report(args):
  if gitcalls.exists():assert not any(a in ('fetch','pull','push','clone') for r in map(json.loads,gitcalls.read_text().splitlines()) for a in r),'report attempted Git network'
  return p.returncode,out,err,elapsed
 # Baseline is also the byte-for-byte no-GitHub preservation reference.
-rc,baseline,stderr,_=report(['--json']);assert rc==0 and not stderr,(rc,stderr)
+rc,baseline,stderr,_=report(['--since','v1.0.0','--json'] if case in ('since','flags-first','flags-last') else ['--json']);assert rc==0 and not stderr,(rc,stderr)
 assert not calls.exists(),'report without --github called gh'
 base=[json.loads(s) for s in baseline.splitlines()];base_locks={r['lock']:r for r in base if r['kind']=='lock'}
 if case in ('no-github','no-github-text'):
