@@ -1312,19 +1312,20 @@ On this repository, `report`'s text output prints machine values. Times are Unix
 6. **Current behavior** on the paths this item touches (rule 14):
    - `relatorio.rs`'s `text` and `dora_text` print every value with `serde_json`'s number form. Times, durations, latencies, shares and `per day` change as points 1 to 4 say. Everything else they print is kept.
    - The `--json` output and every computed value (`meta`, `lock`, `day`, `dora`, `github`, `gap`): keep.
-   - `report`'s reads, its exit 0 and its refusals: keep. It writes nothing, appends no run-log row, and makes no network call without `--github`.
+   - `report`'s reads, its exit 0 and its refusals: keep. That covers the run-log reader (item 38: `serde_json`, a field of the wrong type read as empty, never a gap), repository discovery and git reads (item 76), and `--github`'s config read, `gh` calls and their environment (item 79, point 4, every verdict there kept). The formatting adds no validation or coercion of its own. It writes nothing, appends no run-log row, and makes no network call without `--github`.
    - The standing effects the spec-review brief lists, met by the fixtures: keep.
 7. **Touches.**
    - **The version:** 2.38.0 in §11, `v1-62.version` and the other version cases item 69 lists.
    - **Assertions that change, and nothing else in them:**
      - `v1-38.text` (`acceptance/lib/item38.sh`) checks that the first line holds `100` and `200`. It now checks for `1970-01-01T00:01:40Z` and `1970-01-01T00:03:20Z`, and still checks `machine` or `local` and the `lock-38-A` row.
-     - `v1-76.text` (`acceptance/lib/item76.sh`) checks that `T1-100` and `T3-800` appear as numbers on the opening line and on the DORA coverage line. It now checks their UTC forms on both lines.
+     - `v1-76.text` (`acceptance/lib/item76.sh`) has two assertions: `T1-100` and `T3-800` appear as numbers on the opening line, and again on the DORA coverage line. Both now check their UTC forms.
    - **Must keep passing unchanged:**
      - every other `v1-38.*` and `v1-76.*` case, including `v1-76.text-empty` and `since-text-coverage`, which check counts and words, not values;
      - item 79's text cases, `v1-79.text`, `text-unobserved`, `text-missing`, `summary-sorted` and `no-github-text`, which check only the `github:` line and the `; from github: ...` ending;
      - every `--json` case of items 38, 46, 76 and 79 (`v1-46.report-zero`, `report-count` among them);
-     - item 75's cases (`v1-75.*`).
-   - **New cases** use run logs written by the battery, as item 38's do, and item 76's release fixtures for the DORA lines. Each runs with `TZ` set to a zone other than UTC. They cover:
+     - item 75's cases (`v1-75.*`);
+     - every case item 79's Touches list marks "must keep passing unchanged" (its config reader, item 43's lock reader, item 22's environment and item 10's run-log check among them).
+   - **New cases** use run logs written by the battery after the fixture's last commit (replacing any hook rows), as item 38's do, and item 76's release fixtures for the DORA lines. Each runs with `TZ` set to a zone other than UTC. They cover:
      - each time position;
      - a fractional time;
      - each duration boundary above;
@@ -1333,12 +1334,12 @@ On this repository, `report`'s text output prints machine values. Times are Unix
      - each share as a percent, including `0%` and `100%`;
      - `per day` at two decimals;
      - `--github`'s filled `merge at` and waiting in the new forms;
-     - `--json` byte for byte against the same fixture's expected values in seconds;
+     - `--json` against the same fixture: the exact line text, with today's number spelling (a whole number without `.0`, for example `"red_at":100`);
      - `-` still printed for an empty value.
 
      Cap: 40 new cases.
 8. **Measure and revert.**
-   - **Metric:** on this repository, `shipcraft report | grep -E '[0-9]{10}|[0-9]\.[0-9]{3}'` prints nothing, and every time, duration and share reads as above. `report --json` before and after the release is identical on the same run log.
+   - **Metric:** on this repository, every time, duration, latency and share in `shipcraft report`'s text reads as above (no Unix seconds, no float with more than the fixed decimals in those positions). The 2.37.0 and 2.38.0 binaries, run on the same frozen checkout and run log, print identical `--json` bytes.
    - **Revert:** a release that restores the old text form; `--json` is untouched either way.
 
 ## 4. Configuration
