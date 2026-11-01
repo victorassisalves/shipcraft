@@ -34,6 +34,7 @@ mod processo;
 mod red;
 mod refusal;
 mod relatorio;
+mod relatorio_gh;
 mod revisao;
 mod suite;
 mod tsbuild;
@@ -50,7 +51,7 @@ const USAGE: &str =
      | shipcraft check [--commit-msg <file>] | shipcraft close
      | shipcraft ci --base <ref> [--pr]
      | shipcraft pr [--title <t>] [--body <file>] | shipcraft review [--pr <n>]
-     | shipcraft merge <pr> [--no-review \"<reason>\"] | shipcraft status | shipcraft report [--json] [--since <tag>]";
+     | shipcraft merge <pr> [--no-review \"<reason>\"] | shipcraft status | shipcraft report [--json] [--since <tag>] [--github]";
 
 fn main() -> ExitCode {
     // Item 22.2: the lists reach only the hook's suite, never a value inherited.
@@ -204,21 +205,23 @@ fn run(args: &[&str]) -> Result<()> {
         ["merge", n] => merge::merge(&Repo::open()?, n, None),
         ["merge", n, "--no-review", motivo] => merge::merge(&Repo::open()?, n, Some(motivo)),
         ["status"] => merge::status(&Repo::open()?),
-        // Item 38: reads the run log; item 76: and git, read-only. Syntax first
-        // (exit 2, before any git read): `--json` and `--since <tag>` once each.
+        // Item 38: reads the run log; item 76: and git, read-only; item 79: and
+        // GitHub through `gh` with `--github` only. Syntax first (exit 2, before
+        // any git or `gh` call): `--json`, `--since <tag>` and `--github` once each.
         ["report", rest @ ..] => {
-            let (mut as_json, mut since) = (false, None);
+            let (mut as_json, mut since, mut github) = (false, None, false);
             let mut rest = rest.iter();
             while let Some(arg) = rest.next() {
                 match *arg {
                     "--json" if !as_json => as_json = true,
+                    "--github" if !github => github = true,
                     "--since" if since.is_none() => {
                         since = Some(*rest.next().filter(|v| lock::valid_tag(v)).ok_or_else(|| invalid(args))?)
                     }
                     _ => return Err(invalid(args)),
                 }
             }
-            relatorio::run(as_json, since)
+            relatorio::run(as_json, since, github)
         }
         // Item 23: records no row, as `init`.
         // Item 21.1: any folder, no repository nor .shipcraft.toml needed.
