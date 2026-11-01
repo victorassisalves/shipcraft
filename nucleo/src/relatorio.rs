@@ -3,9 +3,12 @@
 //! Item 76: `[--since <tag>]`, and a local DORA readout from the run log, the
 //! release tags and the lock files, read through `git -C <root>` read-only, with
 //! no network read; a key without data says so with a count.
+//! Item 79: `[--github]` fills the selected locks' waiting and merge times
+//! from GitHub through `gh` (relatorio_gh); without it, nothing changes.
 
 use crate::lock::{self, Lock};
 use crate::refusal::Result;
+use crate::relatorio_gh::{Asker, Pr};
 use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -14,7 +17,7 @@ use std::process::{Command, Stdio};
 
 type Row = Map<String, Value>;
 
-pub fn run(as_json: bool, since: Option<&str>) -> Result<()> {
+pub fn run(as_json: bool, since: Option<&str>, github: bool) -> Result<()> {
     let found = discover();
     let bytes = found.as_ref().and_then(|(_, log)| fs::read(log).ok()).unwrap_or_default();
     let (rows, gaps) = read(&bytes);
@@ -24,8 +27,10 @@ pub fn run(as_json: bool, since: Option<&str>) -> Result<()> {
             ids.push(id);
         }
     }
+    let root = found.as_ref().map(|(root, _)| root.clone()).unwrap_or_default();
+    let git = Git { root: root.clone() };
     let evidence = match &found {
-        Some((root, _)) => Evidence::read(&Git { root: root.clone() }, &ids),
+        Some(_) => Evidence::read(&git, &ids),
         None => Err("no git repository found".to_string()),
     };
     if let (Some(tag), Ok(ev)) = (since, &evidence) {
@@ -35,15 +40,18 @@ pub fn run(as_json: bool, since: Option<&str>) -> Result<()> {
         }
     }
     let facts = evidence.as_ref().ok().map(|ev| Facts::of(ev, &rows, &ids));
-    let report = Report::of(&rows, &ids, facts.as_ref());
+    let mut report = Report::of(&rows, &ids, facts.as_ref());
     let dora = dora(&rows, evidence.as_ref().map(|ev| (ev, facts.as_ref().expect("facts with evidence"))), since);
+    // Item 79: after item 76's reads, and before the day rows take the waiting.
+    let summary = github.then(|| ask_github(&root, &rows, &mut report, evidence.as_ref().ok().map(|ev| (&git, ev))));
     let gaps: Vec<Value> =
         gaps.into_iter().map(|(line, reason)| json!({"kind": "gap", "line": line, "reason": reason})).collect();
     let lines: Vec<Value> = [report.meta.clone()]
         .into_iter()
         .chain(report.locks.clone())
-        .chain(report.days.clone())
+        .chain(report.days())
         .chain([dora])
+        .chain(summary)
         .chain(gaps)
         .collect();
     if as_json {
@@ -80,7 +88,7 @@ fn discover() -> Option<(PathBuf, PathBuf)> {
 
 /// Every variable `git rev-parse --local-env-vars` names, plus the ceiling:
 /// an inherited environment never selects another repository.
-const REPOSITORY_VARS: [&str; 16] = [
+pub(crate) const REPOSITORY_VARS: [&str; 16] = [
     "GIT_ALTERNATE_OBJECT_DIRECTORIES",
     "GIT_CONFIG",
     "GIT_CONFIG_PARAMETERS",
@@ -99,14 +107,68 @@ const REPOSITORY_VARS: [&str; 16] = [
     "GIT_CEILING_DIRECTORIES",
 ];
 
+/// Item 79: asks GitHub about each selected lock row (`merged` or
+/// `merge_not_observed`, `waiting` null), in print order, and fills what it
+/// answers; every lock row gets its `github` list. The `github` summary line.
+fn ask_github(root: &Path, rows: &[Row], report: &mut Report, git: Option<(&Git, &Evidence)>) -> Value {
+    let mut asker = Asker::new(root, git.map(|(git, ev)| (git, ev.branch.as_str(), ev.tip_commit.as_str())));
+    let (mut selected, mut merge_filled, mut waiting_filled) = (0, 0, 0);
+    let mut missing: BTreeMap<String, u64> = BTreeMap::new();
+    for (row, merged) in report.locks.iter_mut().zip(report.merged.iter_mut()) {
+        let mut filled: Vec<&str> = Vec::new();
+        let state = row["state"].as_str().unwrap_or_default();
+        if (state == "merged" || state == "merge_not_observed") && row["waiting"].is_null() {
+            selected += 1;
+            let pr = pr_of(rows, row["lock"].as_str().unwrap_or_default(), state == "merged");
+            match asker.lock(row, pr, &mut filled) {
+                Ok(waiting) => {
+                    row["waiting"] = num(waiting);
+                    filled.push("waiting");
+                    if let Some(m) = merged {
+                        m.waiting = Some(waiting);
+                    }
+                    waiting_filled += 1;
+                }
+                Err(reason) => *missing.entry(reason).or_default() += 1,
+            }
+            if filled.contains(&"merge_at") {
+                merge_filled += 1;
+            }
+        }
+        row["github"] = json!(filled);
+    }
+    json!({
+        "kind": "github", "selected": selected, "merge_filled": merge_filled,
+        "waiting_filled": waiting_filled, "missing": missing,
+    })
+}
+
+/// Item 79: the PR a lock went through. A `merged` lock's is the `pr` of the
+/// `merge` row that gave its `merge_at`; another's, the `pr` of every `pr`
+/// row naming it, any result. Only positive JSON integers count.
+fn pr_of(rows: &[Row], id: &str, merged: bool) -> Pr {
+    let mine: Vec<&Row> = rows.iter().filter(|r| locks_of(r).iter().any(|l| l == id)).collect();
+    let positive = |r: &Row| r.get("pr").and_then(Value::as_u64).filter(|n| *n > 0);
+    let prs: BTreeSet<u64> = if merged {
+        merge_row(&mine).and_then(positive).into_iter().collect()
+    } else {
+        mine.iter().filter(|r| str_of(r, "layer") == "pr").filter_map(|r| positive(r)).collect()
+    };
+    match prs.len() {
+        0 => Pr::None,
+        1 => Pr::One(prs.into_iter().next().expect("one PR")),
+        _ => Pr::Several,
+    }
+}
+
 /// Read-only git at the discovered root, with no lazy fetch and no prompt.
-struct Git {
+pub(crate) struct Git {
     root: PathBuf,
 }
 
 impl Git {
     /// The exit code and stdout; Err when git cannot run.
-    fn call(&self, args: &[&str]) -> std::result::Result<(Option<i32>, Vec<u8>), String> {
+    pub(crate) fn call(&self, args: &[&str]) -> std::result::Result<(Option<i32>, Vec<u8>), String> {
         let mut command = Command::new("git");
         command.arg("-C").arg(&self.root).args(args);
         command.env("GIT_NO_LAZY_FETCH", "1").env("GIT_TERMINAL_PROMPT", "0");
@@ -209,6 +271,8 @@ struct FixData {
 /// every git-derived value null.
 struct Evidence {
     branch: String,
+    /// Item 79: the default branch's commit, for the ancestry check.
+    tip_commit: String,
     tip: BTreeMap<String, String>,
     /// Ordered by time, then by version.
     releases: Vec<Release>,
@@ -307,7 +371,7 @@ impl Evidence {
                 }
             }
         }
-        Ok(Evidence { branch, tip, releases, files })
+        Ok(Evidence { branch, tip_commit, tip, releases, files })
     }
 }
 
@@ -434,15 +498,18 @@ fn unix_time(text: &str) -> Option<i64> {
             }
         }
     };
-    // Howard Hinnant's days_from_civil.
+    Some(days_from_civil(y, mo, d) * 86_400 + h * 3600 + mi * 60 + sec - offset)
+}
+
+/// Howard Hinnant's days_from_civil: days since 1970-01-01.
+pub(crate) fn days_from_civil(y: i64, mo: i64, d: i64) -> i64 {
     let y = if mo <= 2 { y - 1 } else { y };
     let era = y.div_euclid(400);
     let yoe = y - era * 400;
     let mp = (mo + 9) % 12;
     let doy = (153 * mp + 2) / 5 + d - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    let days = era * 146_097 + doe - 719_468;
-    Some(days * 86_400 + h * 3600 + mi * 60 + sec - offset)
+    era * 146_097 + doe - 719_468
 }
 
 /// One DORA metric.
@@ -597,7 +664,8 @@ fn read(bytes: &[u8]) -> (Vec<Row>, Vec<(usize, String)>) {
 struct Report {
     meta: Value,
     locks: Vec<Value>,
-    days: Vec<Value>,
+    /// Per lock row, what the day rows need when it merged.
+    merged: Vec<Option<Merged>>,
 }
 
 /// What a lock's row needs for the day summary.
@@ -623,7 +691,7 @@ impl Report {
             all.extend(facts.tip.iter().filter(|id| !ids.contains(id)).cloned());
         }
         let mut merged = Vec::new();
-        let locks = all
+        let locks: Vec<Value> = all
             .iter()
             .map(|id| {
                 let mine: Vec<&Row> = rows.iter().filter(|r| locks_of(r).contains(id)).collect();
@@ -641,15 +709,19 @@ impl Report {
                 row["change_kind"] = fix.kind.into();
                 row["reported_at"] = fix.reported_at.into();
                 row["fixes_release"] = fix.fixes_release.into();
-                merged.extend(m);
+                merged.push(m);
                 row
             })
             .collect();
-        let mut by_day: BTreeMap<String, Vec<Merged>> = BTreeMap::new();
-        for m in merged {
+        Report { meta, locks, merged }
+    }
+
+    fn days(&self) -> Vec<Value> {
+        let mut by_day: BTreeMap<String, Vec<&Merged>> = BTreeMap::new();
+        for m in self.merged.iter().flatten() {
             by_day.entry(m.day.clone()).or_default().push(m);
         }
-        let days = by_day
+        by_day
             .into_iter()
             .map(|(day, ms)| {
                 let reviewed: Vec<bool> = ms.iter().filter_map(|m| m.first_approved).collect();
@@ -662,8 +734,7 @@ impl Report {
                     "first_review_approved_share": share.map(num),
                 })
             })
-            .collect();
-        Report { meta, locks, days }
+            .collect()
     }
 }
 
@@ -676,14 +747,7 @@ fn lock_row(id: &str, rows: &[&Row]) -> (Value, Option<Merged>) {
     let redos = rows.iter().filter(|r| str_of(r, "layer") == "red" && is(r, "passed") && redo(r)).count();
     let red = passed("red");
     let close = passed("close");
-    // A merge counts only into the default branch.
-    let merge = first(rows.iter().copied().filter(|r| {
-        str_of(r, "layer") == "merge"
-            && is(r, "passed")
-            && r.get("base")
-                .and_then(Value::as_str)
-                .is_some_and(|b| r.get("default_branch").and_then(Value::as_str) == Some(b))
-    }));
+    let merge = merge_row(rows).and_then(at);
     let span = |a: Option<f64>, b: Option<f64>| a.zip(b).map(|(a, b)| b - a);
     let waiting = merge.and_then(|m| {
         let ci = rows.iter().filter(|r| str_of(r, "layer") == "ci" && is(r, "passed")).filter_map(|r| at(r));
@@ -716,6 +780,17 @@ fn lock_row(id: &str, rows: &[&Row]) -> (Value, Option<Merged>) {
     });
     let merged = merge.map(|m| Merged { day: day(m), red_to_merge: span(red, merge), waiting, first_approved });
     (row, merged)
+}
+
+/// The earliest passed `merge` row; a merge counts only into the default branch.
+fn merge_row<'a>(rows: &[&'a Row]) -> Option<&'a Row> {
+    first_row(rows.iter().copied().filter(|r| {
+        str_of(r, "layer") == "merge"
+            && is(r, "passed")
+            && r.get("base")
+                .and_then(Value::as_str)
+                .is_some_and(|b| r.get("default_branch").and_then(Value::as_str) == Some(b))
+    }))
 }
 
 /// The locks a row is about: its `lock` and its `locks`.
@@ -786,7 +861,7 @@ fn p90(mut values: Vec<f64>) -> Option<Value> {
 }
 
 /// A whole number prints as an integer.
-fn num(x: f64) -> Value {
+pub(crate) fn num(x: f64) -> Value {
     if x.fract() == 0.0 && x.abs() < 9e15 {
         json!(x as i64)
     } else {
@@ -838,7 +913,7 @@ fn text(lines: &[Value]) -> String {
                     .as_array()
                     .map(|u| u.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", "));
                 out += &format!(
-                    "lock {}: {}; red at {}, close at {}, merge at {}; red to close {}, close to merge {}, red to merge {}; waiting {}; reviews passed {}, refused {}, error {}, first approved {}; redos {}; refusals {}, errors {}; hook {}; ci {}{}\n",
+                    "lock {}: {}; red at {}, close at {}, merge at {}; red to close {}, close to merge {}, red to merge {}; waiting {}; reviews passed {}, refused {}, error {}, first approved {}; redos {}; refusals {}, errors {}; hook {}; ci {}{}{}\n",
                     line["lock"].as_str().unwrap_or_default(),
                     line["state"].as_str().unwrap_or_default(),
                     show(&line["red_at"]), show(&line["close_at"]), show(&line["merge_at"]),
@@ -850,6 +925,11 @@ fn text(lines: &[Value]) -> String {
                     match unobserved.as_deref() {
                         Some("") | None => String::new(),
                         Some(steps) => format!("; not observed here: {steps}"),
+                    },
+                    // Item 79: only with `--github`, and only when a field was filled.
+                    match line["github"].as_array().map(|g| g.iter().filter_map(Value::as_str).collect::<Vec<_>>()) {
+                        Some(names) if !names.is_empty() => format!("; from github: {}", names.join(", ")),
+                        _ => String::new(),
                     }
                 );
             }
@@ -864,6 +944,15 @@ fn text(lines: &[Value]) -> String {
                 );
             }
             "dora" => out += &dora_text(meta, line),
+            "github" => {
+                let missing = line["missing"].as_object().filter(|m| !m.is_empty()).map_or("none".to_string(), |m| {
+                    m.iter().map(|(reason, n)| format!("{reason} {n}")).collect::<Vec<_>>().join(", ")
+                });
+                out += &format!(
+                    "github: selected {}, merge filled {}, waiting filled {}; missing {missing}\n",
+                    line["selected"], line["merge_filled"], line["waiting_filled"]
+                );
+            }
             _ => {
                 out += &format!(
                     "gap: line {} does not read ({})\n",
