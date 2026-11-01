@@ -88,7 +88,7 @@ elif case=='edited75-bare':
  assert DIFF in output(p) and SKIP in output(p),'edited historical block missing differs/skip notice'
  assert not Path('CLAUDE.md').exists(),'edited block imported'
 elif case=='equal-new-bare':
- call=fixture(False);expected=PREFIX+variant(NEW,True)+SUFFIX
+ call=fixture(False);expected=PREFIX+variant(NEW,False)+SUFFIX
  write('AGENTS.md',expected,0o751)
  p=run(call,'init')
  assert p.returncode==0,output(p)
@@ -205,7 +205,7 @@ elif case=='edited75-local':
  assert DIFF in output(p) and SKIP in output(p),'edited historical block missing differs/skip notice'
  assert not Path('CLAUDE.md').exists(),'edited block imported'
 elif case=='equal-new-local':
- call=fixture(True);expected=PREFIX+variant(NEW,False)+SUFFIX
+ call=fixture(True);expected=PREFIX+variant(NEW,True)+SUFFIX
  write('AGENTS.md',expected,0o751)
  p=run(call,'init')
  assert p.returncode==0,output(p)
