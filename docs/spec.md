@@ -1364,7 +1364,7 @@ Field data from the Draken session (2026-11-01): from 11:29 to 16:15 (4 h 46 min
 2. **Known blocks.** Item 75's block joins the known blocks: both variants, exactly as `init` writes them from item 75's merge (`c3a919d`, version 2.31.0) through 2.38.0, unchanged in that range. In the code it is the old block named for that range (for example `AGENTS_BLOCK_2_31`). `init` replaces it with the new block under item 61's rules: kept bytes before and after, mode kept, the temporary-file write. Every block that was known before this item (item 74's, item 70's, v2.25.0's, v2.22.0's, 2.14.0's) stays known and is now upgraded to the new block. A block that matches none of them (an edited block) is kept with the differs notice, as today. `CLAUDE.md`'s block does not change.
 3. **The GREEN brief.** `.shipcraft/briefs/green.md`'s line that starts `- Running the other tests the change touches` is replaced, in place, by:
 
-   ``- Run the locked tests and the other tests the change affects, not the full suite unless the change affects all of it: CI runs it once. A failure outside the locked tests is reported, not a gate: the hook's verdict decides the commit.``
+   ``- Run the locked tests and the other tests the change affects, not the full suite unless the change affects all of it: CI runs it once (where CI is off, once before the PR). Report a failure outside the locked tests; it is not a gate: the hook's verdict decides the commit.``
 
    Every other line of `green.md` stays, and its last line keeps naming the running version (item 70). `red.md`'s body does not change (none of its lines disagrees with the new block); a fresh `init` stamps it with the running version, 2.39.0, like `green.md`. `init`'s brief handling is unchanged: a missing brief is written; an existing brief equal to this version's (either variant) is kept silently; any other existing brief, including one an older version wrote, is kept with the differs notice (item 68). So an existing install keeps its old `green.md`, and the block, which wins where a brief disagrees, carries the rule.
 4. **Current behavior** on the paths this item touches (rule 14):
@@ -1380,7 +1380,7 @@ Field data from the Draken session (2026-11-01): from 11:29 to 16:15 (4 h 46 min
      - the expected current block text, which gains point 1's six lines in both variants: item 61's `expected_block` (`acceptance/lib/item61.sh`), used by `v1-61.block`, `v1-61.local-block` and by every case of items 68, 70, 74 and 75 that builds the current block;
      - the structural checks `exact_block` in `item70.sh`, `item74.sh` and `item75.sh`, which remove the lines later items added to reach their historical block: each now also removes point 1's six lines, and its historical baseline stays as it is;
      - `BRIEF_BODIES['green.md']` (both variants) in `item70.sh`, `item74.sh` and `item75.sh`, which assert this version's brief after `init`: it gains point 3's line in place of the old one. Where those files write `BRIEF_BODIES` bytes stamped `2.25.0` as an older version's briefs, the old body stays (that is what 2.25.0 wrote).
-     - item 68's `brief_contract` concept patterns for `green.md` (`acceptance/lib/item68.sh`): `other tests.*?(?:check|gate)` and `CI.*?rest` become patterns point 3's line meets (`other tests.*?affects`, `not a gate`, `CI runs it once`); every other pattern stays.
+     - item 68's `brief_contract` concept patterns for `green.md` (`acceptance/lib/item68.sh`): `CI.*?rest` becomes `CI runs it once`; every other pattern stays, and point 3's line meets each of them.
      - their `pontos` where they quote the block or the brief.
 
      In `item70.sh`, `item74.sh` and `item75.sh` one `BRIEF_BODIES` dictionary serves both this version's expected briefs and the briefs a fixture writes stamped `2.25.0`: split it into a current and a historical body before changing the current one, so no historical fixture changes.
@@ -1394,7 +1394,7 @@ Field data from the Draken session (2026-11-01): from 11:29 to 16:15 (4 h 46 min
      - a control: `init` on a repository already holding the new block keeps it with the "already has" notice.
 6. **Measure and revert.**
    - **Metric:** in the first adopter sessions that run with this block (Draken's next 8 PRs after it moves to 2.39.0 or later), the share of session time spent outside Shipcraft commands drops from 56% (the 2026-11-01 sample), no mechanical change runs the RED/GREEN cycle, and no PR opens a review round for a non-Blocking finding.
-   - **Threshold:** median wall time per small PR at most half of the sample's (4 h 46 min over 8 PRs, about 36 min).
+   - **Threshold:** median wall time per small PR at most 18 min (half the sample's mean: 4 h 46 min over 8 PRs).
    - **Revert:** a release restores item 75's block and the old `green.md` line; the new block joins the known blocks so `init` upgrades it back.
 7. **Known limits.**
    - The battery checks the text written, not whether an agent follows it.
