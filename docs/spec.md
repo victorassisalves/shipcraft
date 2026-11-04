@@ -1451,6 +1451,18 @@ Field data (2026-11-03, one Mac): 38 worktrees in Draken's repository, 29 of the
    - A resource shared between sessions, like one test database server, stays: the rule says not to remove it, and a leak inside it is that project's to fix.
    - The line reaches an existing install only on its next `init` after a release; `merge`'s line reaches it when the binary is upgraded.
 
+### Old tests do not pin the whole block (item 86)
+
+Item 85 added one line to the block and had to edit 5 older test files by one line each, plus 6 fixed points, because they compared the block byte for byte. `shipcraft red` selects each edited file and runs it whole: 380 cases instead of 24, 395 s instead of about 150 s. This item changes tests only: no product code, no version.
+
+1. **Old blocks stay literal.** A frozen block from an old item stays a literal fixture for upgrades from that known version, which keep working.
+2. **Tests of the current block check what they own.** The start and end markers stay exact, and every line the test owns is there once, in its frozen order, as an ordered subsequence of the block's lines. Lines newer items add are allowed. `has_lines` in `acceptance/lib/item61.sh` does this, for the bare and the local variant.
+3. **Upgrades compare to the current block.** A case that upgrades a known old block gets the current block from a public `init` in a clean project (`clean_block` in `acceptance/lib/item61.sh`), and its prefix, current block and suffix stay byte exact.
+4. **One pin.** `v1-86.exact-bare` and `v1-86.exact-local` in `acceptance/lib/item86.sh` are the only cases that compare the whole current block byte for byte, so an unexpected line is still caught. An item that adds a block line adds it to `PIN` there, in one line, with a note in `acceptance/pontos/86.md` if the rule changes. Items 61, 68, 70, 74, 75, 84 and 85 and their fixed points are not edited. A line removed or changed on purpose still edits the tests that own it.
+
+- **Metric:** the next item that adds a block line edits 0 of `acceptance/lib/item{61,68,70,74,75,84,85}.sh`, and its `red` selects only its own file plus the pin holder.
+- **Revert:** revert the PR.
+
 ## 4. Configuration
 
 `.shipcraft.toml` lives at the project root.

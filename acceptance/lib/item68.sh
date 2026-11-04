@@ -25,7 +25,7 @@ for n in ast.parse(source).body:
  if isinstance(n,ast.Assign):
   targets={x.id for target in n.targets for x in ast.walk(target) if isinstance(x,ast.Name)}
   if targets and targets<=names:exec(compile(ast.Module(body=[n],type_ignores=[]),'item61-fixtures','exec'),ns)
- elif isinstance(n,ast.FunctionDef) and n.name=='expected_block':exec(compile(ast.Module(body=[n],type_ignores=[]),'item61-fixtures','exec'),ns)
+ elif isinstance(n,ast.FunctionDef) and n.name in ('expected_block','has_lines','clean_block'):exec(compile(ast.Module(body=[n],type_ignores=[]),'item61-fixtures','exec'),ns)
 IMPORT=b'<!-- shipcraft -->\nShipcraft workflow (required): @AGENTS.md\n<!-- /shipcraft -->\n'
 BRIEFS=Path('.shipcraft/briefs'); NAMES=('red.md','green.md')
 CI='CI runs on this machine through shipcraft pr. To run it on GitHub, see shipcraft docs/github-ci.md.'
@@ -93,15 +93,16 @@ def brief_contract(data,name,local):
 if case.startswith('block'):
  append=case.endswith('append');prefix=b'Rules68\r\nwithout final newline' if append else b''
  if append:write('AGENTS.md',prefix)
- p=init();expected=(prefix+b'\n\n' if append else b'')+ns['expected_block']('local' in case)
- assert Path('AGENTS.md').read_bytes()==expected,'block must make exactly three changes; all other bytes/order unchanged'
+ p=init();head=prefix+b'\n\n' if append else b'';actual=Path('AGENTS.md').read_bytes()
+ assert actual.startswith(head) and ns['has_lines'](actual[len(head):],ns['expected_block']('local' in case)),'block must keep the markers and every owned line, once, in its order, after the exact prefix'
  assert Path('CLAUDE.md').read_bytes()==IMPORT,'CLAUDE block changed'
 elif case.startswith('upgrade-') or case.startswith('legacy'):
  local=case.endswith('-local');oldlocal=case.startswith('upgrade-local-')
  old=ns['OLD'] if case.startswith('legacy') else ns['PREVIOUS_LOCAL' if oldlocal else 'PREVIOUS_BARE']
  prefix=b'# Before68\r\n\x00\n';suffix=b'\nAfter68\r\nno final newline'
  write('AGENTS.md',prefix+old+suffix,0o751);write('CLAUDE.md',IMPORT)
- p=init();assert Path('AGENTS.md').read_bytes()==prefix+ns['expected_block'](local)+suffix,'known block not upgraded with surrounding bytes preserved'
+ p=init();current=ns['clean_block'](binary,local);assert ns['has_lines'](current,ns['expected_block'](local)),'current block lost or reordered an owned line'
+ assert Path('AGENTS.md').read_bytes()==prefix+current+suffix,'known block not upgraded with surrounding bytes preserved'
  assert stat.S_IMODE(Path('AGENTS.md').stat().st_mode)==0o751,'upgrade changed mode'
  assert Path('CLAUDE.md').read_bytes()==IMPORT,'upgrade changed CLAUDE block'
  assert 'AGENTS.md' in next(l for l in text(p).splitlines() if l.startswith('shipcraft: ready. Commit '))

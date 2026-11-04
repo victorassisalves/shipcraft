@@ -61,6 +61,25 @@ def expected_block(local=False):
   text=text.replace(b'`shipcraft ',b'`npx -- shipcraft ')
   head,rest=text.split(b'\n- ',1);text=head+b'\n'+ROOT_LINE+b'- '+rest
  return text
+def has_lines(actual,owned):
+ # Item 86: the markers exact, every owned line once, in its frozen order. Lines newer items add are allowed.
+ got=actual.splitlines(keepends=True);lines=owned.splitlines(keepends=True)
+ if b'\r' in actual or got[:1]!=[b'<!-- shipcraft -->\n'] or got[-1:]!=[b'<!-- /shipcraft -->\n'] or lines[0]!=got[0] or lines[-1]!=got[-1]:return False
+ if any(got.count(line)!=1 for line in lines):return False
+ rest=iter(got)
+ return all(line in rest for line in lines)
+def clean_block(binary,local=False):
+ # Item 86: the current block, as public init writes it in a clean project of its own.
+ import shutil,subprocess,tempfile
+ from pathlib import Path
+ with tempfile.TemporaryDirectory() as parent:
+  d=Path(parent)/'clean86';d.mkdir();subprocess.run(['git','init','-q',str(d)],check=True);(d/'requirements.txt').write_text('pytest\n')
+  call=binary
+  if local:
+   target=d/'node_modules/shipcraft-fixture/bin/shipcraft';target.parent.mkdir(parents=True);shutil.copy2(binary,target)
+   call=d/'node_modules/.bin/shipcraft';call.parent.mkdir(parents=True);call.symlink_to(target)
+  subprocess.run([str(call),'init'],cwd=d,check=True,capture_output=True,input=b'',timeout=90)
+  return (d/'AGENTS.md').read_bytes()
 HINT='shipcraft: next step (required): run `shipcraft init` at the repository root to set up Shipcraft; until init runs, Shipcraft checks none of your commits; if init refuses, follow its Next line'
 SKIP="shipcraft: CLAUDE.md not written: AGENTS.md does not hold this version's shipcraft block"
 DIFF="; it differs from this version's: edit it by hand to match docs/spec.md"
@@ -97,7 +116,7 @@ def kept(p,name,b,diff=False):
  if diff: notice(p,name,'already has the shipcraft block, kept'); want(DIFF in output(p),'missing manual-edit guidance')
 def block_contract(b,local):
  want(closed(b),'new AGENTS block must have LF start/end lines')
- want(b==expected_block(local),'item 68 block must make exactly the three specified changes, with all other bytes and line order preserved')
+ want(has_lines(b,expected_block(local)),'item 68 block must keep the markers and every owned line, once, in its order')
  s=b.decode(); low=s.lower()
  patterns=[r'claude code',r'subagent',r'codex exec',r'resume',r'same (?:checkout|working tree)',r'RED.*?commit',r'stubs?',r'GREEN',r'dependenc',r'lockfiles?',r'config',r'red --redo',r'by hand',r'user',r'(?:not protect|unprotected|does not protect|outside.*?lock)']
  for pat in patterns: want(re.search(pat,s,re.I|re.S) is not None,'block omitted '+pat)

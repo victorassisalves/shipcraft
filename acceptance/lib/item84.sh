@@ -7,10 +7,15 @@ item84_cases() {
 item84_case() {
   EXPECT="item 84: ${CASE#v1-84.}"
   v1_start codex claude
-  must_accept 'item 84 init flow contract' cmd "$PY" - "${CASE#v1-84.}" "$(command -v shipcraft)" "$CW" "$ACEITE/../nucleo/Cargo.toml" <<'PY84'
-import os,shutil,stat,subprocess,sys
+  must_accept 'item 84 init flow contract' cmd "$PY" - "${CASE#v1-84.}" "$(command -v shipcraft)" "$CW" "$ACEITE/../nucleo/Cargo.toml" "$ACEITE" <<'PY84'
+import ast,os,shutil,stat,subprocess,sys
 from pathlib import Path
-case,binary,cw,manifest=sys.argv[1:];binary=str(Path(binary).resolve())
+case,binary,cw,manifest,acceptance=sys.argv[1:];binary=str(Path(binary).resolve())
+# Item 86: only item 61's two block helpers, never its test execution.
+source=(Path(acceptance)/'lib/item61.sh').read_text().split("<<'PY61'\n",1)[1].split('\nPY61',1)[0]
+ns={}
+for node in ast.parse(source).body:
+ if isinstance(node,ast.FunctionDef) and node.name in ('has_lines','clean_block'):exec(compile(ast.Module(body=[node],type_ignores=[]),'item61-fixtures','exec'),ns)
 try:import tomllib
 except ImportError:import tomli as tomllib
 version=tomllib.loads(Path(manifest).read_text())['package']['version']
@@ -32,6 +37,11 @@ def variant(block,local):
  text=block.replace(b'`shipcraft ',b'`npx -- shipcraft ')
  head,rest=text.split(b'\n- ',1)
  return head+b'\n'+ROOT_LINE+b'- '+rest
+def current(local):
+ # Item 86: the current block through public init, holding this item's frozen lines in order.
+ block=ns['clean_block'](binary,local)
+ assert ns['has_lines'](block,variant(NEW,local)),'current block lost or reordered an owned line'
+ return block
 def write(path,data,mode=None):
  p=Path(path);p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(data)
  if mode is not None:p.chmod(mode)
@@ -53,10 +63,10 @@ if case=='fresh-bare':
  call=fixture(False);expected=variant(NEW,False)
  p=run(call,'init')
  assert p.returncode==0,output(p)
- assert Path('AGENTS.md').read_bytes()==expected,'missing exact six-line block on fresh init'
+ assert ns['has_lines'](Path('AGENTS.md').read_bytes(),expected),'missing the six-line block on fresh init'
  assert Path('CLAUDE.md').read_bytes()==IMPORT,'CLAUDE import changed'
 elif case=='upgrade-bare-bare':
- call=fixture(False);old=PREFIX+variant(OLD75,False)+SUFFIX;expected=PREFIX+variant(NEW,False)+SUFFIX
+ call=fixture(False);old=PREFIX+variant(OLD75,False)+SUFFIX;expected=PREFIX+current(False)+SUFFIX
  write('AGENTS.md',old,0o751)
  p=run(call,'init')
  assert p.returncode==0,output(p)
@@ -64,7 +74,7 @@ elif case=='upgrade-bare-bare':
  assert stat.S_IMODE(Path('AGENTS.md').stat().st_mode)==0o751,'upgrade changed mode'
  assert Path('CLAUDE.md').read_bytes()==IMPORT,'upgrade omitted exact CLAUDE import'
 elif case=='upgrade-local-bare':
- call=fixture(False);old=PREFIX+variant(OLD75,True)+SUFFIX;expected=PREFIX+variant(NEW,False)+SUFFIX
+ call=fixture(False);old=PREFIX+variant(OLD75,True)+SUFFIX;expected=PREFIX+current(False)+SUFFIX
  write('AGENTS.md',old,0o751)
  p=run(call,'init')
  assert p.returncode==0,output(p)
@@ -72,7 +82,7 @@ elif case=='upgrade-local-bare':
  assert stat.S_IMODE(Path('AGENTS.md').stat().st_mode)==0o751,'upgrade changed mode'
  assert Path('CLAUDE.md').read_bytes()==IMPORT,'upgrade omitted exact CLAUDE import'
 elif case=='older74-bare':
- call=fixture(False);old=PREFIX+variant(OLD74,True)+SUFFIX;expected=PREFIX+variant(NEW,False)+SUFFIX
+ call=fixture(False);old=PREFIX+variant(OLD74,True)+SUFFIX;expected=PREFIX+current(False)+SUFFIX
  write('AGENTS.md',old,0o751)
  p=run(call,'init')
  assert p.returncode==0,output(p)
@@ -88,7 +98,7 @@ elif case=='edited75-bare':
  assert DIFF in output(p) and SKIP in output(p),'edited historical block missing differs/skip notice'
  assert not Path('CLAUDE.md').exists(),'edited block imported'
 elif case=='equal-new-bare':
- call=fixture(False);expected=PREFIX+variant(NEW,False)+SUFFIX
+ call=fixture(False);expected=PREFIX+current(False)+SUFFIX
  write('AGENTS.md',expected,0o751)
  p=run(call,'init')
  assert p.returncode==0,output(p)
@@ -128,7 +138,7 @@ elif case=='old-green-control-bare':
  assert "shipcraft: .shipcraft/briefs/green.md differs from this version's, kept: compare it with docs/spec.md" in output(p)
  assert Path('.shipcraft/briefs/red.md').is_file(),'kept green suppressed red'
 elif case=='later-brief-fails-bare':
- call=fixture(False);expected=PREFIX+variant(NEW,False)+SUFFIX;blocker=b'blocked briefs84\r\n'
+ call=fixture(False);expected=PREFIX+current(False)+SUFFIX;blocker=b'blocked briefs84\r\n'
  write('AGENTS.md',PREFIX+variant(OLD75,True)+SUFFIX,0o751);write('.shipcraft/briefs',blocker)
  p=run(call,'init')
  assert p.returncode==0,output(p)
@@ -170,10 +180,10 @@ elif case=='fresh-local':
  call=fixture(True);expected=variant(NEW,True)
  p=run(call,'init')
  assert p.returncode==0,output(p)
- assert Path('AGENTS.md').read_bytes()==expected,'missing exact six-line block on fresh init'
+ assert ns['has_lines'](Path('AGENTS.md').read_bytes(),expected),'missing the six-line block on fresh init'
  assert Path('CLAUDE.md').read_bytes()==IMPORT,'CLAUDE import changed'
 elif case=='upgrade-bare-local':
- call=fixture(True);old=PREFIX+variant(OLD75,False)+SUFFIX;expected=PREFIX+variant(NEW,True)+SUFFIX
+ call=fixture(True);old=PREFIX+variant(OLD75,False)+SUFFIX;expected=PREFIX+current(True)+SUFFIX
  write('AGENTS.md',old,0o751)
  p=run(call,'init')
  assert p.returncode==0,output(p)
@@ -181,7 +191,7 @@ elif case=='upgrade-bare-local':
  assert stat.S_IMODE(Path('AGENTS.md').stat().st_mode)==0o751,'upgrade changed mode'
  assert Path('CLAUDE.md').read_bytes()==IMPORT,'upgrade omitted exact CLAUDE import'
 elif case=='upgrade-local-local':
- call=fixture(True);old=PREFIX+variant(OLD75,True)+SUFFIX;expected=PREFIX+variant(NEW,True)+SUFFIX
+ call=fixture(True);old=PREFIX+variant(OLD75,True)+SUFFIX;expected=PREFIX+current(True)+SUFFIX
  write('AGENTS.md',old,0o751)
  p=run(call,'init')
  assert p.returncode==0,output(p)
@@ -189,7 +199,7 @@ elif case=='upgrade-local-local':
  assert stat.S_IMODE(Path('AGENTS.md').stat().st_mode)==0o751,'upgrade changed mode'
  assert Path('CLAUDE.md').read_bytes()==IMPORT,'upgrade omitted exact CLAUDE import'
 elif case=='older74-local':
- call=fixture(True);old=PREFIX+variant(OLD74,False)+SUFFIX;expected=PREFIX+variant(NEW,True)+SUFFIX
+ call=fixture(True);old=PREFIX+variant(OLD74,False)+SUFFIX;expected=PREFIX+current(True)+SUFFIX
  write('AGENTS.md',old,0o751)
  p=run(call,'init')
  assert p.returncode==0,output(p)
@@ -205,7 +215,7 @@ elif case=='edited75-local':
  assert DIFF in output(p) and SKIP in output(p),'edited historical block missing differs/skip notice'
  assert not Path('CLAUDE.md').exists(),'edited block imported'
 elif case=='equal-new-local':
- call=fixture(True);expected=PREFIX+variant(NEW,True)+SUFFIX
+ call=fixture(True);expected=PREFIX+current(True)+SUFFIX
  write('AGENTS.md',expected,0o751)
  p=run(call,'init')
  assert p.returncode==0,output(p)
@@ -245,7 +255,7 @@ elif case=='old-green-control-local':
  assert "shipcraft: .shipcraft/briefs/green.md differs from this version's, kept: compare it with docs/spec.md" in output(p)
  assert Path('.shipcraft/briefs/red.md').is_file(),'kept green suppressed red'
 elif case=='later-brief-fails-local':
- call=fixture(True);expected=PREFIX+variant(NEW,True)+SUFFIX;blocker=b'blocked briefs84\r\n'
+ call=fixture(True);expected=PREFIX+current(True)+SUFFIX;blocker=b'blocked briefs84\r\n'
  write('AGENTS.md',PREFIX+variant(OLD75,False)+SUFFIX,0o751);write('.shipcraft/briefs',blocker)
  p=run(call,'init')
  assert p.returncode==0,output(p)

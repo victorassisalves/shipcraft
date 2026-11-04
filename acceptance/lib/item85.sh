@@ -7,10 +7,15 @@ item85_cases() {
 item85_case() {
   EXPECT="item 85: ${CASE#v1-85.}"
   v1_start codex claude
-  must_accept 'item 85 cleanup contract' cmd "$PY" - "${CASE#v1-85.}" "$(command -v shipcraft)" "$CW" "$ST" <<'PY85'
-import json,os,shutil,stat,subprocess,sys
+  must_accept 'item 85 cleanup contract' cmd "$PY" - "${CASE#v1-85.}" "$(command -v shipcraft)" "$CW" "$ST" "$ACEITE" <<'PY85'
+import ast,json,os,shutil,stat,subprocess,sys
 from pathlib import Path
-case,binary,cw,st=sys.argv[1:];binary=str(Path(binary).resolve());cw=Path(cw);st=Path(st)
+case,binary,cw,st,acceptance=sys.argv[1:];binary=str(Path(binary).resolve());cw=Path(cw);st=Path(st)
+# Item 86: only item 61's two block helpers, never its test execution.
+source=(Path(acceptance)/'lib/item61.sh').read_text().split("<<'PY61'\n",1)[1].split('\nPY61',1)[0]
+ns={}
+for node in ast.parse(source).body:
+ if isinstance(node,ast.FunctionDef) and node.name in ('has_lines','clean_block'):exec(compile(ast.Module(body=[node],type_ignores=[]),'item61-fixtures','exec'),ns)
 # Independently pinned acceptance bytes from item84 at 1397349 (2.39.0).
 OLD84=b"<!-- shipcraft -->\n## shipcraft: TDD with a lock (required in this repository)\n- Cycle: RED (a failing test) \xe2\x86\x92 `shipcraft red` \xe2\x86\x92 GREEN (code) \xe2\x86\x92 `git commit`. The git hook checks every commit.\n- Pick the lane first: a mechanical change, one that changes no behavior (text, config, data, content, a rename, docs), is committed directly once the tests it affects pass in one run, with no RED or GREEN; a behavior change takes the cycle.\n- A change that needs more than about 40 new test cases is split before its RED.\n- A review of the RED's tests before the lock takes at most one round and fixes contract bugs only (a test that asserts the wrong behavior).\n- Locally, the GREEN runs only the tests the change affects; the full suite runs once, in CI (where CI is off, once before the PR).\n- In PR review, only Blocking findings open another round; the others go to notes.\n- Small fixes from one request go in one PR.\n- A behavior change: write the failing test first (and a stub), run `shipcraft red` and commit the test together with the lock `.shipcraft/locks/*.json`; only then implement.\n- When the change fixes behavior a release already shipped, the RED runs `shipcraft red --fix`, with `--reported-at <time>` when the time the defect was first reported is known (for example `2026-10-31T00:36-03:00`) and `--fixes-release <tag>` when the release that shipped it is known (for example `v2.25.0`), so the lock records them.\n- Before writing a RED test, read the existing tests that cover the behavior you change, and never contradict them unless the change says that behavior changes. Passing control tests next to the failing ones are fine.\n- Locked tests (listed in the open lock) are the contract: never change them; change the code until they pass. If a test looks wrong, stop and say so.\n- The RED and the GREEN are done by different agent sessions, both in the same checkout: in Claude Code a subagent per phase; in Codex a new `codex exec` session per phase (never `resume`).\n- The RED session commits the tests, the stubs they need and the lock in one commit, and stops.\n- The GREEN session starts from that commit and may change anything the open lock does not protect (product code, dependencies and their lockfiles, config), never a locked file, then commits. A test it finds wrong is reported back with the reason. The session the user talks to sets the GREEN's work aside (`git stash push --include-untracked`; it saved something only if `git rev-parse -q --verify refs/stash` changed, and `git status --porcelain` must then print nothing), starts a new RED session given the intent, the test and that report, never the GREEN's code, which fixes the test with `shipcraft red --redo` and commits; then, if something was saved and `refs/stash` still names it, it restores it with `git stash pop`; if nothing was saved, nothing is restored. If the GREEN already committed code after the RED commit, the work cannot be set aside, a step fails, or the restore conflicts, it stops, keeps the stash, and tells the user. If the repair would leave every locked test passing, or renames a test, `red --redo` refuses: report it to the user.\n- A session told it is the RED or the GREEN does that phase only and starts no other session; the session the user talks to starts them.\n- Start each phase with the agent, model and effort that `shipcraft status` names on its roles line ([roles] red and green), when the project set them; if status refuses or that agent is not available, tell the user instead of choosing another. Each phase follows its brief in .shipcraft/briefs/ (red.md, green.md); where a brief is missing or disagrees with this block, this block wins.\n- If you cannot start a phase's session (your tool cannot start one, or the start is refused, for example a sandbox refusing a nested `codex exec` with `Operation not permitted`), never do that phase yourself: stop and give the user the exact command to paste in a POSIX shell (sh, bash, zsh) where this project's tests run. It starts with `cd` to this checkout's absolute path, then starts a new session (an interactive one counts) with the agent, model and effort `shipcraft status` names for the phase (`shipcraft status` must exit 0; a GitHub lookup notice is fine), each flag left out when not set (none named: the agent you would have started; another agent: its own command and flags), and a prompt that names the phase, its brief and the change; for a wrong-test repair, the test, the GREEN's report and `shipcraft red --redo`, after the GREEN's work is set aside as above. Write each argument you fill in (the path, the model, the effort, the prompt) in single quotes, each `'` in it written `'\\''`, for example `cd '<checkout>' && codex -m '<model>' -c 'model_reasoning_effort=<effort>' 'You are the RED session. Follow .shipcraft/briefs/red.md. The change: <intent>'` or `cd '<checkout>' && claude --model '<model>' --effort '<effort>' 'You are the GREEN session. Follow .shipcraft/briefs/green.md. The change: <intent>'`. That session still does its phase only. If the failed start may have begun the session (it printed output of its own, or a new lock or commit appeared), say so instead of giving a command. Continue only when the user says it finished and the phase's commit is on this branch; if it is not, tell the user.\n- If you run in a sandbox (for example Codex's `workspace-write`), run `shipcraft red`, `shipcraft red --redo` and `git commit` (its hook runs the locked tests) outside it when you can: inside, they can take many times longer, or fail when git cannot write its index. If you cannot, finish your files and stop (your files: those you added, changed or deleted, both sides of a rename), and give the user the steps to run in a POSIX shell where this project's tests run, each argument you fill in written in single quotes as above: first `cd` to this checkout's absolute path; for a RED, then `shipcraft red` (for a repair, `shipcraft red --redo`), which prints the lock's path; then `git --literal-pathspecs add -f --` with each of your files as its own argument and, for a RED, that lock path; then `git commit -m` with the message. A GREEN gets only the `cd`, `git add` and `git commit` steps. Tell the user to start from the first step that has not succeeded yet, and to stop and tell you if a step fails. If one of your files already had other changes before your phase, or `git diff --cached --name-only -z` lists a staged path that is not one of yours (or fails), say so and name those paths instead of handing the steps over. Change nothing after handing them over. Your phase ends there: you start no other phase, and a commit alone does not mean the lock closed (`shipcraft status` says).\n- Never use `--no-verify`, never edit or delete `.shipcraft/locks/*` by hand (`shipcraft red`, `shipcraft red --redo` and the hook write them), never touch the hook or `core.hooksPath`.\n- When in doubt, run `shipcraft status`.\n<!-- /shipcraft -->\n"
 OLD75=b"<!-- shipcraft -->\n## shipcraft: TDD with a lock (required in this repository)\n- Cycle: RED (a failing test) \xe2\x86\x92 `shipcraft red` \xe2\x86\x92 GREEN (code) \xe2\x86\x92 `git commit`. The git hook checks every commit.\n- A behavior change: write the failing test first (and a stub), run `shipcraft red` and commit the test together with the lock `.shipcraft/locks/*.json`; only then implement.\n- When the change fixes behavior a release already shipped, the RED runs `shipcraft red --fix`, with `--reported-at <time>` when the time the defect was first reported is known (for example `2026-10-31T00:36-03:00`) and `--fixes-release <tag>` when the release that shipped it is known (for example `v2.25.0`), so the lock records them.\n- Before writing a RED test, read the existing tests that cover the behavior you change, and never contradict them unless the change says that behavior changes. Passing control tests next to the failing ones are fine.\n- Locked tests (listed in the open lock) are the contract: never change them; change the code until they pass. If a test looks wrong, stop and say so.\n- The RED and the GREEN are done by different agent sessions, both in the same checkout: in Claude Code a subagent per phase; in Codex a new `codex exec` session per phase (never `resume`).\n- The RED session commits the tests, the stubs they need and the lock in one commit, and stops.\n- The GREEN session starts from that commit and may change anything the open lock does not protect (product code, dependencies and their lockfiles, config), never a locked file, then commits. A test it finds wrong is reported back with the reason. The session the user talks to sets the GREEN's work aside (`git stash push --include-untracked`; it saved something only if `git rev-parse -q --verify refs/stash` changed, and `git status --porcelain` must then print nothing), starts a new RED session given the intent, the test and that report, never the GREEN's code, which fixes the test with `shipcraft red --redo` and commits; then, if something was saved and `refs/stash` still names it, it restores it with `git stash pop`; if nothing was saved, nothing is restored. If the GREEN already committed code after the RED commit, the work cannot be set aside, a step fails, or the restore conflicts, it stops, keeps the stash, and tells the user. If the repair would leave every locked test passing, or renames a test, `red --redo` refuses: report it to the user.\n- A session told it is the RED or the GREEN does that phase only and starts no other session; the session the user talks to starts them.\n- Start each phase with the agent, model and effort that `shipcraft status` names on its roles line ([roles] red and green), when the project set them; if status refuses or that agent is not available, tell the user instead of choosing another. Each phase follows its brief in .shipcraft/briefs/ (red.md, green.md); where a brief is missing or disagrees with this block, this block wins.\n- If you cannot start a phase's session (your tool cannot start one, or the start is refused, for example a sandbox refusing a nested `codex exec` with `Operation not permitted`), never do that phase yourself: stop and give the user the exact command to paste in a POSIX shell (sh, bash, zsh) where this project's tests run. It starts with `cd` to this checkout's absolute path, then starts a new session (an interactive one counts) with the agent, model and effort `shipcraft status` names for the phase (`shipcraft status` must exit 0; a GitHub lookup notice is fine), each flag left out when not set (none named: the agent you would have started; another agent: its own command and flags), and a prompt that names the phase, its brief and the change; for a wrong-test repair, the test, the GREEN's report and `shipcraft red --redo`, after the GREEN's work is set aside as above. Write each argument you fill in (the path, the model, the effort, the prompt) in single quotes, each `'` in it written `'\\''`, for example `cd '<checkout>' && codex -m '<model>' -c 'model_reasoning_effort=<effort>' 'You are the RED session. Follow .shipcraft/briefs/red.md. The change: <intent>'` or `cd '<checkout>' && claude --model '<model>' --effort '<effort>' 'You are the GREEN session. Follow .shipcraft/briefs/green.md. The change: <intent>'`. That session still does its phase only. If the failed start may have begun the session (it printed output of its own, or a new lock or commit appeared), say so instead of giving a command. Continue only when the user says it finished and the phase's commit is on this branch; if it is not, tell the user.\n- If you run in a sandbox (for example Codex's `workspace-write`), run `shipcraft red`, `shipcraft red --redo` and `git commit` (its hook runs the locked tests) outside it when you can: inside, they can take many times longer, or fail when git cannot write its index. If you cannot, finish your files and stop (your files: those you added, changed or deleted, both sides of a rename), and give the user the steps to run in a POSIX shell where this project's tests run, each argument you fill in written in single quotes as above: first `cd` to this checkout's absolute path; for a RED, then `shipcraft red` (for a repair, `shipcraft red --redo`), which prints the lock's path; then `git --literal-pathspecs add -f --` with each of your files as its own argument and, for a RED, that lock path; then `git commit -m` with the message. A GREEN gets only the `cd`, `git add` and `git commit` steps. Tell the user to start from the first step that has not succeeded yet, and to stop and tell you if a step fails. If one of your files already had other changes before your phase, or `git diff --cached --name-only -z` lists a staged path that is not one of yours (or fails), say so and name those paths instead of handing the steps over. Change nothing after handing them over. Your phase ends there: you start no other phase, and a commit alone does not mean the lock closed (`shipcraft status` says).\n- Never use `--no-verify`, never edit or delete `.shipcraft/locks/*` by hand (`shipcraft red`, `shipcraft red --redo` and the hook write them), never touch the hook or `core.hooksPath`.\n- When in doubt, run `shipcraft status`.\n<!-- /shipcraft -->\n"
@@ -27,6 +32,11 @@ def variant(block,local):
  text=block.replace(b'`shipcraft ',b'`npx -- shipcraft ')
  head,rest=text.split(b'\n- ',1)
  return head+b'\n'+ROOT_LINE+b'- '+rest
+def current(local):
+ # Item 86: the current block through public init, holding this item's frozen lines in order.
+ block=ns['clean_block'](binary,local)
+ assert ns['has_lines'](block,variant(NEW,local)),'current block lost or reordered an owned line'
+ return block
 def write(path,data,mode=None):
  p=Path(path);p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(data)
  if mode is not None:p.chmod(mode)
@@ -79,10 +89,10 @@ if case=='fresh-bare':
  call=fixture(False);expected=variant(NEW,False)
  p=run(call,'init')
  assert p.returncode==0,output(p)
- assert Path('AGENTS.md').read_bytes()==expected,'missing exact cleanup block on fresh init'
+ assert ns['has_lines'](Path('AGENTS.md').read_bytes(),expected),'missing the cleanup block on fresh init'
  assert Path('CLAUDE.md').read_bytes()==IMPORT,'CLAUDE import changed'
 elif case=='upgrade-bare-bare':
- call=fixture(False);expected=PREFIX+variant(NEW,False)+SUFFIX
+ call=fixture(False);expected=PREFIX+current(False)+SUFFIX
  write('AGENTS.md',PREFIX+variant(OLD84,False)+SUFFIX,0o751)
  p=run(call,'init')
  assert p.returncode==0,output(p)
@@ -90,7 +100,7 @@ elif case=='upgrade-bare-bare':
  assert stat.S_IMODE(Path('AGENTS.md').stat().st_mode)==0o751,'upgrade changed mode'
  assert Path('CLAUDE.md').read_bytes()==IMPORT,'upgrade omitted exact import'
 elif case=='upgrade-local-bare':
- call=fixture(False);expected=PREFIX+variant(NEW,False)+SUFFIX
+ call=fixture(False);expected=PREFIX+current(False)+SUFFIX
  write('AGENTS.md',PREFIX+variant(OLD84,True)+SUFFIX,0o751)
  p=run(call,'init')
  assert p.returncode==0,output(p)
@@ -106,7 +116,7 @@ elif case=='edited84-bare':
  assert DIFF in output(p) and SKIP in output(p),'edited item84 block missing differs/skip notices'
  assert not Path('CLAUDE.md').exists(),'edited block imported'
 elif case=='equal-new-bare':
- call=fixture(False);expected=PREFIX+variant(NEW,False)+SUFFIX
+ call=fixture(False);expected=PREFIX+current(False)+SUFFIX
  write('AGENTS.md',expected,0o751)
  p=run(call,'init')
  assert p.returncode==0,output(p)
@@ -120,7 +130,7 @@ elif case=='historical-control-bare':
  p=run(call,'init')
  assert p.returncode==0,output(p)
  actual=Path('AGENTS.md').read_bytes()
- assert actual in (PREFIX+variant(OLD84,False)+SUFFIX,PREFIX+variant(NEW,False)+SUFFIX),'historical fixture not recognized or wrong install variant'
+ assert actual in (PREFIX+variant(OLD84,False)+SUFFIX,PREFIX+current(False)+SUFFIX),'historical fixture not recognized or wrong install variant'
  assert actual!=before,'cross-variant historical fixture took the keep-unknown path'
  assert stat.S_IMODE(Path('AGENTS.md').stat().st_mode)==0o751 and Path('CLAUDE.md').read_bytes()==IMPORT
  assert DIFF not in output(p) and SKIP not in output(p)
@@ -128,10 +138,10 @@ elif case=='fresh-local':
  call=fixture(True);expected=variant(NEW,True)
  p=run(call,'init')
  assert p.returncode==0,output(p)
- assert Path('AGENTS.md').read_bytes()==expected,'missing exact cleanup block on fresh init'
+ assert ns['has_lines'](Path('AGENTS.md').read_bytes(),expected),'missing the cleanup block on fresh init'
  assert Path('CLAUDE.md').read_bytes()==IMPORT,'CLAUDE import changed'
 elif case=='upgrade-bare-local':
- call=fixture(True);expected=PREFIX+variant(NEW,True)+SUFFIX
+ call=fixture(True);expected=PREFIX+current(True)+SUFFIX
  write('AGENTS.md',PREFIX+variant(OLD84,False)+SUFFIX,0o751)
  p=run(call,'init')
  assert p.returncode==0,output(p)
@@ -139,7 +149,7 @@ elif case=='upgrade-bare-local':
  assert stat.S_IMODE(Path('AGENTS.md').stat().st_mode)==0o751,'upgrade changed mode'
  assert Path('CLAUDE.md').read_bytes()==IMPORT,'upgrade omitted exact import'
 elif case=='upgrade-local-local':
- call=fixture(True);expected=PREFIX+variant(NEW,True)+SUFFIX
+ call=fixture(True);expected=PREFIX+current(True)+SUFFIX
  write('AGENTS.md',PREFIX+variant(OLD84,True)+SUFFIX,0o751)
  p=run(call,'init')
  assert p.returncode==0,output(p)
@@ -155,7 +165,7 @@ elif case=='edited84-local':
  assert DIFF in output(p) and SKIP in output(p),'edited item84 block missing differs/skip notices'
  assert not Path('CLAUDE.md').exists(),'edited block imported'
 elif case=='equal-new-local':
- call=fixture(True);expected=PREFIX+variant(NEW,True)+SUFFIX
+ call=fixture(True);expected=PREFIX+current(True)+SUFFIX
  write('AGENTS.md',expected,0o751)
  p=run(call,'init')
  assert p.returncode==0,output(p)
@@ -169,19 +179,19 @@ elif case=='historical-control-local':
  p=run(call,'init')
  assert p.returncode==0,output(p)
  actual=Path('AGENTS.md').read_bytes()
- assert actual in (PREFIX+variant(OLD84,True)+SUFFIX,PREFIX+variant(NEW,True)+SUFFIX),'historical fixture not recognized or wrong install variant'
+ assert actual in (PREFIX+variant(OLD84,True)+SUFFIX,PREFIX+current(True)+SUFFIX),'historical fixture not recognized or wrong install variant'
  assert actual!=before,'cross-variant historical fixture took the keep-unknown path'
  assert stat.S_IMODE(Path('AGENTS.md').stat().st_mode)==0o751 and Path('CLAUDE.md').read_bytes()==IMPORT
  assert DIFF not in output(p) and SKIP not in output(p)
 elif case=='older75':
- call=fixture(False);expected=PREFIX+NEW+SUFFIX
+ call=fixture(False);expected=PREFIX+current(False)+SUFFIX
  write('AGENTS.md',PREFIX+variant(OLD75,True)+SUFFIX,0o751)
  p=run(call,'init')
  assert p.returncode==0,output(p)
  assert Path('AGENTS.md').read_bytes()==expected,'older75 did not upgrade straight to cleanup block'
  assert stat.S_IMODE(Path('AGENTS.md').stat().st_mode)==0o751 and Path('CLAUDE.md').read_bytes()==IMPORT
 elif case=='later-brief-fails':
- call=fixture(False);expected=PREFIX+NEW+SUFFIX;blocker=b'blocked briefs85\r\n'
+ call=fixture(False);expected=PREFIX+current(False)+SUFFIX;blocker=b'blocked briefs85\r\n'
  write('AGENTS.md',PREFIX+variant(OLD84,True)+SUFFIX,0o751);write('.shipcraft/briefs',blocker)
  p=run(call,'init')
  assert p.returncode==0,output(p)
