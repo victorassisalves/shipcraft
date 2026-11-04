@@ -534,6 +534,8 @@ const RISK_LINES: &str = "- Pick the lane first: a mechanical change, one that c
 - In PR review, only Blocking findings open another round; the others go to notes.
 - Small fixes from one request go in one PR.
 ";
+/// Item 85: the line the current block gains right after the `- Small fixes` line (cleanup after the merge).
+const CLEANUP_LINE: &str = "- After a merge, clean up what this change created: its worktree, temp folders, and servers or databases you started. Never remove what you did not create, what other sessions may be using, or anything with unmerged work: report those instead.\n";
 /// Item 74's block (commit f4220f1, v2.30.0), a known block in both variants;
 /// item 75's is it with `FIX_LINE` (`agents_block_2_31`). Item 61's block
 /// with item 68's rules: the machine install's block; a project-local install
@@ -629,9 +631,15 @@ fn agents_block_2_31() -> String {
     after_line(AGENTS_BLOCK_2_30, "\n- A behavior change: write the failing test first", FIX_LINE)
 }
 
-/// Item 84: item 75's block with `RISK_LINES` right after the line that starts `- Cycle:`.
-fn current_block() -> String {
+/// Item 84's block (commit 1397349, v2.39.0), a known block in both variants:
+/// item 75's block with `RISK_LINES` right after the line that starts `- Cycle:`.
+fn agents_block_2_39() -> String {
     after_line(&agents_block_2_31(), "\n- Cycle:", RISK_LINES)
+}
+
+/// Item 85: item 84's block with `CLEANUP_LINE` right after the `- Small fixes` line.
+fn current_block() -> String {
+    after_line(&agents_block_2_39(), "\n- Small fixes from one request go in one PR.", CLEANUP_LINE)
 }
 
 /// `block` with `lines` right after the line that starts at `start` (a `\n` and the line's start).
@@ -641,7 +649,7 @@ fn after_line(block: &str, start: &str, lines: &str) -> String {
     format!("{}{lines}{}", &block[..end], &block[end..])
 }
 
-/// A block (this version's, v2.31.0's, v2.30.0's, v2.26.0's, v2.25.0's or v2.22.0's) in its machine or project-local form.
+/// A block (this version's, v2.39.0's, v2.31.0's, v2.30.0's, v2.26.0's, v2.25.0's or v2.22.0's) in its machine or project-local form.
 fn variant(block: &str, local: bool) -> String {
     if !local {
         return block.to_string();
@@ -663,6 +671,8 @@ fn agents_block(repo: &Repo, local: bool) -> String {
     let (bare_2_30, local_2_30) = (variant(AGENTS_BLOCK_2_30, false), variant(AGENTS_BLOCK_2_30, true));
     let block_2_31 = agents_block_2_31();
     let (bare_2_31, local_2_31) = (variant(&block_2_31, false), variant(&block_2_31, true));
+    let block_2_39 = agents_block_2_39();
+    let (bare_2_39, local_2_39) = (variant(&block_2_39, false), variant(&block_2_39, true));
     let known = [
         other.as_str(),
         bare_2_22.as_str(),
@@ -675,6 +685,8 @@ fn agents_block(repo: &Repo, local: bool) -> String {
         local_2_30.as_str(),
         bare_2_31.as_str(),
         local_2_31.as_str(),
+        bare_2_39.as_str(),
+        local_2_39.as_str(),
     ];
     let (wrote, current) = onboard(repo, AGENTS_FILE, &new, &known, Some(AGENTS_BLOCK_2_14));
     let mut listed = if wrote { format!(", {AGENTS_FILE}") } else { String::new() };

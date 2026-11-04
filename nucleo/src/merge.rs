@@ -106,6 +106,8 @@ pub fn merge(repo: &Repo, number: &str, sem_revisao: Option<&str>) -> Result<()>
         "shipcraft: PR #{number} merged into {base}{}.",
         if sem_revisao.is_some() { " without review (reason in the PR)" } else { "" }
     );
+    // Item 85: advice only; shipcraft reads nothing and deletes nothing here.
+    println!("shipcraft: clean up what this change created (worktree, temp folders, servers you started).");
     Ok(())
 }
 
