@@ -1402,6 +1402,55 @@ Field data from the Draken session (2026-11-01): from 11:29 to 16:15 (4 h 46 min
    - An existing install keeps its old `green.md` (point 3); only the block reaches it on `init`.
    - Draken stays on 2.31.0 until the coordinator moves it, so the metric starts then.
 
+### Cleanup after the merge: a rule in the block and a line from `merge` (item 85)
+
+Field data (2026-11-03, one Mac): 38 worktrees in Draken's repository, 29 of them on merged PRs; 15 merged item worktrees in Shipcraft's; about 200 GB of leftover battery folders in `/private/tmp`; the disk at 96%. Nothing tells an agent to clean up after a merge, and whoever creates a resource is the only one who knows it is theirs. Shipcraft stays a generic gate: it does not learn about worktrees, folders or servers, it deletes nothing and checks nothing. It states the rule and says it again at the moment it applies.
+
+1. **The new line in the block.** The current variants of item 84's block gain one line, right after the line `- Small fixes from one request go in one PR.`, before the line that starts `- A behavior change:`. Every other line stays, byte for byte, in its order. It is one line ending with `\n`:
+
+   ``- After a merge, clean up what this change created: its worktree, temp folders, and servers or databases you started. Never remove what you did not create, what other sessions may be using, or anything with unmerged work: report those instead.``
+
+   The outer double backticks only quote the line. It names no `shipcraft` command, so item 61's rule leaves it the same in the local variant.
+2. **Known blocks.** Item 84's block joins the known blocks: both variants, exactly as `init` writes them from item 84's merge (`1397349`, version 2.39.0). In the code it is the old block named for that version (for example `agents_block_2_39`). `init` replaces it with the new block under item 61's rules: kept bytes before and after, mode kept, the temporary-file write. Every block already known stays known and goes straight to the new block.
+3. **The line from `merge`.** After a successful merge, right after the line `shipcraft: PR #<n> merged into <base>...`, `shipcraft merge` prints one more line on stdout, with and without `--no-review`:
+
+   ``shipcraft: clean up what this change created (worktree, temp folders, servers you started).``
+
+   It is advice: nothing reads the state of the machine, it authorizes no deletion by itself, and the exit code stays 0. It prints after a merge into any base, the default branch or not. A refused merge, or a merge that fails in `gh`, does not print it.
+4. **Current behavior** on the paths this item touches (rule 14):
+   - Item 84's point 4 list, every entry, the npm workspace probe among them: keep.
+   - `init`'s block handling (items 61, 68, 70, 74, 75, 84): create, append once, replace a known block, keep an edited block with the differs notice, leave a symlink or non-regular file alone, the temporary-file write, kept prefix, suffix and mode, `CLAUDE.md` written only when `AGENTS.md` holds this version's block, and a failure that never undoes the init: keep. One reading changes: the block's text (point 1) and the set of known blocks (point 2).
+   - `init`'s brief handling (item 68, 70, 84): the briefs' bodies do not change; a fresh `init` stamps them with the running version, 2.40.0; an existing 2.39.0 brief gets the differs notice, as any older brief does: keep.
+   - `merge` (items 5, 42, 62, 73, 79): its refusals, the order of its checks, the `--match-head-commit` pin, the first success line, and captured `gh` output: keep. One run-log row on a successful merge and none on a refused or failed one, overriding the standing-effects wording for this command: keep. The fetch of the base before the status checks, the `--no-review` comment posted before the merge attempt and left in place if the pinned merge then fails, and the head fetch for attribution: keep. `merge` deletes no branch, as today: keep.
+   - The standing effects the spec-review brief lists (run-log rows, lock files, the post-commit closing commit, `TMPDIR`, a suite on a copy or in the working tree): keep.
+   - Nothing else changes: no refusal code, hook verdict, lock or config.
+5. **Touches.**
+   - **The version:** 2.40.0 in §11, `v1-62.version` and the other version cases item 69 lists.
+   - **Assertions that change, and nothing else in them:**
+     - the expected current block text, which gains point 1's line in both variants: item 61's `expected_block` (`acceptance/lib/item61.sh`), used by `v1-61.block`, `v1-61.local-block` and by every case of items 68, 70, 74, 75 and 84 that builds the current block;
+     - the structural checks `exact_block` in `item70.sh`, `item74.sh` and `item75.sh`, which remove the lines later items added to reach their historical block: each now also removes point 1's line, and its historical baseline stays as it is;
+     - item 84's cases that assert "the block after `init`": they get the new block; its cases that write item 75's block as input keep it;
+     - the version stamp in the expected briefs of items 70, 74, 75 and 84, where they read the running version; a brief a fixture writes stamped with an older version stays;
+     - their `pontos` where they quote the block.
+   - **Must keep passing unchanged:** every other case of items 61, 68, 70, 74, 75 and 84; item 80's install-guard cases that read the onboarding files; every case of items 5, 62 and 79 that runs `merge`; `v1-42.squash`, `absent`, `merge`, `head-config`, `no-review`, `invalid-string`, `invalid-number`, `invalid-bool`, `missing-ci`, `missing-review`, `no-review-missing-ci`, `merge-fails`, `closed-no-review-waived`; `v1-64.reader-merge`; `v1-73.control-merge`. The spec review found no case that asserts the whole stdout of a successful merge.
+   - **New cases** (cap: 40, estimate 14):
+     - the current block's exact text after `init` on a fresh repository, machine and local;
+     - upgrades from item 84's block in all four directions (bare or local input, bare or local install), checking the exact new block, the prefix and suffix bytes, the mode and the `CLAUDE.md` import;
+     - an edited item 84 block kept with the differs notice and no `CLAUDE.md` import;
+     - one older known block (item 75's) upgraded straight to the new block;
+     - a control: `init` on a repository already holding the new block keeps it with the "already has" notice;
+     - `merge` success prints the new line right after the merged line, exit 0, with and without `--no-review`;
+     - `merge` refused (no CI status) and `merge` failing in `gh` do not print it.
+6. **Measure and revert.**
+   - **Metric:** over each adopter's next 5 merges after it runs a block with this line (Draken, draken-platform): worktrees on merged PRs left in that repository: each branch from `git worktree list --porcelain`, looked up with `gh pr list --state merged --head <branch>`. A detached worktree, or a branch whose lookup fails, is not counted, and the readout says how many were left out.
+   - **Threshold:** at most 1 left, against 29 of 38 on 2026-11-03.
+   - **Revert:** at the first report of an agent removing someone else's work because of this rule, a release restores item 84's block and drops the `merge` line; the new block joins the known blocks so `init` upgrades it back.
+7. **Known limits.**
+   - The battery checks the text written, not whether an agent follows it.
+   - "What this change created" and "unmerged work" are the agent's judgment: after a squash merge the branch's commits are not ancestors of the base though the change landed, so an agent that is unsure reports. Shipcraft neither classifies nor verifies it.
+   - A resource shared between sessions, like one test database server, stays: the rule says not to remove it, and a leak inside it is that project's to fix.
+   - The line reaches an existing install only on its next `init` after a release; `merge`'s line reaches it when the binary is upgraded.
+
 ## 4. Configuration
 
 `.shipcraft.toml` lives at the project root.
@@ -1814,4 +1863,4 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.39.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.40.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
