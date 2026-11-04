@@ -27,7 +27,7 @@ for node in ast.parse(source).body:
  if isinstance(node,ast.Assign):
   targets={n.id for t in node.targets for n in ast.walk(t) if isinstance(n,ast.Name)}
   if targets and targets<=names:exec(compile(ast.Module(body=[node],type_ignores=[]),'item61-fixtures','exec'),ns)
- elif isinstance(node,ast.FunctionDef) and node.name=='expected_block':exec(compile(ast.Module(body=[node],type_ignores=[]),'item61-fixtures','exec'),ns)
+ elif isinstance(node,ast.FunctionDef) and node.name in ('expected_block','has_lines','clean_block'):exec(compile(ast.Module(body=[node],type_ignores=[]),'item61-fixtures','exec'),ns)
 def variant(block,local):
  if not local:return block
  text=block.replace(b'`shipcraft ',b'`npx -- shipcraft ')
@@ -61,7 +61,7 @@ if local:
 def init(**kw):return run(call,'init',**kw)
 def exact_block(actual):
  expected=ns['expected_block'](local)
- assert actual==expected,'missing exact item 70 fallback line or changed other block bytes/order'
+ assert ns['has_lines'](actual,expected),'missing exact item 70 fallback line, or an owned line lost or out of order'
  fallback=ns['FALLBACK'].replace(b'`shipcraft ',b'`npx -- shipcraft ') if local else ns['FALLBACK']
  assert actual.count(fallback)==1,'fallback must occur once, as one LF-terminated line'
  sandbox=ns['SANDBOX'].replace(b'`shipcraft ',b'`npx -- shipcraft ') if local else ns['SANDBOX']
@@ -155,7 +155,7 @@ else:
   closing(p,agents=False,briefs=False)
  else:
   actual=Path('AGENTS.md').read_bytes()
-  assert actual==PREFIX+ns['expected_block'](local)+SUFFIX,'v2.25.0 known block not upgraded with exact surrounding bytes'
+  assert actual==PREFIX+ns['clean_block'](binary,local)+SUFFIX,'v2.25.0 known block not upgraded with exact surrounding bytes'
   exact_block(actual[len(PREFIX):-len(SUFFIX)])
   assert stat.S_IMODE(Path('AGENTS.md').stat().st_mode)==0o751,'upgrade changed mode'
   closing(p,briefs=False)

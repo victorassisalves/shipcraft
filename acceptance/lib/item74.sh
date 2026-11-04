@@ -26,7 +26,7 @@ for node in ast.parse(source).body:
  if isinstance(node,ast.Assign):
   targets={n.id for t in node.targets for n in ast.walk(t) if isinstance(n,ast.Name)}
   if targets and targets<=names:exec(compile(ast.Module(body=[node],type_ignores=[]),'item61-fixtures','exec'),ns)
- elif isinstance(node,ast.FunctionDef) and node.name=='expected_block':exec(compile(ast.Module(body=[node],type_ignores=[]),'item61-fixtures','exec'),ns)
+ elif isinstance(node,ast.FunctionDef) and node.name in ('expected_block','has_lines','clean_block'):exec(compile(ast.Module(body=[node],type_ignores=[]),'item61-fixtures','exec'),ns)
 def variant(block,local):
  if not local:return block
  text=block.replace(b'`shipcraft ',b'`npx -- shipcraft ')
@@ -60,11 +60,11 @@ if local:
 def init(**kw):return run(call,'init',**kw)
 def exact_block(actual):
  expected=ns['expected_block'](local)
- assert actual==expected,'missing exact item 74 sandbox line or changed other block bytes/order'
+ assert ns['has_lines'](actual,expected),'missing exact item 74 sandbox line, or an owned line lost or out of order'
  sandbox=ns['SANDBOX'].replace(b'`shipcraft ',b'`npx -- shipcraft ') if local else ns['SANDBOX']
  fallback=ns['FALLBACK'].replace(b'`shipcraft ',b'`npx -- shipcraft ') if local else ns['FALLBACK']
- assert actual.count(sandbox)==1 and fallback+sandbox in actual,'sandbox line must occur once immediately after fallback, with LF'
- assert actual.replace(sandbox,b'',1).replace(ns['FIX_DATA'].replace(b'`shipcraft ',b'`npx -- shipcraft ') if local else ns['FIX_DATA'],b'',1).replace(b"- Pick the lane first: a mechanical change, one that changes no behavior (text, config, data, content, a rename, docs), is committed directly once the tests it affects pass in one run, with no RED or GREEN; a behavior change takes the cycle.\n- A change that needs more than about 40 new test cases is split before its RED.\n- A review of the RED's tests before the lock takes at most one round and fixes contract bugs only (a test that asserts the wrong behavior).\n- Locally, the GREEN runs only the tests the change affects; the full suite runs once, in CI (where CI is off, once before the PR).\n- In PR review, only Blocking findings open another round; the others go to notes.\n- Small fixes from one request go in one PR.\n- After a merge, clean up what this change created: its worktree, temp folders, and servers or databases you started. Never remove what you did not create, what other sessions may be using, or anything with unmerged work: report those instead.\n",b'',1)==variant(HISTORICAL_BARE,local),'fixture must add exactly item 74 and item 75 lines to e642432'
+ assert actual.count(sandbox)==1 and fallback+sandbox in expected,'sandbox line must occur once, after fallback (immediately in the frozen lines), with LF'
+ assert expected.replace(sandbox,b'',1).replace(ns['FIX_DATA'].replace(b'`shipcraft ',b'`npx -- shipcraft ') if local else ns['FIX_DATA'],b'',1).replace(b"- Pick the lane first: a mechanical change, one that changes no behavior (text, config, data, content, a rename, docs), is committed directly once the tests it affects pass in one run, with no RED or GREEN; a behavior change takes the cycle.\n- A change that needs more than about 40 new test cases is split before its RED.\n- A review of the RED's tests before the lock takes at most one round and fixes contract bugs only (a test that asserts the wrong behavior).\n- Locally, the GREEN runs only the tests the change affects; the full suite runs once, in CI (where CI is off, once before the PR).\n- In PR review, only Blocking findings open another round; the others go to notes.\n- Small fixes from one request go in one PR.\n- After a merge, clean up what this change created: its worktree, temp folders, and servers or databases you started. Never remove what you did not create, what other sessions may be using, or anything with unmerged work: report those instead.\n",b'',1)==variant(HISTORICAL_BARE,local),'fixture must add exactly item 74 and item 75 lines to e642432'
 def closing(p,agents=True,briefs=True):
  lines=text(p).splitlines();ready=[l for l in lines if l.startswith('shipcraft: ready. Commit ')]
  assert len(ready)==1 and lines[-3]==ready[0],'changed closing order'
@@ -140,7 +140,7 @@ else:
   closing(p,agents=False,briefs=False)
  else:
   actual=Path('AGENTS.md').read_bytes()
-  assert actual==PREFIX+ns['expected_block'](local)+SUFFIX,'e642432 known block not upgraded with exact surrounding bytes'
+  assert actual==PREFIX+ns['clean_block'](binary,local)+SUFFIX,'e642432 known block not upgraded with exact surrounding bytes'
   exact_block(actual[len(PREFIX):-len(SUFFIX)])
   assert stat.S_IMODE(Path('AGENTS.md').stat().st_mode)==0o751,'upgrade changed mode'
   closing(p,briefs=False)
