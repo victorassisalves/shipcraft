@@ -1,8 +1,8 @@
 //! Item 4: the executed review. A new agent session (codex, claude or gemini,
 //! from `[roles] review`) reviews a commit in an isolated checkout, from a
 //! brief built into the binary. It fails closed: anything but a well-formed
-//! verdict on its first line is an error, never an approval, and there is no
-//! retry (rule 12).
+//! verdict on its first line is an error, never an approval, and the only
+//! retry is a non-zero exit whose reason says `Please retry` (item 87).
 
 use crate::config::Config;
 use crate::fila;
@@ -15,13 +15,15 @@ use serde_json::json;
 use std::fs::{self, File};
 use std::os::unix::ffi::OsStrExt;
 use std::process::{Command, Stdio};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 const BRIEF: &str = include_str!("brief.md");
 /// Item 63: the brief when the review comes after green CI at the same head.
 const BRIEF_AFTER_CI: &str = include_str!("brief_after_ci.md");
 const MAX_DIFF: usize = 400_000;
 const MAX_BATTERY: usize = 200_000;
+/// Item 87: the attempts in all, when each failure says `Please retry`.
+const ATTEMPTS: u64 = 3;
 
 pub struct Request<'a> {
     pub repo: &'a Repo,
@@ -54,6 +56,8 @@ pub struct Review {
     pub blocking: u64,
     pub text: String,
     pub agent: String,
+    /// Item 87: a non-zero exit whose reason holds `Please retry`.
+    retry: bool,
 }
 
 impl Review {
@@ -76,7 +80,25 @@ impl Review {
     }
 }
 
+/// Item 87: every attempt takes its own slot and writes its own row, and the
+/// wait between attempts holds no slot. The last attempt's outcome is the review's.
 pub fn run(req: &Request) -> Result<Review> {
+    let wait = req.config.revisao.retry_wait;
+    let mut n = 1;
+    loop {
+        let review = attempt(req)?;
+        if !review.retry || wait == 0 || n == ATTEMPTS {
+            return Ok(review);
+        }
+        if let Verdict::Error(why) = &review.verdict {
+            eprintln!("shipcraft: review attempt {n} of {ATTEMPTS} gave no verdict ({why}); trying again in {wait} s");
+        }
+        std::thread::sleep(Duration::from_secs(wait));
+        n += 1;
+    }
+}
+
+fn attempt(req: &Request) -> Result<Review> {
     let papel = &req.config.papeis.revisao;
     let agent = papel.agent.clone();
     let started = Instant::now();
@@ -89,6 +111,7 @@ pub fn run(req: &Request) -> Result<Review> {
             blocking: 0,
             text: String::new(),
             agent: agent.clone(),
+            retry: false,
         }
     };
     let (resultado, codigo) = match &review.verdict {
@@ -185,17 +208,19 @@ fn execute(req: &Request, agent: &str) -> Result<Review> {
     let _ = repo.run(&["worktree", "remove", "--force", &tree_s]);
     let _ = repo.run(&["worktree", "prune"]);
     let stdout = fs::read_to_string(&out).unwrap_or_default();
-    let stderr = fs::read_to_string(&err).unwrap_or_default();
+    let stderr = String::from_utf8_lossy(&fs::read(&err).unwrap_or_default()).into_owned();
     let final_message = fs::read_to_string(&last).unwrap_or_default();
     let text = if final_message.trim().is_empty() { stdout.clone() } else { final_message };
     let all = format!("{stdout}\n{stderr}");
+    let mut retry = false;
     let (verdict, blocking) = match end {
         Err(e) => (Verdict::Error(format!("could not start the reviewer: {}", stop_text(e))), 0),
         Ok(End::TimedOut) => (Verdict::Error(format!("timed out ({limit} s, [review] timeout)")), 0),
         Ok(End::Exited(0)) => parse(&text, &req.sha),
         Ok(End::Exited(code)) => {
-            let last_line = stderr.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
-            (Verdict::Error(format!("the reviewer exited with code {code}: {last_line}")), 0)
+            let reason = exit_reason(&stderr);
+            retry = reason.contains("Please retry");
+            (Verdict::Error(format!("the reviewer exited with code {code}: {reason}")), 0)
         }
     };
     Ok(Review {
@@ -203,7 +228,20 @@ fn execute(req: &Request, agent: &str) -> Result<Review> {
         blocking,
         text: format!("{}\n{}", text.trim_end(), token_line(&all)).trim_end().to_string(),
         agent: agent.to_string(),
+        retry,
     })
+}
+
+/// Item 87: the last `ERROR:` line of the reviewer's stderr; without one, the
+/// last line with an ASCII letter that is not the `tokens used` footer.
+fn exit_reason(stderr: &str) -> &str {
+    let mut lines = stderr.split('\n').map(str::trim_ascii).rev();
+    let footer = |l: &str| l.get(.."tokens used".len()).is_some_and(|p| p.eq_ignore_ascii_case("tokens used"));
+    lines
+        .clone()
+        .find(|l| l.starts_with("ERROR:"))
+        .or_else(|| lines.find(|l| l.bytes().any(|b| b.is_ascii_alphabetic()) && !footer(l)))
+        .unwrap_or("")
 }
 
 fn stop_text(stop: crate::refusal::Stop) -> String {

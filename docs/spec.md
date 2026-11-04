@@ -1463,6 +1463,53 @@ Item 85 added one line to the block and had to edit 5 older test files by one li
 - **Metric:** the next item that adds a block line edits 0 of `acceptance/lib/item{61,68,70,74,75,84,85}.sh`, and its `red` selects only its own file plus the pin holder.
 - **Revert:** revert the PR.
 
+### A failed review says why, and a passing failure is tried again (item 87)
+
+Wrong-verdict note. Introduced in v2.0.0 (commit 4f9d784, checked with `git log -S`). Found on 2026-11-04 at 18:40 -03, on PR #104 here and in draken-platform, during a Codex failure: `shipcraft pr` printed `the reviewer exited with code 1: 44,605`, which is the token count, while the session's error was `stream disconnected before completion: Unable to verify model access right now. Please retry.` The earlier layer that should have caught it is the battery: the `quota` stub writes one line to stderr, so taking the last line looked right.
+
+Field data (run logs of this Mac, 2026-11-04): 7 reviews of 371 ended without a verdict by a non-zero exit, 6 of them in that failure, and a person reran each. That failure lasted at least 15 minutes, so the retry below would not have ended it: the retry is for short failures, and the reason line is the certain gain.
+
+1. **The reason.** On a non-zero exit, the reason after `the reviewer exited with code <code>: ` comes from the reviewer's stderr, read as bytes and decoded lossily as UTF-8 (one bad byte no longer loses the stream; an unreadable file reads as empty), split on `\n`, each line trimmed of ASCII whitespace. It is the last line that starts with `ERROR:` (exact case, no ANSI stripping); when none does, the last line that holds an ASCII letter and does not start with `tokens used` (any case); when none does, empty. Nothing else about the message changes. A timeout, a start failure and a malformed verdict keep their reasons.
+2. **The retry.** When the exit is non-zero and that reason holds the exact bytes `Please retry`, the review runs again, in a new session and a new isolated copy, up to 3 attempts in all.
+   - Between attempts it waits `[review] retry_wait` seconds and holds no machine slot: each attempt enters the queue as a review does today, so a wait does not block other runs. The first line of stderr each attempt prints today stays, and before a wait it prints one line: `shipcraft: review attempt <n> of 3 gave no verdict (<reason>); trying again in <s> s`.
+   - Every other outcome ends the review as today, with no retry: approval, changes requested, a refusal or malformed verdict with exit 0, a timeout, a start failure, and a non-zero exit whose reason lacks those bytes (quota, for example). A review that fails closed still never approves.
+   - The last attempt's outcome is the review's outcome. Its text, blocking count and reason are published, and the verdict, the status and the exit code are built from it as today.
+   - All attempts use the original request: the same sha, base, title, body, config and reuse keys, whatever changes during a wait. `[review] timeout` applies to each attempt on its own; queue waits and retry waits have no overall limit.
+   - `<n>` is the failed attempt's number from 1. The line prints only when another attempt will run, never after attempt 3 and never with `retry_wait = 0`.
+   - The slot guard is dropped before the wait, and the next attempt takes a new ticket. An error that today returns before a row is written (the queue, the temp folder, the worktree, the brief) still returns as today on any attempt: it writes no row, and it ends the retries.
+   - `shipcraft pr`, `shipcraft review` and `shipcraft review --pr` all retry. The refusal's why line becomes `review fails closed: without a well-formed verdict there is no approval, and shipcraft retries only a "Please retry" failure`.
+3. **`[review] retry_wait`.** Whole seconds, default `120`, checked as `[review] timeout` is. `0` turns the retry off: one attempt; point 1's reason stays. The config table gains the row. Any explicit value, `0` included, needs `shipcraft_min` of `2.41` or more, refused the way item 62's `suite_checks` and item 64's `[roles]` are, because an older binary ignores the key and would reach another verdict.
+
+**The run log.** Each attempt writes the `review` row it writes today, with its own tokens and no new field, so `report` counts each failed attempt as an error. A row's `secs` holds its queue time and its run, as today, and no retry wait. The `pr` row stays wall clock, so it holds the waits.
+
+**Metric:** on the next failures with `Please retry`, the share of reviews that reach a verdict with no rerun by a person, and 0 reasons without a letter in `pr` rows. Cost: up to 2 waits of 120 s, and the tokens a failed attempt spends (up to about 49,000 seen). **Revert:** `retry_wait = 0` in a repository, or revert the PR.
+
+**Touches.** Read first, and keep:
+- Item 4: `v1-4.3-recusa-do-revisor`, `v1-4.3-saida-nao-zero` and `v1-4.3-tempo-esgotado` stay one attempt. The stub's `quota` text has no `Please retry`.
+- Item 7: `v1-7.1-fila-um-slot`, `v1-7.1-fila-dois-slots`, `v1-7.2-fila-posicao`, `v1-7.2-fila-tempo-libera`.
+- Item 24: `v1-24.json-zero`, `v1-24.json-null`.
+- Item 63: `v1-63.publish-fails-local`, `v1-63.publish-fails-review-pr`.
+- Item 64: `v1-64.row-error`, `v1-64.row-error-pr`, `v1-64.row-no-start`, `v1-64.row-no-start-pr`.
+- Item 82: `v1-82.two-local`, `v1-82.two-off`, `v1-82.two-review-pr`, `v1-82.publish-local`, `v1-82.publish-review-pr`.
+- `acceptance/README.md`, fixed point 5 ("Each PR invocation runs the reviewer once"): superseded. It gains "except a `Please retry` failure (item 87)".
+- Items 54 and 63: reuse reads only `passed` and `refused` rows, and `after_green_ci` stays on each row.
+- Item 38 and 76: `report` reads `review` rows as today.
+- Items 62 and 79: `pr`'s `review-error` refusal and `merge`'s checks.
+- Item 69 and the version cases: 2.41.0.
+
+**Current behavior**, each marked keep or change:
+- `revisao::run` enters the queue once and writes one row per call: change to once per attempt.
+- `execute` makes a new copy and removes it at the end: keep.
+- The non-zero reason is the last non-empty stderr line: change as point 1.
+- "The reviewer runs once per `shipcraft pr` and is not retried automatically": change as point 2.
+- `shipcraft pr`, `shipcraft review` and `shipcraft review --pr` all call `run`, so all retry: change.
+- The `review-error` refusal's why line says shipcraft does not retry automatically: change as point 2.
+- `execute`'s temp folder, its `brief.md`, `ultima-mensagem.md`, `saida.txt` and `erros.txt`, the forced worktree removal and the prune: keep, per attempt.
+- `fila::enter`'s queue files, its position line and the unlock on drop: keep, per attempt.
+- `shipcraft pr` pushes and creates or edits the PR before the review, and those stay when the review fails: keep. Its summary comment and its own row: keep, once.
+- `medicao::record` ignores an append failure: keep.
+- The pending status posted before the review and the final status are posted once per review, not per attempt: keep.
+
 ## 4. Configuration
 
 `.shipcraft.toml` lives at the project root.
@@ -1499,6 +1546,7 @@ Item 85 added one line to the block and had to edit 5 older test files by one li
 | `[roles] red`, `[roles] green` | The agent (string or table, as `review`) the orchestrator uses for each phase; shown, never run (item 64). | not set |
 | `[review] spec` | Path of a project spec given to the reviewer. | none |
 | `[review] timeout` | Review time limit, in seconds. | `1200` |
+| `[review] retry_wait` | Seconds between review attempts after a `Please retry` failure (item 87); `0` turns the retry off. | `120` |
 | `[machine] slots` | Concurrent local CI and review runs on this machine. | `1` |
 | `[pr] warn_lines` | Product lines above which the PR summary suggests a split. | `500` |
 | `[pr] shape_lines` | Fixes the file-size threshold of the shape warning (an integer above 0). | p90 of the project |
@@ -1660,7 +1708,7 @@ Nothing else changes: refusals and errors print no such line, and exit codes, st
 
 - **A separate session:** always a fresh session of the `[roles] review` agent, without the author's context. It is a different agent even with the same model. The brief is built into the binary and carries the project spec (`[review] spec`), the PR body and the raw diff.
 - **The verdict is the first line:** `APPROVE at <sha>` or `CHANGES REQUESTED at <sha>`, then `Blocking: N`. Anything else, including a blank line first or text after the sha, is malformed. `APPROVE` gives `success`, `CHANGES REQUESTED` gives `failure`.
-- **Fail closed:** timeout, quota, a non-zero exit, a reviewer refusal or a malformed verdict give `error` with the reason, never approval. The reviewer runs once per `shipcraft pr` and is not retried automatically. A `pending` status older than the timeout is redone by the next `shipcraft pr`.
+- **Fail closed:** timeout, quota, a non-zero exit, a reviewer refusal or a malformed verdict give `error` with the reason, never approval. The reviewer runs once per `shipcraft pr`; only a non-zero exit whose reason holds `Please retry` is tried again (item 87). A `pending` status older than the timeout is redone by the next `shipcraft pr`.
 - **Reuse:** a verdict is reused when the diff and the PR's text are both unchanged (item 54 added the text). The diff key (`diff_sha256`) is the SHA-256 of `git diff --raw -z --no-abbrev --no-renames --ignore-submodules=none <base> <head>`, as before: every changed file has the same versions on both sides. If the key cannot be computed, the review runs.
 - **The PR's text is part of the key (item 54).** The brief carries a title and a body, so a verdict is reused only when they are the same too.
   - **The text key.** `text_sha256` is the SHA-256 of the title's UTF-8 bytes, one NUL byte, then the body's UTF-8 bytes: the same title and body this run's brief receives, before the brief's own substitutions (an empty body is the empty string, not the brief's placeholder). For a PR they are the decoded JSON strings `gh` returned, with no trimming or newline or Unicode normalization; for `review` without a PR, the title and body it builds today (its rows get the key; whether it reuses is unchanged: it runs every time). If the title or body could not be read (a failed call, a missing, null or non-string field), there is no text key: the review runs and its row has no `text_sha256`. How the review behaves when the text cannot be read is unchanged.
@@ -1875,4 +1923,4 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.40.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.41.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.

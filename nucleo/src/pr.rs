@@ -526,7 +526,7 @@ fn outcome(review: &Review, what: &str) -> Result<()> {
         Verdict::Error(why) => refuse(
             "review-error",
             format!("{what} gave no verdict: {why}"),
-            "review fails closed: without a well-formed verdict there is no approval, and shipcraft does not retry automatically",
+            "review fails closed: without a well-formed verdict there is no approval, and shipcraft retries only a \"Please retry\" failure",
             "see reviewer output above; change the reviewer or timeout once, then escalate",
         ),
     }
