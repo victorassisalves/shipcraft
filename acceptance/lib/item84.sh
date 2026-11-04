@@ -23,7 +23,7 @@ GREEN_LINE=b"- Run the locked tests and the other tests the change affects, not 
 OLD_GREEN_LINE=b"- Running the other tests the change touches is a check, not a gate: report a failure outside the locked tests, and let the hook's verdict decide the commit, since CI runs the rest.\n"
 IMPORT=b'<!-- shipcraft -->\nShipcraft workflow (required): @AGENTS.md\n<!-- /shipcraft -->\n'
 PREFIX=b'# House rules84\r\n\x00\n';SUFFIX=b'\nAfter84\r\nno final newline'
-NEW=OLD75.replace(b'- A behavior change:',SIX+b'- A behavior change:',1)
+NEW=OLD75.replace(b'- A behavior change:',SIX+b'- A behavior change:',1).replace(b'- A behavior change:',b'- After a merge, clean up what this change created: its worktree, temp folders, and servers or databases you started. Never remove what you did not create, what other sessions may be using, or anything with unmerged work: report those instead.\n'+b'- A behavior change:',1)
 STAMP=('<!-- written by shipcraft '+version+' -->\n').encode()
 DIFF="; it differs from this version's: edit it by hand to match docs/spec.md"
 SKIP="shipcraft: CLAUDE.md not written: AGENTS.md does not hold this version's shipcraft block"
