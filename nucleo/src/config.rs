@@ -235,6 +235,8 @@ pub struct Revisao {
     pub spec: Option<String>,
     #[serde(rename = "timeout")]
     pub tempo_max: u64,
+    /// Item 87: seconds between attempts after a `Please retry` failure; 0 is one attempt.
+    pub retry_wait: u64,
 }
 
 /// Item 11, rule 3: above `aviso_linhas` product lines the summary suggests a
@@ -281,7 +283,7 @@ impl Default for Papeis {
 
 impl Default for Revisao {
     fn default() -> Self {
-        Revisao { spec: None, tempo_max: 1200 }
+        Revisao { spec: None, tempo_max: 1200, retry_wait: 120 }
     }
 }
 
@@ -343,6 +345,7 @@ impl Config {
         config.normalize()?;
         // Item 64: after every check that refused before it.
         config.papeis = check_roles(text, std::mem::take(&mut config.papeis_raw))?;
+        check_retry_wait(text)?;
         Ok(config)
     }
 
@@ -611,15 +614,36 @@ fn check_suite_checks(table: &toml::Table, execution: &toml::Value) -> Result<()
     if execution.get("ci").and_then(|v| v.as_str()) != Some("github") {
         return wrong("is not empty, and needs ci = \"github\"".into());
     }
-    let min = table.get("shipcraft_min").and_then(|v| v.as_str());
-    let well_formed = min.is_some_and(|m| {
-        let runs: Vec<&str> = m.split('.').collect();
-        (2..=3).contains(&runs.len()) && runs.iter().all(|r| !r.is_empty() && r.bytes().all(|b| b.is_ascii_digit()))
-    });
-    if !well_formed || min.is_some_and(|m| version_parts(m) < version_parts("2.18")) {
+    if !min_reaches(table, "2.18") {
         return wrong("is not empty, and needs shipcraft_min = \"2.18\" or above".into());
     }
     Ok(())
+}
+
+/// `shipcraft_min` is a well-formed version at `floor` or above.
+fn min_reaches(table: &toml::Table, floor: &str) -> bool {
+    table.get("shipcraft_min").and_then(|v| v.as_str()).is_some_and(|m| {
+        let runs: Vec<&str> = m.split('.').collect();
+        (2..=3).contains(&runs.len())
+            && runs.iter().all(|r| !r.is_empty() && r.bytes().all(|b| b.is_ascii_digit()))
+            && version_parts(m) >= version_parts(floor)
+    })
+}
+
+/// Item 87: any explicit `[review] retry_wait`, 0 included, needs 2.41, since
+/// an older binary ignores the key and would reach another verdict.
+fn check_retry_wait(text: &str) -> Result<()> {
+    let Ok(table) = text.parse::<toml::Table>() else { return Ok(()) };
+    let Some(value) = table.get("review").and_then(|r| r.get("retry_wait")) else { return Ok(()) };
+    if min_reaches(&table, "2.41") {
+        return Ok(());
+    }
+    refuse(
+        "config-invalid",
+        format!("[review] retry_wait = {value} needs shipcraft_min = \"2.41\" or above"),
+        "older binaries ignore this key, so they would try a review once and could reach another verdict",
+        format!("set shipcraft_min = \"2.41\" (or above) in {CONFIG_FILE} and run again"),
+    )
 }
 
 /// Item 64: the agents a role names.
@@ -966,6 +990,22 @@ globs = ["tests/**"]
         ] {
             let refused = Config::parse(bad);
             assert!(matches!(refused, Err(crate::refusal::Stop::Refused(r)) if r.code == "execution-invalid"), "{bad}");
+        }
+    }
+
+    #[test]
+    fn retry_wait_defaults_to_120_and_any_explicit_value_needs_2_41() {
+        assert_eq!(Config::parse("").unwrap().revisao.retry_wait, 120);
+        assert_eq!(Config::parse("shipcraft_min = \"2.41\"\n[review]\nretry_wait = 0").unwrap().revisao.retry_wait, 0);
+        for bad in [
+            "[review]\nretry_wait = 0",
+            "shipcraft_min = \"2.40.9\"\n[review]\nretry_wait = 0",
+            "shipcraft_min = \"2.41a\"\n[review]\nretry_wait = 1",
+            "shipcraft_min = \"2.41\"\n[review]\nretry_wait = -1",
+            "shipcraft_min = \"2.41\"\n[review]\nretry_wait = 1.5",
+        ] {
+            let refused = Config::parse(bad);
+            assert!(matches!(refused, Err(crate::refusal::Stop::Refused(r)) if r.code == "config-invalid"), "{bad}");
         }
     }
 }
