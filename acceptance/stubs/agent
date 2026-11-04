@@ -3,7 +3,9 @@
 
 The battery copies this file as `codex`, `claude` and/or `gemini` into a folder on
 the case's PATH. Behavior comes from <folder>/state/reviewer.json:
-  mode      approve | changes | preamble | blankline | suffix | malformed | refuse | exit1 | quota | hang
+  mode      approve | changes | preamble | blankline | suffix | malformed | refuse | exit1 | quota | hang | codex-error | retry-then-approve
+  stderr_hex  raw stderr bytes for codex-error (hex; default is captured Codex shape)
+  fail_times  failures before approval for retry-then-approve (default 1)
   blocking  number in "Blocking: N" (default 0 for approve, 2 for changes)
   sleep     seconds to wait before answering (default 0)
   timeline  shared file to write "<name> revisao start|end <t>" to
@@ -87,6 +89,8 @@ def main():
            "start": time.time(), "pid": os.getpid()}
     with open(os.path.join(ST, "reviewer.calls.jsonl"), "a") as f:
         f.write(json.dumps(rec) + "\n")
+    with open(os.path.join(ST, "reviewer.calls.jsonl")) as f:
+        attempt = sum(1 for _ in f)
     timeline(c, "start")
     mode = c.get("mode", "approve")
     time.sleep(float(c.get("sleep", 0)))
@@ -94,7 +98,16 @@ def main():
     tokens = int(c.get("tokens", 4321))
     body = "REVIEW-BODY-MARKER-3a9: nothing to point out beyond the above.\n"
     out, rc = "", 0
-    if mode == "approve":
+    if mode == "retry-then-approve":
+        tokens += attempt
+        mode = "codex-error" if attempt <= int(c.get("fail_times", 1)) else "approve"
+    if mode == "codex-error":
+        raw = bytes.fromhex(c["stderr_hex"]) if "stderr_hex" in c else (
+            "ERROR: stream disconnected before completion: Unable to verify model access right now. Please retry.\ntokens used\n%d\n" % tokens).encode()
+        sys.stderr.buffer.write(raw)
+        sys.stderr.buffer.flush()
+        rc = 1
+    elif mode == "approve":
         out = "APPROVE at %s\nBlocking: %s\n%s" % (sha, c.get("blocking", 0), body)
     elif mode == "changes":
         out = "CHANGES REQUESTED at %s\nBlocking: %s\n%s1. REVIEW-FINDING-MARKER-77c: the empty case is not handled.\n" % (sha, c.get("blocking", 2), body)

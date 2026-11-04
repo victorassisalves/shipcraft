@@ -72,7 +72,7 @@ These readings remain part of the acceptance contract. Historical item numbers i
 2. Verdict and `Blocking: N` are the first two lines; the SHA is HEAD. The early cases do not judge N.
 3. APPROVE maps to success, changes requested to failure, and refusal/timeout/quota/nonzero exit/malformed verdict to error with a nonempty reason. Red CI may be failure or error.
 4. Text before the verdict is malformed and produces error.
-5. Each PR invocation runs the reviewer once; stub calls are counted.
+5. Each PR invocation runs the reviewer once, except a `Please retry` failure (item 87); stub calls are counted.
 6. PR exit 0 is required only when CI/review succeed or are off; other outcomes are judged by statuses.
 7. Local `shipcraft review` prints the verdict/findings, returns 0 only on approval and publishes nothing.
 8. PR review publishes `shipcraft/review` and a comment on the PR head, from an isolated checkout; the user's checkout is unchanged. These cases do not require a CI status there.
