@@ -28,8 +28,8 @@ s=re.sub(r'## The intent \(the PR body\)\n.*?\n## Steps\n', 'PAYLOAD\n## Steps\n
 s=re.sub(r'(APPROVE at |CHANGES REQUESTED at )[0-9a-f]{40}',r'\1HEAD',s)
 s=re.sub(r'(CI is green at this commit \()[0-9a-f]{7}(\))',r'\1HEAD7\2',s)
 s=re.sub(r'(CI green at )[0-9a-f]{7}(\))',r'\1HEAD7\2',s)
-expected=('589ceb46e6fa2d2421c58ce3e4959abe5695d7aba1a8226bed2d700fbe2ae625' if sys.argv[2]=='true'
-          else '5fbb23cfac9701eab8fffa4e956cb45914db1bebef2525462e1dcca7c8607fb6')
+expected=('773a99d73de349ea8f13e93fcf3f8ee86bbd61a8a7b805e59219a5fb0e151c16' if sys.argv[2]=='true'
+          else '7b4e46d5346a968de2db5be396987bf35de813f21b0d3796ef9be1b53f0dc1da')
 assert hashlib.sha256(s.encode()).hexdigest()==expected,('other brief bytes changed',s)
 PY
 }
