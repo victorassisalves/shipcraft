@@ -1568,18 +1568,19 @@ The brief asks for a reproduced violation of the spec or the intent, or a crash 
 
 `init` writes the shipcraft block to `AGENTS.md`, and only a later `init` updates it. Nothing says when that is due. draken-platform kept its 2026-10-27 block until 11-05, without the lanes, the limit of about 40 cases or "only Blocking findings open another round", while its binary moved on many versions; its median PR on 11-04 was 871 changed lines against 271 on draken, which had those rules. Victor's decision (2026-11-05, "resolve", after this was recommended): `status` says so.
 
-1. **The new line.** `status` prints one line right after the hook line and before the open-locks line. It reads `AGENTS.md` at the repository root in the working tree, with the same reader and block rules as `init` (`find_block`: one start line and one end line, compared byte for byte with this binary's blocks):
+1. **The new line.** `status` prints one line right after the hook line and before the open-locks line. It reads `AGENTS.md` at the repository root in the working tree, from the root `Repo::open` finds (a linked worktree's own, even when `status` runs in a subfolder), with `init`'s reader and block rules (`find_block`, byte for byte, with no newline normalization). The rows are tried in this order:
 
    | `AGENTS.md` | Line |
    |---|---|
-   | Holds this version's block, in either the machine or the project-local form | `shipcraft: AGENTS.md block: current` |
-   | Holds a block an earlier version wrote (every block `init` would replace, the legacy one included) | ``shipcraft: AGENTS.md block: from an earlier version; run `shipcraft init` to update it`` |
-   | Holds a block `init` would keep: edited, or from a newer version, or markers that do not pair | `shipcraft: AGENTS.md block: differs from this version's; init keeps it, compare it with docs/spec.md by hand` |
-   | Has no start marker, or does not exist | ``shipcraft: AGENTS.md block: none; run `shipcraft init` to add it`` |
+   | Has no start marker (stray end markers included), or does not exist | ``shipcraft: AGENTS.md block: none; run `shipcraft init` to add it`` |
    | Is not a regular file, a symlink included, or cannot be read as UTF-8 text | `shipcraft: AGENTS.md block: could not read it` |
+   | Holds this version's block, in either the machine or the project-local form | `shipcraft: AGENTS.md block: current` |
+   | Holds a block an earlier version wrote: any earlier block `init` knows, in either form, or the exact legacy block of v2.14.0 (a start marker with no end marker, followed by anything) | ``shipcraft: AGENTS.md block: from an earlier version; run `shipcraft init` to update it`` |
+   | Anything else `init` keeps: edited, from a newer version, or other markers that do not pair | `shipcraft: AGENTS.md block: differs from this version's; init keeps it, compare it with docs/spec.md by hand` |
 
    A project-local install compared with the machine form of this version's block is `current`: that difference is the install's, not the version's. `init` still replaces it, as today.
 2. **Current behavior** on the paths this item touches (rule 14):
+   - Every failure before the hook line (outside git, invalid or missing config, `shipcraft_min` above the binary): keep, with no new line.
    - `status`'s other lines, their order, its refusals (an unknown lock format after the hook line, a lock folder it cannot read exits 2), and its exit codes: keep. The new line never changes the exit code and runs before the locks are read, so it prints in those cases too.
    - `status` runs no project command, writes no file and logs no row: keep. The new read writes nothing.
    - `init`: what it writes, replaces and keeps, and every message: keep. The block's text: keep. `CLAUDE.md` is not read by this line.
@@ -1588,12 +1589,12 @@ The brief asks for a reproduced violation of the spec or the intent, or a crash 
 3. **Touches.**
    - **The version:** 2.43.0 in section 11, `v1-62.version` and the other version cases item 69 lists.
    - **The commands table** in section 3 gains the line in `status`'s row.
-   - **Must keep passing unchanged:** every case that reads `status` output by line or pattern, items 58, 62, 64 and 73 included; the block cases of items 61, 68, 70, 74, 75, 84, 85 and 86.
-   - **New cases:** one per table row, each in a repository set up through public commands where it can be: `init` then `status` is `current`, on both the machine and the project-local install; each earlier block `init` knows gives `from an earlier version`, and after `init` gives `current`; an edited line, a missing end marker and two start markers give `differs`, and `init` leaves that file as it was; no `AGENTS.md`, and one with no markers, give `none`; a symlink and a folder and invalid UTF-8 give `could not read it`. In every case the exit code is unchanged, no file changes and no row is logged, and the line sits between the hook line and the open-locks line. With an unknown lock format the line still prints before the refusal.
+   - **Must keep passing unchanged:** `v1-5.4-status-nivel-de-protecao`; `v1-15c.status-sem-exec-borda`; `v1-20.status.*`; `v1-25.*.status-*`; `v1-70.status-*`; `v1-75.read-status`, `v1-75.future-status`; the `status` cases of items 58, 62, 64 and 73; the block cases of items 61, 68, 70, 74, 75, 84, 85 and 86. The spec review found none that breaks: no case pins the whole output or the hook line next to the locks line.
+   - **New cases:** one per table row, each in a repository set up through public commands where it can be: `init` then `status` is `current`, on both the machine and the project-local install; each earlier block `init` knows gives `from an earlier version`, and after `init` gives `current`; an edited line, a missing end marker and two start markers give `differs`, and `init` leaves that file as it was; no `AGENTS.md`, and one with no markers, give `none`; a symlink and a folder and invalid UTF-8 give `could not read it`. In every case the `status` run keeps its exit code, changes no file and logs no row, compared right before and after it (setup commits may have written rows earlier), and the line sits between the hook line and the open-locks line. A CRLF copy of the current block gives `differs`; an end marker with no start gives `none`; a run from a subfolder reads the root's file; the exact v2.14.0 block, followed by other text, gives `from an earlier version`. With an unknown lock format the line still prints before the refusal.
 4. **Measure and revert.**
-   - **Metric:** adopter repositories whose block is older than their binary for more than 2 days, read by the coordinator from `status` on draken and draken-platform at each release: 0 from the next release on; and false `from an earlier version` lines: 0, where `init` would not have replaced the block.
+   - **Metric:** adopter repositories whose block is older than their binary for more than 2 days, read by the coordinator from `status` on draken and draken-platform at each release: 0 from the next release on; and false lines: 0, meaning an `earlier version` line on a block that isn't one, or a `current` line on one that is.
    - **Revert:** a false line, or an adopter agent acting wrongly on it, removes the line in a release.
-5. **Known limits.** The line tells; nothing runs `init`. `status` is only read when someone runs it, so an agent that never does never sees it. It says nothing of the phase briefs in `.shipcraft/briefs/`, which also change only through `init`. A newer block than the binary reads as `differs`, which is true but does not say to upgrade.
+5. **Known limits.** The line tells; nothing runs `init`. `status` is only read when someone runs it, so an agent that never does never sees it. It says nothing of the phase briefs in `.shipcraft/briefs/`, which also change only through `init`. A newer block than the binary reads as `differs`, which is true but does not say to upgrade. The line says `shipcraft init` literally: on a project-local install, the user runs it the way they run `status`.
 
 ### Single suite (top level)
 
