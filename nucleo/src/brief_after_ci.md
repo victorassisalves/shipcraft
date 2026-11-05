@@ -55,10 +55,23 @@ publishes your review; you never post, push, commit or comment yourself.
 
 ## Rules for a Blocking item
 
-A Blocking item must be BOTH:
-- reproduced by you, with the exact commands and their observed output; and
+A Blocking item must be ALL of these:
+- reproduced by you, with the exact commands and their observed output;
 - either a violation of a specific rule of the spec or of the stated intent (quote it),
-  or a crash (panic, abort, or an unhandled error on valid input).
+  or a crash (panic, abort, or an unhandled error on valid input); and
+- either reachable or a risk to data or access; say which, and why. Reachable: a real
+  user or system gets there in use, through an entry point of the product, a public API
+  or documented configuration, from input it would really send or state it really holds
+  (a supported older state counts). Timing counts if it can happen in use, even if you
+  forced it to reproduce it. A risk to data or access: it can lose, corrupt or expose
+  data, a secret included, or let someone act without permission, however rare the
+  trigger.
+
+A reproduced defect that fails the last test is a note, never Blocking: a state nothing
+creates or has created, input nobody would really send, or timing that cannot happen in
+use. Finding no caller in this repository proves nothing about a public API or a
+documented configuration. The note says what would make it Blocking. A failing test that
+the project's suite runs is reachable.
 
 A failing test of the battery, reproduced with the smallest selection, counts as
 reproduced: name it and the rule it checks. Not being able to isolate a test is never
