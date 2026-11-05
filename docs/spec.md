@@ -1601,25 +1601,30 @@ The brief asks for a reproduced violation of the spec or the intent, or a crash 
 
 Item 89's `status` says to run `shipcraft init` when the `AGENTS.md` block is old. On this repository, a Rust project with its own `.shipcraft.toml`, that `init` refuses `lang-unrecognized`. Passing `--lang other --command ... --glob ...` gets through, and then `init` itself says those values only seed a new config. Item 67 point 1 decided that a hand-written config does not lift the refusal, when no message told anyone to run `init` on such a project. Now one does. Victor's decision (2026-11-05, "Sim, abre").
 
-1. **The change.** A plain `init` (no `--lang`, `--command` or `--glob`) does not refuse `lang-unrecognized` or `lang-multiple` when `.shipcraft.toml` exists, by the existence test `init` uses today (`symlink_metadata`, so a link or a folder counts). It goes on as an `init` with a kept config: it keeps the config and the lock folder, installs or keeps the hooks, updates the `AGENTS.md` block, writes the briefs, and exits 0. It prints no language or runner line, and not `test command run as written`, since it chose neither. The next line is the existing `already exists, kept`. It reads no language file to do this.
+1. **The change.** `init` with no `--lang`, `--command` or `--glob` (`--github` allowed) plans as today: workspaces first, then detection, with every read and refusal that planning has. Only the two refusals `lang-unrecognized` and `lang-multiple` change: when `symlink_metadata` on `.shipcraft.toml` succeeds, so a link, a broken link or a folder counts, `init` goes on instead of refusing. If that call fails for any reason, it refuses as today. Going on, it prints no language or runner line and not `test command run as written`, since it chose neither, and every later step runs as it does for a kept config today.
 2. **What does not change.**
    - No config: `lang-unrecognized` and `lang-multiple` refuse as today, with their texts.
-   - A language that is detected, with or without a config: as today, the language or workspace line included.
+   - A plan that succeeds, with or without a config: as today, the language or workspace line and workspace precedence included.
    - `--lang python|node|go`, and an unknown `--lang`: as today, config or not. `--lang other` and its validation (item 67), and the seed notice: as today, config or not. `--command` or `--glob` without `--lang other`: refuses as today.
-   - Errors after the language step (hook decisions, `raise_min`, a legacy config file refused before it): as today. The config's contents are still not read or validated by `init`, as today.
+   - Every step after planning, in today's order: hook decisions and their refusals; `raise_min`, which refuses `shipcraft-min` on a linked or invalid config and errors on a folder or an unreadable one, so those configs do not reach `ready`; an open lock's refusal. Each of these still comes before anything is written, so `already exists, kept` does not print then.
 3. **Current behavior** on the paths this item touches (rule 14):
-   - What `init` writes, replaces and keeps, its rollback on a failed write, its order of messages, exit codes and final `ready` lines: keep. `.shipcraft.toml` stays byte for byte.
-   - Item 67 point 1's sentence that a hand-written config does not lift the refusal, and its point 3: superseded for the plain form only. Section 7's table rows gain "and no `.shipcraft.toml` exists".
+   - `.shipcraft.toml`: kept. The only write is today's: `raise_min` raising `shipcraft_min` for a lefthook or similar integration, with its message and its restore on failure.
+   - `.shipcraft/locks/.gitkeep`: ensured as today, its folders created, existing locks untouched; if `.shipcraft` is a file, the core failure as today.
+   - Core write failures (config, lock placeholder, hooks): undo what this run created and exit 2, as today. Onboarding failures (`AGENTS.md` a link, `.shipcraft/briefs` a file): a notice, what was installed stays, and `ready` prints, as today.
+   - `--github`: `protect` and its messages as today, its failure not failing `init`.
+   - The final `ready` lines and the CI line from the kept config: keep.
+   - Item 67 point 1's sentence that a hand-written config does not lift the refusal, and its point 3: superseded for this form only. Section 7's rows gain "and no `.shipcraft.toml` exists".
    - `status` and its line (item 89): keep. The advice now works here.
    - The standing effects the spec-review brief lists: keep.
 4. **Touches.**
+   - **Assertions that change, and nothing else:** `v1-67.detection-kept` in `acceptance/lib/item67.sh`, which pins this refusal, and `acceptance/pontos/67.md` points 9 and 14, which describe it. The case now asserts the new behavior.
    - **The version:** 2.44.0 in section 11, `v1-62.version` and the other version cases item 69 lists.
-   - **Must keep passing unchanged:** every `v1-67.*` case that refuses with no config, and any `v1-67.*` case with a kept config and flags; the block cases of items 61, 68, 70, 74, 75, 84, 85, 86 and 89. If a `v1-67.*` case asserts the refusal with a config and no flags, it changes to the new behavior; the spec review names it.
-   - **New cases:** with a hand-written config and no language file, a plain `init` exits 0, keeps the config byte for byte, replaces an earlier `AGENTS.md` block, then `status` says `current`; the same with two language files (`lang-multiple` today); with a config that is a link and one that is invalid TOML, the same; no language line and no `run as written` line in any of them; no config with no language file and with two still refuse with today's codes; a detected language with a config still prints its language line; a failed write still rolls back what the run created.
+   - **Must keep passing unchanged:** every other `v1-67.*` case; `init-detect`, `init-files`, `init-workflow`, `init-lang-flag` in `acceptance/run.sh`; `v1-9.1-init-*`; `v1-20.rota.commit-msg`, `v1-20.rota.post-commit`; `v1-27.mensagem-*`; `v1-58.plain`, `v1-58.kept`, `v1-58.rollback`; `v1-75.read-init`; the block cases of items 61, 68, 70, 74, 75, 84, 85, 86 and 89.
+   - **New cases:** with a valid hand-written config and no language file, `init` exits 0, keeps the config byte for byte, replaces an earlier `AGENTS.md` block, then `status` says `current`, with no language line and no `run as written` line; the same with two language files; a linked config and an invalid one still refuse `shipcraft-min` and a folder errors, each writing nothing; no config with no language file and with two still refuse with today's codes and an unchanged tree; two language files plus a tested workspace still print the workspace line; a detected language with a config still prints its language line; a foreign hook still refuses with no `already exists, kept` line; `.shipcraft` as a file undoes what the run created; `AGENTS.md` as a link prints the notice and `ready`.
 5. **Measure and revert.**
-   - **Metric:** `init` run on this repository with no flags updates the block, once a new block exists; false successes: 0, meaning an `init` that says `ready` with nothing a project can use.
-   - **Revert:** a project with a config that needed the refusal: a release restores it.
-6. **Known limits.** `init` still does not validate the config it keeps, so an invalid one gets `ready`, as it does today with `--lang other`; `status` and the next commit say so. The `ready` line still says to commit `.shipcraft.toml`, as it does for any kept config.
+   - **Metric:** the next time the block changes, `init` with no flags updates it on this repository and on any adopter with an unrecognized language; refusals of that form on a usable config: 0.
+   - **Revert:** a project that needed the refusal with a config present: a release restores it.
+6. **Known limits.** `init` does not check that the kept config's suites run: a parsable config with wrong commands gets `ready`, and the next commit says so. The `ready` line still says to commit `.shipcraft.toml`, as it does for any kept config.
 
 ### Single suite (top level)
 
