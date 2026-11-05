@@ -15,7 +15,7 @@ from pathlib import Path
 try: import tomllib
 except ImportError: import tomli as tomllib
 case,binary,manifest,cw=sys.argv[1:]; binary=str(Path(binary).resolve())
-version=tomllib.loads(Path(manifest).read_text())['package']['version']
+version=(tomllib.loads(Path(manifest).read_text())['package']['version'] if case=='version' else subprocess.check_output([binary,'--version'],text=True).split()[1])
 def run(*args,ok=True):
  p=subprocess.run(list(map(str,args)),input=b'',capture_output=True,timeout=90)
  print('$',repr(args),'[rc='+str(p.returncode)+']\n'+(p.stdout+p.stderr).decode(errors='replace'),flush=True)
@@ -84,6 +84,15 @@ if case.startswith('detection'):
   # Creation order cannot decide the language.
   for name,data in ([('requirements.txt','pytest'),('go.mod','module example.com/m\n\ngo 1.21\n')] if not case.endswith('reverse') else [('go.mod','module example.com/m\n\ngo 1.21\n'),('requirements.txt','pytest')]):write(name,data)
  if case=='detection-kept':write('.shipcraft.toml','test_command = "sh tests/run.sh {junit}"\ntest_globs = ["tests/**"]\nfilter = "command"\n')
+ if case=='detection-kept':
+  original=Path('.shipcraft.toml').read_bytes();p=init([])
+  assert Path('.shipcraft.toml').read_bytes()==original,'existing config rewritten'
+  assert 'already exists, kept' in text(p) and 'ready. Commit' in text(p),text(p)
+  assert not re.search(r'(?im)^shipcraft: (?:language|runner)\b|run as written',text(p)),text(p)
+  assert Path('.shipcraft/locks/.gitkeep').is_file() and Path('AGENTS.md').is_file()
+  assert Path('.git/shipcraft/sentinel').read_bytes()==b'keep67\r\n\x00'
+  assert not Path('.git/shipcraft/runs.jsonl').exists()
+  sys.exit()
  before=snapshot(stable_git=True);p=init([],False);refusal(p)
  assert_snapshot(before,'refused init changed files')
  if 'multiple' not in case:
