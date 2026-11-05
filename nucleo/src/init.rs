@@ -659,35 +659,64 @@ fn variant(block: &str, local: bool) -> String {
     format!("{head}{ROOT_LINE}{rest}")
 }
 
+/// The blocks `init` replaces for an install of this form: this version's other
+/// form first, then every earlier block in both forms.
+fn known_blocks(local: bool) -> Vec<String> {
+    let earlier = [
+        AGENTS_BLOCK_2_22.to_string(),
+        AGENTS_BLOCK_2_25.to_string(),
+        AGENTS_BLOCK_2_26.to_string(),
+        AGENTS_BLOCK_2_30.to_string(),
+        agents_block_2_31(),
+        agents_block_2_39(),
+    ];
+    let mut known = vec![agents_text(!local)];
+    for block in &earlier {
+        known.push(variant(block, false));
+        known.push(variant(block, true));
+    }
+    known
+}
+
+/// Item 89: `status`'s line on `AGENTS.md`'s block, read with `init`'s rules. It writes nothing.
+pub fn agents_block_status(repo: &Repo) -> String {
+    let unreadable = "shipcraft: AGENTS.md block: could not read it";
+    let path = repo.path(AGENTS_FILE);
+    let text = match path.symlink_metadata() {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(_) => return unreadable.to_string(),
+        Ok(meta) if !meta.is_file() => return unreadable.to_string(),
+        Ok(_) => match fs::read_to_string(&path) {
+            Ok(text) => Some(text),
+            Err(_) => return unreadable.to_string(),
+        },
+    };
+    let new = agents_text(false);
+    let known = known_blocks(false);
+    let refs: Vec<&str> = known.iter().map(String::as_str).collect();
+    let found = text.as_deref().map(|t| (t, find_block(t, &new, &refs, Some(AGENTS_BLOCK_2_14))));
+    match found {
+        None | Some((_, Found::None)) => "shipcraft: AGENTS.md block: none; run `shipcraft init` to add it",
+        Some((_, Found::Equal)) => "shipcraft: AGENTS.md block: current",
+        // A project-local install's form is this version's too; `known[0]` is that other form.
+        Some((t, Found::Known(range))) if t[range.clone()] == known[0] => "shipcraft: AGENTS.md block: current",
+        Some((_, Found::Known(_))) => {
+            "shipcraft: AGENTS.md block: from an earlier version; run `shipcraft init` to update it"
+        }
+        Some((_, Found::Differs)) => {
+            "shipcraft: AGENTS.md block: differs from this version's; init keeps it, compare it with docs/spec.md by hand"
+        }
+    }
+    .to_string()
+}
+
 /// Tells agents the workflow where they already look: `AGENTS.md` gets the
 /// block, and `CLAUDE.md` imports it where Claude Code reads it (item 61). A
 /// failure here never undoes the init. Returns the files it wrote, `, AGENTS.md`.
 fn agents_block(repo: &Repo, local: bool) -> String {
     let new = agents_text(local);
-    let other = agents_text(!local);
-    let (bare_2_22, local_2_22) = (variant(AGENTS_BLOCK_2_22, false), variant(AGENTS_BLOCK_2_22, true));
-    let (bare_2_25, local_2_25) = (variant(AGENTS_BLOCK_2_25, false), variant(AGENTS_BLOCK_2_25, true));
-    let (bare_2_26, local_2_26) = (variant(AGENTS_BLOCK_2_26, false), variant(AGENTS_BLOCK_2_26, true));
-    let (bare_2_30, local_2_30) = (variant(AGENTS_BLOCK_2_30, false), variant(AGENTS_BLOCK_2_30, true));
-    let block_2_31 = agents_block_2_31();
-    let (bare_2_31, local_2_31) = (variant(&block_2_31, false), variant(&block_2_31, true));
-    let block_2_39 = agents_block_2_39();
-    let (bare_2_39, local_2_39) = (variant(&block_2_39, false), variant(&block_2_39, true));
-    let known = [
-        other.as_str(),
-        bare_2_22.as_str(),
-        local_2_22.as_str(),
-        bare_2_25.as_str(),
-        local_2_25.as_str(),
-        bare_2_26.as_str(),
-        local_2_26.as_str(),
-        bare_2_30.as_str(),
-        local_2_30.as_str(),
-        bare_2_31.as_str(),
-        local_2_31.as_str(),
-        bare_2_39.as_str(),
-        local_2_39.as_str(),
-    ];
+    let known = known_blocks(local);
+    let known: Vec<&str> = known.iter().map(String::as_str).collect();
     let (wrote, current) = onboard(repo, AGENTS_FILE, &new, &known, Some(AGENTS_BLOCK_2_14));
     let mut listed = if wrote { format!(", {AGENTS_FILE}") } else { String::new() };
     let claude = match repo.path(CLAUDE_FILE).symlink_metadata() {

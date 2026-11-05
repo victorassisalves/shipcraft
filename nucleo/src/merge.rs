@@ -145,6 +145,7 @@ pub fn status(repo: &Repo) -> Result<()> {
         if review_off { "off".to_string() } else { config.papeis.revisao.shown() }
     );
     println!("{}", crate::init::hook_status(repo));
+    println!("{}", crate::init::agents_block_status(repo));
     let open: Vec<String> = lock_files(repo, &Snapshot::Tree)?
         .into_iter()
         .filter(|(_, bytes)| crate::lock::Lock::parse(bytes).is_none_or(|l| l.is_open()))
