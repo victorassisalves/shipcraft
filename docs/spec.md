@@ -347,7 +347,7 @@ Each command is `shipcraft <command>`. Exit codes, unless the row says otherwise
 | `review` | Reviews local HEAD and prints the verdict; publishes nothing. Exit `0` on approval; refuses `review-changes-requested`, `review-error`, `review-off`. |
 | `review --pr <n>` | Reviews any PR in an isolated copy and publishes `shipcraft/review` and a comment. Refuses `pr-from-fork`. |
 | `merge <pr> [--no-review "<reason>"]` | The merge gate (section 5). Refuses `pr-not-open`, `merge-without-ci`, `merge-without-review`, `no-review-without-reason`. |
-| `status` | Prints the layers, review agent (none when review is off, item 73), hook state, open locks, and one line with the real branch protection level. |
+| `status` | Prints the layers, review agent (none when review is off, item 73), hook state, whether `AGENTS.md`'s block is this version's (item 89), open locks, and one line with the real branch protection level. |
 | `report [--json] [--since <tag>] [--github]` | Prints the flow's numbers per lock and per day from the run log (section 8, item 38), with DORA from git (item 76); `--github` fills the waiting and merge times from GitHub (item 79). Reads only; refuses only bad arguments and a `--since` that is not a release. |
 
 `init` writes no run-log row; `red` and `close` write one each (item 38).
@@ -1563,6 +1563,38 @@ The brief asks for a reproduced violation of the spec or the intent, or a crash 
    - **Revert:** a defect that reached real use and that the coordinator matches to a note in its PR, or a data or access defect approved with no Blocking and found later, restores both briefs' text in a release. A target missed alone is not a revert: it opens the next cause (re-reviews with no memory of the earlier round).
 5. **Known limits.** No test can check the reviewer's judgment: the cases pin the words, and the metric says whether they work. "Real user" and "without forcing" are the reviewer's reading, and reviews already differ between runs (draken-platform PR #77 was approved, then refused with only `.gitleaksignore` changed). The classification behind this item is one agent's. Notes live in the PR comment only: nothing tracks them after the merge, and a later review has no memory of them. It finds the defect again only if it looks there. The 31 above overstates what becomes a note, since it counts rare defects that risk data or access.
 
+
+### `status` says when `AGENTS.md`'s block is not this version's (item 89)
+
+`init` writes the shipcraft block to `AGENTS.md`, and only a later `init` updates it. Nothing says when that is due. draken-platform kept its 2026-10-27 block until 11-05, without the lanes, the limit of about 40 cases or "only Blocking findings open another round", while its binary moved on many versions; its median PR on 11-04 was 871 changed lines against 271 on draken, which had those rules. Victor's decision (2026-11-05, "resolve", after this was recommended): `status` says so.
+
+1. **The new line.** `status` prints one line right after the hook line and before the open-locks line. It reads `AGENTS.md` at the repository root in the working tree, with the same reader and block rules as `init` (`find_block`: one start line and one end line, compared byte for byte with this binary's blocks):
+
+   | `AGENTS.md` | Line |
+   |---|---|
+   | Holds this version's block, in either the machine or the project-local form | `shipcraft: AGENTS.md block: current` |
+   | Holds a block an earlier version wrote (every block `init` would replace, the legacy one included) | ``shipcraft: AGENTS.md block: from an earlier version; run `shipcraft init` to update it`` |
+   | Holds a block `init` would keep: edited, or from a newer version, or markers that do not pair | `shipcraft: AGENTS.md block: differs from this version's; init keeps it, compare it with docs/spec.md by hand` |
+   | Has no start marker, or does not exist | ``shipcraft: AGENTS.md block: none; run `shipcraft init` to add it`` |
+   | Is not a regular file, a symlink included, or cannot be read as UTF-8 text | `shipcraft: AGENTS.md block: could not read it` |
+
+   A project-local install compared with the machine form of this version's block is `current`: that difference is the install's, not the version's. `init` still replaces it, as today.
+2. **Current behavior** on the paths this item touches (rule 14):
+   - `status`'s other lines, their order, its refusals (an unknown lock format after the hook line, a lock folder it cannot read exits 2), and its exit codes: keep. The new line never changes the exit code and runs before the locks are read, so it prints in those cases too.
+   - `status` runs no project command, writes no file and logs no row: keep. The new read writes nothing.
+   - `init`: what it writes, replaces and keeps, and every message: keep. The block's text: keep. `CLAUDE.md` is not read by this line.
+   - `merge`, `pr`, `red`, `ci`, `report` and the hook: keep. Only `status` prints the line.
+   - The standing effects the spec-review brief lists: keep.
+3. **Touches.**
+   - **The version:** 2.43.0 in section 11, `v1-62.version` and the other version cases item 69 lists.
+   - **The commands table** in section 3 gains the line in `status`'s row.
+   - **Must keep passing unchanged:** every case that reads `status` output by line or pattern, items 58, 62, 64 and 73 included; the block cases of items 61, 68, 70, 74, 75, 84, 85 and 86.
+   - **New cases:** one per table row, each in a repository set up through public commands where it can be: `init` then `status` is `current`, on both the machine and the project-local install; each earlier block `init` knows gives `from an earlier version`, and after `init` gives `current`; an edited line, a missing end marker and two start markers give `differs`, and `init` leaves that file as it was; no `AGENTS.md`, and one with no markers, give `none`; a symlink and a folder and invalid UTF-8 give `could not read it`. In every case the exit code is unchanged, no file changes and no row is logged, and the line sits between the hook line and the open-locks line. With an unknown lock format the line still prints before the refusal.
+4. **Measure and revert.**
+   - **Metric:** adopter repositories whose block is older than their binary for more than 2 days, read by the coordinator from `status` on draken and draken-platform at each release: 0 from the next release on; and false `from an earlier version` lines: 0, where `init` would not have replaced the block.
+   - **Revert:** a false line, or an adopter agent acting wrongly on it, removes the line in a release.
+5. **Known limits.** The line tells; nothing runs `init`. `status` is only read when someone runs it, so an agent that never does never sees it. It says nothing of the phase briefs in `.shipcraft/briefs/`, which also change only through `init`. A newer block than the binary reads as `differs`, which is true but does not say to upgrade.
+
 ### Single suite (top level)
 
 | Key | Meaning |
@@ -1973,4 +2005,4 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.42.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.43.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
