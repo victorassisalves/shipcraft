@@ -80,7 +80,7 @@ pub fn run(repo: &Repo, options: &Options) -> Result<()> {
     let custom = custom(options)?;
     let (lang, mut suites) = match &custom {
         Some(_) => (None, Vec::new()),
-        None => plan(repo, options.lang).map(|(lang, suites)| (Some(lang), suites))?,
+        None => plan(repo, options.lang)?,
     };
     let install = install(repo);
     let local = matches!(install, Install::Project);
@@ -89,7 +89,7 @@ pub fn run(repo: &Repo, options: &Options) -> Result<()> {
     // Item 16b: proved on the tree before anything is written.
     let kept = repo.path(CONFIG_FILE).symlink_metadata().is_ok();
     // Item 67: `--lang other` skips TypeScript build inference entirely.
-    let (build, built) = match if kept || custom.is_some() { None } else { tsbuild::infer(repo)? } {
+    let (build, built) = match if kept || lang.is_none() { None } else { tsbuild::infer(repo)? } {
         Some((command, dirs)) => (Some(command), dirs),
         None => (None, Vec::new()),
     };
@@ -103,7 +103,9 @@ pub fn run(repo: &Repo, options: &Options) -> Result<()> {
         (Vec::new(), false)
     };
     match lang {
-        None => println!("shipcraft: test command run as written (filter = \"command\")"),
+        None if custom.is_some() => println!("shipcraft: test command run as written (filter = \"command\")"),
+        // Item 90: a kept config with no language chosen: neither line applies.
+        None => {}
         Some(lang) if !workspace => println!("shipcraft: language {} (runner {})", lang.name(), suites[0].2.runner),
         Some(lang) => println!("shipcraft: workspace {} with {} suite(s)", lang.name(), suites.len()),
     }
@@ -113,12 +115,23 @@ pub fn run(repo: &Repo, options: &Options) -> Result<()> {
     let reviewer = reviewer();
     // Item 15a: a write that fails in the middle undoes what this run created.
     let mut created = Vec::new();
-    let written = write_once(repo, &mut created, CONFIG_FILE, &config_text(lang, custom.as_ref(), &suites, named, &reviewer, build.as_deref()))
-        .and_then(|()| write_once(repo, &mut created, &format!("{LOCK_DIR}/.gitkeep"), ""))
-        .and_then(|()| match &hook {
-            Hook::Own(hooks) => install_hooks(hooks, local, &mut created),
-            Hook::Msg(plan) => init_msg::write(repo, plan, raise.as_ref()).map(|()| plan.new.is_some()),
-            Hook::Tool(tool) => init_tool::write(repo, tool, raise.as_ref()).map(|()| !tool.writes.is_empty()),
+    let config = if lang.is_none() && custom.is_none() {
+        keep_config(repo)
+    } else {
+        write_once(
+            repo,
+            &mut created,
+            CONFIG_FILE,
+            &config_text(lang, custom.as_ref(), &suites, named, &reviewer, build.as_deref()),
+        )
+    };
+    let written =
+        config.and_then(|()| write_once(repo, &mut created, &format!("{LOCK_DIR}/.gitkeep"), "")).and_then(|()| {
+            match &hook {
+                Hook::Own(hooks) => install_hooks(hooks, local, &mut created),
+                Hook::Msg(plan) => init_msg::write(repo, plan, raise.as_ref()).map(|()| plan.new.is_some()),
+                Hook::Tool(tool) => init_tool::write(repo, tool, raise.as_ref()).map(|()| !tool.writes.is_empty()),
+            }
         });
     let wrote = written.as_ref().is_ok_and(|w| *w);
     if let Err(stop) = written {
@@ -200,22 +213,24 @@ fn ci_line(ci: &str) -> Option<&'static str> {
 }
 
 /// The language and the suites: one per package with tests in a workspace,
-/// or one at the root.
+/// or one at the root. No language (item 90) means a kept config and no suites.
 /// Suites to write: (nome, raiz, profile).
 type Suites = Vec<(String, String, Profile)>;
 
-fn plan(repo: &Repo, flag: Option<&str>) -> Result<(Lang, Suites)> {
+fn plan(repo: &Repo, flag: Option<&str>) -> Result<(Option<Lang>, Suites)> {
     if flag.is_none() {
         if let Some((lang, patterns)) = lang::workspace(repo.root()) {
             let suites = workspace_suites(repo, lang, &patterns)?;
             if !suites.is_empty() {
-                return Ok((lang, suites));
+                return Ok((Some(lang), suites));
             }
         }
     }
-    let lang = choose_lang(repo, flag)?;
+    let Some(lang) = choose_lang(repo, flag)? else {
+        return Ok((None, Vec::new()));
+    };
     let profile = lang.profile(repo.root(), "node_modules/.bin/");
-    Ok((lang, vec![(String::new(), ".".to_string(), profile)]))
+    Ok((Some(lang), vec![(String::new(), ".".to_string(), profile)]))
 }
 
 fn workspace_suites(repo: &Repo, lang: Lang, patterns: &[String]) -> Result<Suites> {
@@ -374,10 +389,10 @@ fn command_problem(command: &str) -> Option<&'static str> {
     None
 }
 
-fn choose_lang(repo: &Repo, flag: Option<&str>) -> Result<Lang> {
+fn choose_lang(repo: &Repo, flag: Option<&str>) -> Result<Option<Lang>> {
     if let Some(name) = flag {
         return match Lang::from_name(name) {
-            Some(lang) => Ok(lang),
+            Some(lang) => Ok(Some(lang)),
             None => refuse(
                 "lang-unknown",
                 format!("linguagem desconhecida: {name}"),
@@ -387,7 +402,10 @@ fn choose_lang(repo: &Repo, flag: Option<&str>) -> Result<Lang> {
         };
     }
     match Lang::detect(repo.root()).as_slice() {
-        [lang] => Ok(*lang),
+        [lang] => Ok(Some(*lang)),
+        // Item 90: a config already says how to run the tests, in whatever form
+        // (a link, a broken link and a folder count); later steps judge it.
+        _ if repo.path(CONFIG_FILE).symlink_metadata().is_ok() => Ok(None),
         [] => refuse(
             "lang-unrecognized",
             "could not recognize the project language",
@@ -869,6 +887,15 @@ fn write_once(repo: &Repo, created: &mut Vec<PathBuf>, relative: &str, content: 
     }
     write(&path, content, created)?;
     println!("shipcraft: created {relative}");
+    Ok(())
+}
+
+/// Item 90: with no language there is nothing to generate, so this path never
+/// writes a config: one gone since planning stops the run instead.
+fn keep_config(repo: &Repo) -> Result<()> {
+    let path = repo.path(CONFIG_FILE);
+    path.symlink_metadata().map_err(|e| failed(format!("{CONFIG_FILE} is gone since init started: {e}")))?;
+    println!("shipcraft: {CONFIG_FILE} already exists, kept");
     Ok(())
 }
 
