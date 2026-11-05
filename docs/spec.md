@@ -1526,15 +1526,19 @@ The brief asks for a reproduced violation of the spec or the intent, or a crash 
    - reproduced by you, with the exact commands and their observed output;
    - either a violation of a specific rule of the spec or of the stated intent (quote it),
      or a crash (panic, abort, or an unhandled error on valid input); and
-   - either reachable or a risk to data or access; say which, and why. Reachable: code at
-     this commit gets there with input a real user or system would send, and with timing
-     that happens without forcing. A risk to data or access: it can lose, corrupt or expose
-     stored data, or let someone act without permission, however rare the trigger.
+   - either reachable or a risk to data or access; say which, and why. Reachable: a real
+     user or system gets there in use, through an entry point of the product, a public API
+     or documented configuration, from input it would really send or state it really holds
+     (a supported older state counts). Timing counts if it can happen in use, even if you
+     forced it to reproduce it. A risk to data or access: it can lose, corrupt or expose
+     data, a secret included, or let someone act without permission, however rare the
+     trigger.
 
-   A reproduced defect that fails the last test is a note, never Blocking: a state no code
-   at this commit creates, input no real user or system would send, or timing you had to
-   force. The note says what would make it Blocking. A failing test of the battery is
-   always reachable.
+   A reproduced defect that fails the last test is a note, never Blocking: a state nothing
+   creates or has created, input nobody would really send, or timing that cannot happen in
+   use. Finding no caller in this repository proves nothing about a public API or a
+   documented configuration. The note says what would make it Blocking. A failing test that
+   the project's suite runs is reachable.
    ```
 
    The paragraph that starts `A failing test of the battery` follows after a blank line, as today. Nothing else in either brief changes: the steps, the format, the ground rules, item 82's paragraph, the placeholders and their substitution stay byte for byte.
@@ -1542,16 +1546,21 @@ The brief asks for a reproduced violation of the spec or the intent, or a crash 
    - Which brief is chosen (item 63), the substitutions, the brief written to the review's work folder as `brief.md` and passed to the agent: keep.
    - The verdict parsing (first line, `Blocking: N`), fail closed, the retry (item 87), the statuses, the run-log `review` rows, the reviewer's environment, the queue: keep. An `APPROVE` with notes is parsed as today, and the notes reach the PR comment as today.
    - Reuse by `diff_sha256` and `text_sha256` (item 54): keep. The brief's text is in neither key, so a refusal from before this item is reused while the diff and the text match.
+   - **What this means for a refusal already recorded:** the new rule applies to fresh reviews. To get one for an unchanged PR, change its code or its title or body.
    - `[review] spec`, the PR body and the reviewer's time budget: keep.
+   - The review's work folder (`shipcraft-revisao-*` in the caller's `TMPDIR`, its worktree and output files) and its cleanup, the queue's files, what happens when a step fails before a row is written: keep.
+   - Publishing: pending status, review and row, comment, final status, in that order; a failed comment leaves the pending status and the recorded verdict; reuse posts no new comment; the local `review` prints the text and publishes nothing; exits 0, 1 and 2: keep.
+   - The sentence that makes style, naming, performance and missing tests notes: keep, and it wins over the last test. A failing test still counts as reproduced as today: name it and the rule it checks, with no separate probe. An outage from slowness is a performance note unless it loses, corrupts or exposes data.
    - The standing effects the spec-review brief lists: keep.
 3. **Touches.**
    - **Assertions that change, and nothing else:** the pinned SHA-256 of the normalized briefs in item 63's `i63_brief` (`acceptance/lib/item63.sh`, used by `v1-63.brief-off`, `brief-off-spoof`, `brief-review`, `brief-review-pr` and `brief-review-pr-spoof`) and in item 82's `i82_brief` (`acceptance/lib/item82.sh`, both hashes).
    - **The version:** 2.42.0 in section 11, `v1-62.version` and the other version cases item 69 lists.
-   - **Must keep passing unchanged:** every other `v1-63.*` and `v1-82.*` case; `v1-54.*`; item 64's brief and prompt checks; item 87's cases; item 40's `src/brief.md` cases, which are about a project file of that name.
-   - **New cases:** each brief (after green CI and not) carries the new list and the new paragraph once, between the heading and `A failing test of the battery`; neither carries `must be BOTH`; item 82's paragraph still ends the section; a fake reviewer's `APPROVE` with a note section gives `success` and shows the note in the PR comment; a fake reviewer's `CHANGES REQUESTED` gives `failure` and a row as today.
+   - **Fixed points that change with them:** the hash in `acceptance/pontos/63.md` and the statement in `acceptance/pontos/82.md` that only item 82's paragraph was added.
+   - **Must keep passing unchanged:** every other `v1-63.*` and `v1-82.*` case; `v1-54.*`; `v1-4.1-brief-completa`, `v1-4.2-veredito-changes-requested`; `v1-30.1-brief`, `v1-30.1-brief-aspas`; `v1-35.4-externo`, `v1-35.4-textconv`, `v1-35.4-cor`; item 64's brief and prompt checks; item 87's cases; item 40's `src/brief.md` cases, which are about a project file of that name.
+   - **New cases:** each brief (after green CI and not) carries the new list and the new paragraph once, between the heading and the sentence that starts `A failing test of the battery` in each brief; neither carries `must be BOTH`; item 82's paragraph still ends the section; a fake reviewer's `APPROVE` with a note section gives `success` and shows the note in the PR comment; a fake reviewer's `CHANGES REQUESTED` gives `failure` and a row as today.
 4. **Measure and revert.**
-   - **Metric:** over the next 20 reviewed PRs of draken-platform on this version or later: refused rounds per PR (0.76 today, 35 of 46), target at most 0.4; first review passed for PRs of 700 changed lines or more (12 of 30 today), target at least 60%; review `secs` (p50 146 s, p90 237 s) must not grow by more than half. The coordinator reads every note of those PRs once.
-   - **Revert:** a defect that reached real use and was only a note in its PR, or a data or access defect approved with no Blocking and found later, restores both briefs' text in a release. A target missed alone is not a revert: it opens the next cause (re-reviews with no memory of the earlier round).
+   - **Metric:** over the next 20 draken-platform PRs whose reviews all ran on this version or later, counting one fresh completed verdict per round (no reused row, no error row): refused rounds per PR (0.76 today, 35 of 46), target at most 0.4; first review passed for PRs of 700 changed lines or more (12 of 30 today), target at least 60%; review `secs` per fresh row, nearest-rank p50 and p90 (146 s and 237 s), must not grow by more than half. The coordinator reads every note of those PRs once.
+   - **Revert:** a defect that reached real use and that the coordinator matches to a note in its PR, or a data or access defect approved with no Blocking and found later, restores both briefs' text in a release. A target missed alone is not a revert: it opens the next cause (re-reviews with no memory of the earlier round).
 5. **Known limits.** No test can check the reviewer's judgment: the cases pin the words, and the metric says whether they work. "Real user" and "without forcing" are the reviewer's reading, and reviews already differ between runs (draken-platform PR #77 was approved, then refused with only `.gitleaksignore` changed). The classification behind this item is one agent's. Notes live in the PR comment only: nothing tracks them after the merge, and a later review has no memory of them. It finds the defect again only if it looks there. The 31 above overstates what becomes a note, since it counts rare defects that risk data or access.
 
 ### Single suite (top level)
