@@ -1514,6 +1514,46 @@ Field data (run logs of this Mac, 2026-11-04): 7 reviews of 371 ended without a 
 
 `.shipcraft.toml` lives at the project root.
 
+
+### A Blocking item is reachable, or a risk to data or access (item 88)
+
+The brief asks for a reproduced violation of the spec or the intent, or a crash on valid input. It never asks whether anything reaches the defect or what it would cost. On draken-platform, 46 PRs merged from 2026-10-31 to 11-05 had 44 Blocking items in 35 refused rounds, and every item met the criteria. One agent classified them, with a partial check by the coordinator: 31 needed rare input, forced timing or a state no code creates yet, and 10 were worth a merge block. The 26 rounds with nothing worth a block cost about 6 hours and 1.9 million tokens. Victor's decision (2026-11-05, "Fecha e segue"): rare and unreachable defects become notes; a risk to data or access still blocks, however rare.
+
+1. **The new rules.** In both built-in briefs, `nucleo/src/brief.md` and `nucleo/src/brief_after_ci.md`, the list that opens "## Rules for a Blocking item", from `A Blocking item must be BOTH:` to `unhandled error on valid input).`, becomes:
+
+   ```
+   A Blocking item must be ALL of these:
+   - reproduced by you, with the exact commands and their observed output;
+   - either a violation of a specific rule of the spec or of the stated intent (quote it),
+     or a crash (panic, abort, or an unhandled error on valid input); and
+   - either reachable or a risk to data or access; say which, and why. Reachable: code at
+     this commit gets there with input a real user or system would send, and with timing
+     that happens without forcing. A risk to data or access: it can lose, corrupt or expose
+     stored data, or let someone act without permission, however rare the trigger.
+
+   A reproduced defect that fails the last test is a note, never Blocking: a state no code
+   at this commit creates, input no real user or system would send, or timing you had to
+   force. The note says what would make it Blocking. A failing test of the battery is
+   always reachable.
+   ```
+
+   The paragraph that starts `A failing test of the battery` follows after a blank line, as today. Nothing else in either brief changes: the steps, the format, the ground rules, item 82's paragraph, the placeholders and their substitution stay byte for byte.
+2. **Current behavior** on the paths this item touches (rule 14):
+   - Which brief is chosen (item 63), the substitutions, the brief written to the review's work folder as `brief.md` and passed to the agent: keep.
+   - The verdict parsing (first line, `Blocking: N`), fail closed, the retry (item 87), the statuses, the run-log `review` rows, the reviewer's environment, the queue: keep. An `APPROVE` with notes is parsed as today, and the notes reach the PR comment as today.
+   - Reuse by `diff_sha256` and `text_sha256` (item 54): keep. The brief's text is in neither key, so a refusal from before this item is reused while the diff and the text match.
+   - `[review] spec`, the PR body and the reviewer's time budget: keep.
+   - The standing effects the spec-review brief lists: keep.
+3. **Touches.**
+   - **Assertions that change, and nothing else:** the pinned SHA-256 of the normalized briefs in item 63's `i63_brief` (`acceptance/lib/item63.sh`, used by `v1-63.brief-off`, `brief-off-spoof`, `brief-review`, `brief-review-pr` and `brief-review-pr-spoof`) and in item 82's `i82_brief` (`acceptance/lib/item82.sh`, both hashes).
+   - **The version:** 2.42.0 in section 11, `v1-62.version` and the other version cases item 69 lists.
+   - **Must keep passing unchanged:** every other `v1-63.*` and `v1-82.*` case; `v1-54.*`; item 64's brief and prompt checks; item 87's cases; item 40's `src/brief.md` cases, which are about a project file of that name.
+   - **New cases:** each brief (after green CI and not) carries the new list and the new paragraph once, between the heading and `A failing test of the battery`; neither carries `must be BOTH`; item 82's paragraph still ends the section; a fake reviewer's `APPROVE` with a note section gives `success` and shows the note in the PR comment; a fake reviewer's `CHANGES REQUESTED` gives `failure` and a row as today.
+4. **Measure and revert.**
+   - **Metric:** over the next 20 reviewed PRs of draken-platform on this version or later: refused rounds per PR (0.76 today, 35 of 46), target at most 0.4; first review passed for PRs of 700 changed lines or more (12 of 30 today), target at least 60%; review `secs` (p50 146 s, p90 237 s) must not grow by more than half. The coordinator reads every note of those PRs once.
+   - **Revert:** a defect that reached real use and was only a note in its PR, or a data or access defect approved with no Blocking and found later, restores both briefs' text in a release. A target missed alone is not a revert: it opens the next cause (re-reviews with no memory of the earlier round).
+5. **Known limits.** No test can check the reviewer's judgment: the cases pin the words, and the metric says whether they work. "Real user" and "without forcing" are the reviewer's reading, and reviews already differ between runs (draken-platform PR #77 was approved, then refused with only `.gitleaksignore` changed). The classification behind this item is one agent's. Notes live in the PR comment only: nothing tracks them after the merge, and a later review has no memory of them. It finds the defect again only if it looks there. The 31 above overstates what becomes a note, since it counts rare defects that risk data or access.
+
 ### Single suite (top level)
 
 | Key | Meaning |
@@ -1708,6 +1748,7 @@ Nothing else changes: refusals and errors print no such line, and exit codes, st
 
 - **A separate session:** always a fresh session of the `[roles] review` agent, without the author's context. It is a different agent even with the same model. The brief is built into the binary and carries the project spec (`[review] spec`), the PR body and the raw diff.
 - **The verdict is the first line:** `APPROVE at <sha>` or `CHANGES REQUESTED at <sha>`, then `Blocking: N`. Anything else, including a blank line first or text after the sha, is malformed. `APPROVE` gives `success`, `CHANGES REQUESTED` gives `failure`.
+- **What blocks (item 88):** a Blocking item is reproduced, breaks the spec or the intent or crashes on valid input, and is reachable or a risk to data or access. Any other reproduced defect is a note.
 - **Fail closed:** timeout, quota, a non-zero exit, a reviewer refusal or a malformed verdict give `error` with the reason, never approval. The reviewer runs once per `shipcraft pr`; only a non-zero exit whose reason holds `Please retry` is tried again (item 87). A `pending` status older than the timeout is redone by the next `shipcraft pr`.
 - **Reuse:** a verdict is reused when the diff and the PR's text are both unchanged (item 54 added the text). The diff key (`diff_sha256`) is the SHA-256 of `git diff --raw -z --no-abbrev --no-renames --ignore-submodules=none <base> <head>`, as before: every changed file has the same versions on both sides. If the key cannot be computed, the review runs.
 - **The PR's text is part of the key (item 54).** The brief carries a title and a body, so a verdict is reused only when they are the same too.
@@ -1923,4 +1964,4 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.41.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.42.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
