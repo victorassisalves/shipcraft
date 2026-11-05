@@ -1596,6 +1596,36 @@ The brief asks for a reproduced violation of the spec or the intent, or a crash 
    - **Revert:** a false line, or an adopter agent acting wrongly on it, removes the line in a release.
 5. **Known limits.** The line tells; nothing runs `init`. `status` is only read when someone runs it, so an agent that never does never sees it. It says nothing of the phase briefs in `.shipcraft/briefs/`, which also change only through `init`. A newer block than the binary reads as `differs`, which is true but does not say to upgrade. The line says `shipcraft init` literally: on a project-local install, the user runs it the way they run `status`.
 
+
+### `init` does not need the language when the config already exists (item 90)
+
+Item 89's `status` says to run `shipcraft init` when the `AGENTS.md` block is old. On this repository, a Rust project with its own `.shipcraft.toml`, that `init` refuses `lang-unrecognized`. Passing `--lang other --command ... --glob ...` gets through, and then `init` itself says those values only seed a new config. Item 67 point 1 decided that a hand-written config does not lift the refusal, when no message told anyone to run `init` on such a project. Now one does. Victor's decision (2026-11-05, "Sim, abre").
+
+1. **The change.** `init` with no `--lang`, `--command` or `--glob` (`--github` allowed) plans as today: workspaces first, then detection, with every read and refusal that planning has. Only the two refusals `lang-unrecognized` and `lang-multiple` change: when `symlink_metadata` on `.shipcraft.toml` succeeds, so a link, a broken link or a folder counts, `init` goes on instead of refusing. If that call fails for any reason, it refuses as today. Going on, it prints no language or runner line and not `test command run as written`, since it chose neither, and every later step runs as it does for a kept config today.
+2. **What does not change.**
+   - No config: `lang-unrecognized` and `lang-multiple` refuse as today, with their texts.
+   - A plan that succeeds, with or without a config: as today, the language or workspace line and workspace precedence included.
+   - `--lang python|node|go`, and an unknown `--lang`: as today, config or not. `--lang other` and its validation (item 67), and the seed notice: as today, config or not. `--command` or `--glob` without `--lang other`: refuses as today.
+   - Every step after planning, in today's order: hook decisions and their refusals; `raise_min`, which refuses `shipcraft-min` on a linked or invalid config and errors on a folder or an unreadable one, so those configs do not reach `ready`; an open lock's refusal. Each of these still comes before anything is written, so `already exists, kept` does not print then.
+3. **Current behavior** on the paths this item touches (rule 14):
+   - `.shipcraft.toml`: kept. The only write is today's: `raise_min` raising `shipcraft_min` for a lefthook or similar integration, with its message and its restore on failure.
+   - `.shipcraft/locks/.gitkeep`: ensured as today, its folders created, existing locks untouched; if `.shipcraft` is a file, the core failure as today.
+   - Core write failures (config, lock placeholder, hooks): undo what this run created and exit 2, as today. Onboarding failures (`AGENTS.md` a link, `.shipcraft/briefs` a file): a notice, what was installed stays, and `ready` prints, as today.
+   - `--github`: `protect` and its messages as today, its failure not failing `init`.
+   - The final `ready` lines and the CI line from the kept config: keep.
+   - Item 67 point 1's sentence that a hand-written config does not lift the refusal, and its point 3: superseded for this form only. Section 7's rows gain "and no `.shipcraft.toml` exists".
+   - `status` and its line (item 89): keep. The advice now works here.
+   - The standing effects the spec-review brief lists: keep.
+4. **Touches.**
+   - **Assertions that change, and nothing else:** `v1-67.detection-kept` in `acceptance/lib/item67.sh`, which pins this refusal, and `acceptance/pontos/67.md` points 9 and 14, which describe it. The case now asserts the new behavior.
+   - **The version:** 2.44.0 in section 11, `v1-62.version` and the other version cases item 69 lists.
+   - **Must keep passing unchanged:** every other `v1-67.*` case; `init-detect`, `init-files`, `init-workflow`, `init-lang-flag` in `acceptance/run.sh`; `v1-9.1-init-*`; `v1-20.rota.commit-msg`, `v1-20.rota.post-commit`; `v1-27.mensagem-*`; `v1-58.plain`, `v1-58.kept`, `v1-58.rollback`; `v1-75.read-init`; the block cases of items 61, 68, 70, 74, 75, 84, 85, 86 and 89.
+   - **New cases:** with a valid hand-written config and no language file, `init` exits 0, keeps the config byte for byte, replaces an earlier `AGENTS.md` block, then `status` says `current`, with no language line and no `run as written` line; the same with two language files; a linked config and an invalid one still refuse `shipcraft-min` and a folder errors, each writing nothing; no config with no language file and with two still refuse with today's codes and an unchanged tree; two language files plus a tested workspace still print the workspace line; a detected language with a config still prints its language line; a foreign hook still refuses with no `already exists, kept` line; `.shipcraft` as a file undoes what the run created; `AGENTS.md` as a link prints the notice and `ready`.
+5. **Measure and revert.**
+   - **Metric:** the next time the block changes, `init` with no flags updates it on this repository and on any adopter with an unrecognized language; refusals of that form on a usable config: 0.
+   - **Revert:** a project that needed the refusal with a config present: a release restores it.
+6. **Known limits.** `init` does not check that the kept config's suites run: a parsable config with wrong commands gets `ready`, and the next commit says so. The `ready` line still says to commit `.shipcraft.toml`, as it does for any kept config.
+
 ### Single suite (top level)
 
 | Key | Meaning |
@@ -1893,9 +1923,9 @@ Output from a project command that `shipcraft` passes through always ends before
 | `execution-invalid` | An `[execution] ci`, `review` or `merge` value `shipcraft` does not know (items 42 and 47), or a `suite_checks` value item 62 refuses. |
 | `foreign-hook` | `init` cannot prove which hook runs, or another tool owns it. |
 | `group-failed` | At RED, a failing case is a vitest `describe` block whose `beforeAll` failed and whose tests were skipped, not a test (item 52). |
-| `lang-multiple` | `init` found more than one language. |
+| `lang-multiple` | `init` found more than one language, and no `.shipcraft.toml` exists (item 90). |
 | `lang-unknown` | `--lang` names an unsupported language, or `--lang other` without a valid `--command` and `--glob` (item 67). |
-| `lang-unrecognized` | `init` found no known project file. |
+| `lang-unrecognized` | `init` found no known project file, and no `.shipcraft.toml` exists (item 90). |
 | `hook-config-changed` | A hook integration file (lefthook, husky, pre-commit) changed with a lock open. |
 | `install-not-committed` | `red` or `red --redo` while a file of the install (`.shipcraft.toml`, the briefs, `.shipcraft/locks/.gitkeep`, a tracked hook file) is in the working tree but neither in HEAD nor staged (item 80). |
 | `lock-closed-red` | A lock arrives closed while locked cases still fail. |
@@ -2006,4 +2036,4 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.43.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.44.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
