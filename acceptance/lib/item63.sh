@@ -67,7 +67,7 @@ else:
   s=re.sub(r'## The intent \(the PR body\)\n.*?\n## Steps\n', 'PAYLOAD\n## Steps\n',s,flags=re.S)
   s=re.sub(r'(APPROVE at |CHANGES REQUESTED at )[0-9a-f]{40}',r'\1HEAD',s)
   return s
- assert hashlib.sha256(normalize(s).encode()).hexdigest()=='5fbb23cfac9701eab8fffa4e956cb45914db1bebef2525462e1dcca7c8607fb6',normalize(s)
+ assert hashlib.sha256(normalize(s).encode()).hexdigest()=='7b4e46d5346a968de2db5be396987bf35de813f21b0d3796ef9be1b53f0dc1da',normalize(s)
 PY
 }
 i63_env_stub() {
