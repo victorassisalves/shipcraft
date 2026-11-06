@@ -186,6 +186,12 @@ pub fn run(repo: &Repo, options: &Options) -> Result<()> {
         Hook::Tool(tool) => tool.writes.iter().map(|(file, ..)| format!(", {file}")).collect(),
         Hook::Own(_) => String::new(),
     };
+    // Item 91: a new config whose root suite got vitest only by default.
+    if !kept && lang == Some(Lang::Node) && !workspace && lang::node_runner(repo.root()).is_none() {
+        println!(
+            "shipcraft: warning: found neither vitest nor jest in package.json, so the test command assumes vitest. Install it, or for another runner, from the repository root, remove {CONFIG_FILE} and run: {OTHER_FORM}"
+        );
+    }
     println!("shipcraft: ready. Commit {CONFIG_FILE}{lefthook}{agents}{briefs} and {LOCK_DIR}/;");
     println!("shipcraft: then write the failing test and stub, and run `shipcraft red`.");
     // 27.1, read raw: a `shipcraft_min` above this binary keeps the file's real `ci`.

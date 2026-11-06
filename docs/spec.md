@@ -1626,6 +1626,35 @@ Item 89's `status` says to run `shipcraft init` when the `AGENTS.md` block is ol
    - **Revert:** a project that needed the refusal with a config present: a release restores it.
 6. **Known limits.** `init` does not check that the kept config's suites run: a parsable config with wrong commands gets `ready`, and the next commit says so. The `ready` line still says to commit `.shipcraft.toml`, as it does for any kept config.
 
+### `init --lang node` says when vitest is only an assumption (item 91)
+
+`--lang node` on a project whose `package.json` declares neither vitest nor jest writes `node_modules/.bin/vitest run ...` as the test command and prints `ready`, as item 9 decided. A project on another runner learns this only when `red` fails. Found on 2026-11-06 in a trial for a Node function with no dependencies that tests with `node --test`: `init` printed `language node (runner vitest)` and `ready`, with no vitest in the project. Victor's decision (2026-11-06, "Sim, abre o item"). The default stays; this item only says it is an assumption.
+
+1. **The change.** When `init` writes a new `.shipcraft.toml` from `--lang node`, the plan is one suite at the root (no workspace), and today's runner inference (`node_runner` on the root) returns none, it prints one line on stdout, right before the `shipcraft: ready.` line:
+
+   `shipcraft: warning: found neither vitest nor jest in package.json, so the test command assumes vitest. Install it, or for another runner, from the repository root, remove .shipcraft.toml and run: shipcraft init --lang other --command '<test command writing JUnit to {junit}>' --glob '<test files>'`
+
+   The result is the inference's own, with no second reader: it follows symlinks, any failure to read or parse the file gives no runner, and a key under `dependencies` or `devDependencies` counts whatever its value (`"jest": null` is a runner). "One suite at the root" reads the resulting plan, not the manifests: `--lang node` does not look at workspaces today, so a root `package.json` with `workspaces` and no root runner plans one root suite and gets the line. The line is informative: at the same version, `init` writes the same files with the same bytes and exits as it would without it. Deciding and printing it starts no tool and looks at no `node_modules`; TypeScript build inference still runs as today.
+2. **What does not change.**
+   - The default itself: vitest without a runner dependency, the language line `language node (runner vitest)`, and every word of the config.
+   - No line for: detection with no `--lang` (it needs a runner dependency to choose Node, and a detected workspace plans several suites); a `package.json` declaring vitest or jest, installed or not; a kept config (`.shipcraft.toml` exists in any form, item 90's reading); `--lang python`, `--lang go`, `--lang other`.
+   - A run that fails before `ready` prints no line.
+3. **Current behavior** on the paths this item touches (rule 14):
+   - `.shipcraft.toml`, `.shipcraft/locks/.gitkeep`, the hooks, hook integration files such as lefthook's and `shipcraft_min`'s raise and restore, `AGENTS.md`, `CLAUDE.md` and the briefs: written as today. Keep.
+   - Exit codes: a refusal exits 1, including an open lock's; a core write failure undoes what this run created and exits 2; an onboarding or briefs failure prints its notice and still reaches `ready` with exit 0, so the line prints there too; `--github`'s protection failure does not fail `init`. Keep.
+   - TypeScript build inference, its `tsc -b` proof run and its output in the tree: keep.
+   - The lines `init` prints today and their order, the closing guidance and the final CI line after `ready` included: keep, with this one added.
+   - Item 16b's handling of an invalid `package.json` under `--lang node`, its warning and the absent `[build]`: keep; the new line also prints there.
+   - The standing effects the spec-review brief lists: keep.
+4. **Touches.**
+   - **Assertions that change, and nothing else:** the version: 2.45.0 in section 11, `v1-62.version` and the other version cases item 69 lists.
+   - **Must keep passing unchanged:** `init-detect`, `init-files`, `init-workflow`, `init-lang-flag` in `acceptance/run.sh`; `v1-9.1-init-*`; item 16b's cases in `acceptance/lib/item16b.sh`, `v1-16b.1-composite`, `v1-16b.1-references` and `v1-16b.1-build-reference` among them; `v1-72.root-composite`, `v1-72.root-references`; `v1-27.mensagem-local`, `v1-27.mensagem-desligado`, `v1-27.mensagem-github`; `v1-58.plain`, `v1-58.kept`, `v1-58.rollback`; `v1-75.read-init`; `v1-68.closing`, `v1-68.closing-red`, `v1-68.closing-green`, `v1-68.closing-none`; every `v1-67.*`; every `v1-90.*`.
+   - **New cases:** `--lang node` with a `package.json` with no runner, with no `package.json`, and with an unparsable one: the line once, right before `ready`, exit 0, with a config whose text is the expected one for this version; `--lang node` with vitest and with jest (each in `dependencies` and `devDependencies`): no line; a kept config: no line; `--lang node` on a root `package.json` with `workspaces` and no root runner: the line; a plain `init` on a `package.json` with vitest: no line; `--lang node` that fails on a foreign hook: no line.
+5. **Measure and revert.**
+   - **Metric:** on the next Node adopter on another runner, the line appears at `init`, and `red` is not the first place the wrong runner shows. False alarms: the line printed when the root's runner inference returned a runner: 0. The known limits below are not false alarms.
+   - **Revert:** one such false alarm, or an adopter on a known limit who reports the line as noise: a release removes it.
+6. **Known limits.** A runner declared only in a parent folder or a workspace package, or installed globally, still gets the line, and so does a `package.json` that does not parse, even when its text names vitest. `init` does not check that vitest is installed when it is declared. Other runners keep going through `--lang other`; first-class support for `node --test` is not part of this item.
+
 ### Single suite (top level)
 
 | Key | Meaning |
@@ -2036,4 +2065,4 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.44.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.45.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.

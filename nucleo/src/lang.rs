@@ -129,7 +129,7 @@ fn package_json(dir: &Path) -> Option<serde_json::Value> {
 }
 
 /// "vitest" or "jest" when package.json depends on one of them.
-fn node_runner(dir: &Path) -> Option<&'static str> {
+pub fn node_runner(dir: &Path) -> Option<&'static str> {
     let package = package_json(dir)?;
     let depends_on =
         |name: &str| ["dependencies", "devDependencies"].iter().any(|section| package[section].get(name).is_some());
