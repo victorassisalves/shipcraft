@@ -81,11 +81,11 @@ item62_case() {
   v1_start codex
   case "$c" in
     docs|docs-migration|version)
-      chk 'spec-linked static contract' "$PY" - "$c" "$ACEITE/../docs/spec.md" "$ACEITE/../docs/github-ci.md" "$(command -v shipcraft)" <<'PY'
+      chk 'spec-linked static contract' "$PY" - "$c" "$ACEITE/../docs/spec.md" "$ACEITE/../docs/github-ci.md" "$(command -v shipcraft)" "$ACEITE/../nucleo/Cargo.toml" <<'PY'
 import pathlib,re,subprocess,sys
-mode,spec,doc,binary=sys.argv[1:]; s=pathlib.Path(spec).read_text(); d=pathlib.Path(doc).read_text()
+mode,spec,doc,binary,manifest=sys.argv[1:]; s=pathlib.Path(spec).read_text(); d=pathlib.Path(doc).read_text()
 if mode=='version':
- version=re.search(r'This contract is \*\*([0-9.]+)\*\*',s).group(1)
+ version=re.search(r'(?m)^version = \"([^\"]+)\"',pathlib.Path(manifest).read_text()).group(1)
  p=subprocess.run([binary,'--version'],capture_output=True,text=True); assert p.returncode==0 and re.fullmatch(r'shipcraft '+re.escape(version)+r' \([0-9a-f]{12}\)\n',p.stdout),(version,p.stdout)
 elif mode=='docs':
  for phrase in ('suite_checks','2.18','tomllib','pull_request.head.sha','fetch-depth: 0','always()','needs:'):
