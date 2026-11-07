@@ -26,7 +26,7 @@ concurrency:
 jobs:
   # 5 macOS shards: a free account runs at most 5 macOS jobs at once.
   macos:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule'
     name: macos ${{ matrix.shard }}/5
     runs-on: macos-latest
     timeout-minutes: 30
