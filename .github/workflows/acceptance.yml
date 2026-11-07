@@ -18,6 +18,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: acceptance-${{ github.ref }}
@@ -117,7 +118,7 @@ jobs:
           retention-days: 1
 
   linux:
-    needs: [scope, build]
+    needs: scope
     if: needs.scope.outputs.mode != 'none'
     name: linux ${{ matrix.shard }}/${{ strategy.job-total }}
     runs-on: ubuntu-latest
@@ -158,11 +159,24 @@ jobs:
         with:
           python-version: "3.12"
 
+      # POC-034 arm A: the shard sets up beside the build job and waits for the core here.
+      - name: Wait for the core
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 180); do
+            n=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts?name=shipcraft-linux" -q .total_count)
+            [ "${n:-0}" -ge 1 ] && { echo "core ready after $((i * 2)) s"; exit 0; }
+            sleep 2
+          done
+          echo "::error::the build job published no core in 360 s"; exit 1
       - name: Download the core
         uses: actions/download-artifact@v4
         with:
           name: shipcraft-linux
           path: nucleo/target/release
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
       - run: chmod +x nucleo/target/release/shipcraft
 
       - name: Run the acceptance suite (shard ${{ matrix.shard }}/${{ strategy.job-total }}, ${{ needs.scope.outputs.mode }})
@@ -188,13 +202,14 @@ jobs:
   # or when the scope found nothing the battery covers.
   gate:
     name: acceptance
-    needs: [scope, linux]
+    needs: [scope, build, linux]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Every Linux shard passed, or nothing to run
         run: |
           test "${{ needs.scope.result }}" = success
+          test "${{ needs.build.result }}" = success
           if [ "${{ needs.scope.outputs.mode }}" = none ]; then
             test "${{ needs.linux.result }}" = skipped
           else
