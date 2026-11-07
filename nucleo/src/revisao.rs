@@ -43,6 +43,10 @@ pub struct Request<'a> {
     /// this head (local or GitHub CI). Chooses the brief that does not rerun
     /// the suite and is recorded as `after_green_ci`.
     pub after_green_ci: bool,
+    /// Item 96: `shipcraft pr` started the review beside the GitHub CI wait
+    /// (`[review] after = "push"`). Chooses the brief derived from item 63's,
+    /// with CI running, and is recorded as `beside_ci`.
+    pub beside_ci: bool,
 }
 
 pub enum Verdict {
@@ -122,7 +126,8 @@ fn attempt(req: &Request) -> Result<Review> {
     let mut row = json!({
         "layer": "review", "secs": medicao::seconds(started), "result": resultado, "code": codigo,
         "branch": req.branch, "commit": req.sha, "tokens": tokens(&review.text), "agent": agent, "pr": req.pr,
-        "after_green_ci": req.after_green_ci, "model": papel.model, "effort": papel.effort,
+        "after_green_ci": req.after_green_ci, "beside_ci": req.beside_ci,
+        "model": papel.model, "effort": papel.effort,
     });
     if !req.diff_sha256.is_empty() {
         row["diff_sha256"] = json!(req.diff_sha256);
@@ -195,7 +200,9 @@ fn execute(req: &Request, agent: &str) -> Result<Review> {
     }
     cmd.current_dir(&tree).stdin(Stdio::null()).stdout(file(&out)?).stderr(file(&err)?);
     let limit = req.config.revisao.tempo_max;
-    let after = if req.after_green_ci {
+    let after = if req.beside_ci {
+        format!("; CI is running at {}, so the suite is not rerun", short(&req.sha))
+    } else if req.after_green_ci {
         format!("; CI is green at {}, so the suite is not rerun", short(&req.sha))
     } else {
         String::new()
@@ -330,7 +337,15 @@ fn brief(req: &Request, tree: &str, work: &str) -> Result<String> {
         None => format!("the branch {} (before its pull request)", req.branch),
     };
     let body = if req.body.trim().is_empty() { "(the PR has no body)".to_string() } else { req.body.clone() };
-    let template = if req.after_green_ci { BRIEF_AFTER_CI } else { BRIEF };
+    let beside;
+    let template = if req.beside_ci {
+        beside = brief_beside_ci();
+        beside.as_str()
+    } else if req.after_green_ci {
+        BRIEF_AFTER_CI
+    } else {
+        BRIEF
+    };
     Ok(template
         .replace("{{WHAT}}", &what)
         .replace("{{PROJECT}}", &repo.name())
@@ -346,6 +361,20 @@ fn brief(req: &Request, tree: &str, work: &str) -> Result<String> {
         .replace("{{SPEC}}", &spec)
         .replace("{{BATTERY}}", &battery(req)?)
         .replace("{{DIFF}}", &cap(&diff, MAX_DIFF)))
+}
+
+/// Item 96: item 63's brief after green CI with exactly four changes in the
+/// template, before anything is inserted, for a review beside running CI.
+fn brief_beside_ci() -> String {
+    BRIEF_AFTER_CI
+        .replacen("CI is green at this commit ({{SHORT}})", "CI is running at this commit ({{SHORT}})", 1)
+        .replacen("CI already ran them", "CI runs them", 1)
+        .replacen(
+            "CI is green at this commit and the suite is CI's job",
+            "CI is running at this commit and the suite is CI's job",
+            1,
+        )
+        .replacen("The suite: not rerun (CI green at {{SHORT}})", "The suite: not rerun (CI running at {{SHORT}})", 1)
 }
 
 /// The test files of the head commit, whole up to a cap; past it, by name.
