@@ -182,7 +182,7 @@
     "acceptance/tools/routing_check.py": "sha256:1e5d4f81fec0bb2c4e598faa91466e1270e78a9c637cebb46bf76b7a7cb7e5a1",
     "acceptance/tools/slice.sh": "sha256:368aba67e2427b3f47573dc0d0caacdd5f973e647f1cad7915f704d2a9aebadf",
     "acceptance/tools/tmo.py": "sha256:03dd0904d07c119f115237889bb51392e2206b71fe77d694ffb3d1edd82b5c61",
-    "docs/spec.md": "sha256:2f06544877c74c54d446de3a601a23d21509be7474b58c13c1557a89e6a185ce"
+    "docs/spec.md": "sha256:b6ed9947e1a2f1783cc11567887e8cee60d19b311a598f57db9c968a7eb92e80"
   },
   "cases": [
     "acceptance:acceptance/lib/item96.sh::core::v1-96.brief",
@@ -269,5 +269,5 @@
   "kind": "feature",
   "reported_at": null,
   "fixes_release": null,
-  "seal": "66d672e65b214b20cd4ab01e10f907dcb9106e11fbc739de8a97a5dab8ada3f2"
+  "seal": "2d28d6077b7043256483072e80781e77b51af63dd909fcfb81710c67771cdbb4"
 }
