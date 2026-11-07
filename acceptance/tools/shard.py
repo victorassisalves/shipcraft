@@ -1,4 +1,5 @@
 """shard.py <durations.tsv> <k> <n>: the battery's cases for CI shard k of n.
+shard.py --order <durations.tsv>: the run plan ("<language> <index> <case>" lines) longest first.
 
 Reads "<language> <case>" lines (every case, in table order) on stdin and prints the ones shard k
 runs. The cases are spread by duration, longest first, each to the shard with the least total so
@@ -9,20 +10,35 @@ as before. Every case lands in exactly one shard: the split is checked before an
 """
 import statistics, sys
 
+
+def read_secs(path):
+    secs = {}
+    try:
+        with open(path) as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) == 3 and not line.startswith('#'):
+                    secs[(parts[0], parts[1])] = float(parts[2])
+    except OSError:
+        pass
+    return secs
+
+
+if sys.argv[1] == '--order':
+    # Longest first, so a long case never starts last and holds the shard open alone.
+    secs = read_secs(sys.argv[2])
+    median = statistics.median(secs.values()) if secs else 0.0
+    plan = [line.split() for line in sys.stdin if line.strip()]
+    for p in sorted(plan, key=lambda p: -secs.get((p[0], p[2]), median)):
+        print(' '.join(p))
+    sys.exit(0)
+
 path, k, n = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
 if not 1 <= k <= n:
     sys.exit('shard.py: shard k must be 1..n')
 cases = [tuple(line.split()) for line in sys.stdin if line.strip()]
 
-secs = {}
-try:
-    with open(path) as f:
-        for line in f:
-            parts = line.split()
-            if len(parts) == 3 and not line.startswith('#'):
-                secs[(parts[0], parts[1])] = float(parts[2])
-except OSError:
-    pass
+secs = read_secs(path)
 
 shard_of = {}
 if secs:

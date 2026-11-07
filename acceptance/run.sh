@@ -1022,7 +1022,10 @@ for l in $LANGS; do
 done
 total=$(grep -c . "$WORK/plan")
 echo "run.sh: running $total cases"
-xargs -P "$JOBS" -L 1 "$WORK/toolvenv/bin/python" "$ACEITE/tools/tmo.py" "${SHIPCRAFT_ACCEPTANCE_CASE_TIMEOUT:-900}" bash "$SELF" __case < "$WORK/plan"
+# Longest cases first (durations.tsv); the report below keeps the table order of $WORK/plan.
+"$PY" "$ACEITE/tools/shard.py" --order "$ACEITE/durations.tsv" < "$WORK/plan" > "$WORK/plan.order" \
+  || cp "$WORK/plan" "$WORK/plan.order"
+xargs -P "$JOBS" -L 1 "$WORK/toolvenv/bin/python" "$ACEITE/tools/tmo.py" "${SHIPCRAFT_ACCEPTANCE_CASE_TIMEOUT:-900}" bash "$SELF" __case < "$WORK/plan.order"
 
 # ---- report
 pass=0; failn=0
