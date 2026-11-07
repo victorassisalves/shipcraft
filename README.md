@@ -19,6 +19,18 @@ A coding agent asked to make a failing test pass has two ways to do it: fix the 
 
 Prose rules in `AGENTS.md` ("never edit the tests") help, but nothing enforces them. Shipcraft turns that rule into a mechanical check that runs where agents can't argue with it: in the git hook and again in CI.
 
+## What it catches
+
+| The problem | What Shipcraft does |
+|---|---|
+| An agent edits, skips or deletes a failing test, or changes the test config, so the suite goes green | The git hook refuses the commit, in three lines: what happened, why, and the next step |
+| Someone skips the hook (`git commit --no-verify`, an edited hook) | `shipcraft ci` re-checks every commit of the branch from a clean checkout, and runs the full suite |
+| A PR changes the config to switch off its own checks | The PR is judged by the config on the base branch, not by its own |
+| The code that passes the tests was never read by anyone else | A different agent (Codex, Claude or Gemini) reviews the PR against your spec; a blocker counts only if it reproduced it |
+| A merge goes in before CI and review are green | `shipcraft merge` refuses; the one way out, `--no-review "<reason>"`, is recorded in the PR and in the numbers |
+| Agents that don't know the process | `init` writes the cycle into `AGENTS.md`, and every refusal names the next step, often the exact command |
+| No way to tell whether the process pays for itself | Every hook, CI and review run is logged on your machine; `shipcraft report` gives the times and refusals |
+
 ## How it works
 
 Work is split into two roles, and they should be different agents (or an agent and you):
@@ -53,6 +65,13 @@ Every refusal is three lines: **what happened, why it matters, and the next step
 **It does not judge whether your tests are good.** That's the RED's job, and the review layer's. Shipcraft protects the judgment once it has been made.
 
 ## Quick start
+
+What you need:
+
+- **macOS** (Apple silicon or Intel) for the npm package and `install.sh`. On Linux, build from source (below). Windows is not supported.
+- **git**, and a project with tests: Python with pytest, TypeScript/JavaScript with vitest or jest, Go with [gotestsum](https://github.com/gotestyourself/gotestsum) (`go install gotest.tools/gotestsum@latest`), or any runner that writes JUnit XML (see [Configuration](#configuration)).
+- Optional, for `shipcraft pr` and `shipcraft merge`: a GitHub remote named `origin` and `gh` logged in.
+- Optional, for the review: the `codex`, `claude` or `gemini` CLI. The review sends the diff to that agent's provider; without one, `init` turns the review off.
 
 Installing is two steps, and step 2 is required: add the package (or the binary), then run `init` at the repository root. `init` sets up Shipcraft and wires its hooks; until it runs, Shipcraft checks none of your commits. From the npm package, step 2 is `pnpm exec shipcraft init` or `npx -- shipcraft init`.
 
@@ -112,6 +131,24 @@ shipcraft merge 42
 `shipcraft status` shows the open locks and how protected the repository really is.
 
 Without a GitHub remote, the cycle still works up to the commits: `red`, the hook and `shipcraft ci --base <ref>` run locally; `pr` and `merge` need GitHub.
+
+### See it refuse
+
+After the RED commit, before you write the code, try the four shortcuts an agent takes. Make each change, run `git commit -am "fix rounding"`, read the refusal, and undo it with `git restore --staged --worktree <file>` before the next one:
+
+1. change the expected value in a locked test: `shipcraft refused: locked test <file> changed after RED`;
+2. skip the test (`t.Skip`, `pytest.mark.skip`, `it.skip`): the same refusal;
+3. delete the test file: `shipcraft refused: locked file <file> was deleted`;
+4. change `.shipcraft.toml`: `shipcraft refused: .shipcraft.toml changed … with lock … open`.
+
+Each refusal goes on with a `Why:` line and a `Next:` line that says how to recover.
+
+### Removing Shipcraft
+
+1. Remove the binary: `pnpm remove shipcraft` (or `npm rm shipcraft`) with the npm install, `install.sh --uninstall` with the script, or `cargo uninstall shipcraft` from source.
+2. Delete `.shipcraft.toml` and the `.shipcraft/` folder.
+3. Remove the block between `<!-- shipcraft -->` and `<!-- /shipcraft -->` in `AGENTS.md` and in `CLAUDE.md` (delete either file if `init` created it and nothing else is in it).
+4. Remove the hooks: with plain git hooks, `commit-msg` and `post-commit` in the hooks folder (`git rev-parse --git-path hooks` prints it), the two files marked `# shipcraft hook`; with lefthook, husky or pre-commit, the `shipcraft` lines in the hook manager's file.
 
 Upgrading: with the npm install, `pnpm add -DE shipcraft@latest` (or `npm i -D --save-exact shipcraft@latest`) and commit `package.json` with the lockfile; every clone then gets the same version. To go back, pin the previous one exactly: `pnpm add -DE shipcraft@<version>`, and commit both files again. With `install.sh`, run it again, or `install.sh --version <version>`. A version older than the config's `shipcraft_min` refuses to run: going back past it also means lowering `shipcraft_min` in `.shipcraft.toml`, with no lock open. Release notes say which version to go back to when a release changes something you may want to undo.
 
@@ -223,7 +260,7 @@ Shipcraft is developed with Shipcraft: specs in `docs/`, RED and GREEN by separa
 
 ## Contributing
 
-Pull requests from outside the project are not accepted for now; bug reports and field reports are welcome as issues. See [CONTRIBUTING.md](CONTRIBUTING.md), and [SECURITY.md](SECURITY.md) for vulnerabilities.
+Pull requests from outside the project are not accepted for now; bug reports and field reports are welcome as issues. Tried it? A field report helps most: where you got stuck in this README, how long the hook took, and any refusal that looked wrong, with its three lines. See [CONTRIBUTING.md](CONTRIBUTING.md), and [SECURITY.md](SECURITY.md) for vulnerabilities.
 
 ## License
 
