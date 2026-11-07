@@ -1688,6 +1688,7 @@ Item 89's `status` says to run `shipcraft init` when the `AGENTS.md` block is ol
 | `[review] spec` | Path of a project spec given to the reviewer. | none |
 | `[review] timeout` | Review time limit, in seconds. | `1200` |
 | `[review] retry_wait` | Seconds between review attempts after a `Please retry` failure (item 87); `0` turns the retry off. | `120` |
+| `[review] after` | When `shipcraft pr` starts the review with `ci = "github"`: `ci` (after GitHub CI passed) or `push` (at once, beside GitHub CI; item 96). | `ci` |
 | `[machine] slots` | Concurrent local CI and review runs on this machine. | `1` |
 | `[pr] warn_lines` | Product lines above which the PR summary suggests a split. | `500` |
 | `[pr] shape_lines` | Fixes the file-size threshold of the shape warning (an integer above 0). | p90 of the project |
@@ -1871,6 +1872,33 @@ The QA brief told the reviewer to run the whole suite. In `shipcraft pr` the rev
 6. **The run log.** Every `review` row that is not reused gains `after_green_ci`: `true` after green CI, otherwise `false`. It goes on exactly the rows written today: a reviewer that could not start or gave no verdict still has its row, with the field; a failure that writes no row today (no queue slot, no checkout, no brief) still writes none. A reused row (`reused: true`) does not have it. Reuse does not change: the same keys, the same lookup and the same rows, in `pr` and in `review --pr`. A reused verdict starts no reviewer, so no suite runs.
 7. **Measure and revert.** The metric is the `secs` of non-reused `review` rows with `after_green_ci: true`, over the first 5 PRs merged into main after this item. The coordinator names the 5 PRs by number and reads their rows by `pr` from this machine's run log; every round counts, and a PR with no such row is reported as not observed, never counted as fast. `secs` is wall time, including any wait for a queue slot, because that is what the PR waits. The bar: the review fits inside the 14-minute RED-to-main bar, with a median of 5 minutes or less. If it is slower, or a defect that a full suite run would have caught escapes a review, the coordinator reports it and the project may turn the layer off (`review = "off"`). Nothing switches by itself.
 8. **Known limits.** A test that passes in CI but is wrong is still only something the reviewer reads, as it was before. CI is judged at HEAD only: if the base moved after CI, the review does not run the merged tree, the same as the merge gate. When `shipcraft review --pr <n>` starts a reviewer, it uses today's brief and runs the full suite, because it does not read CI.
+
+### The review beside GitHub CI (item 96)
+
+Since item 63 the reviewer does not rerun the suite after green CI, so waiting for CI before the review starts only adds the review's time to every PR. Measured here (run log, PRs 103 and 105 to 110, the full battery): `pr` took 341 to 632 s, median 379 s, and a non-reused review 29 to 92 s (one 351 s). From item 85 to 91 no CI went red after a green GREEN slice, so a review spent on a head CI then rejects should be rare. This item lets a project start the review at once, beside GitHub CI. The default does not change.
+
+1. **`[review] after`.** `"ci"` (the default when the key is absent): `shipcraft pr` behaves as today. `"push"`: the review starts beside GitHub CI, as point 2 says. Any other value, a non-string included, refuses `config-invalid` naming `[review] after` and its value, wherever the config is read, like `[execution] ci`. Any explicit value, `"ci"` included, needs `shipcraft_min` of `2.46` or more, refused `config-invalid` the way item 87's `retry_wait` is, because an older binary ignores the key. `shipcraft pr` reads it from the same config it reads `[execution]` from. With `"push"`, nothing changes unless `[execution] ci = "github"` and `review = "local"`: with local CI the CI and the review would compete for the same machine slots, so local CI, `ci = "off"` and `review = "off"` behave exactly as with `"ci"`, and print nothing new. `shipcraft review` and `shipcraft review --pr <n>` ignore the key. The config table gains the row.
+2. **The review beside CI.** With `"push"`, `ci = "github"` and `review = "local"`, `shipcraft pr` starts the review (or reuses a verdict, item 54, unchanged) at the point where today it starts the wait for GitHub CI, and runs that wait (item 62's rules, output and limit, unchanged) at the same time.
+   - The brief is item 63's brief after green CI with exactly these changes: `CI is green at this commit (<short>)` becomes `CI is running at this commit (<short>)`; `CI already ran them` becomes `CI runs them`; `CI is green at this commit and the suite is CI's job` becomes `CI is running at this commit and the suite is CI's job`; the format line becomes `The suite: not rerun (CI running at <short>)`. Every other byte is the same, and the verdict parser does not change. The line that starts the review ends with `; CI is running at <short sha>, so the suite is not rerun`.
+   - `shipcraft/review` is published when the review ends, whatever CI is doing then, as today. `shipcraft pr` waits for both, the CI wait and the review, before it reports. If the CI wait stopped (any of item 62's stops), the refusal is the CI's code and reason, without the words `review did not run`, even when the review approved; otherwise, if the review did not approve, the refusal is the review's code and reason as today; otherwise the PR is ready. The summary comment is posted as today. `shipcraft merge` does not change: both statuses at the head.
+3. **The run log.** Every `review` row that is not reused gains `beside_ci`: `true` when it started beside CI under point 2, otherwise `false`; `after_green_ci` is `false` on a row with `beside_ci: true`. A reused row has neither field, as today. Every `pr` row gains `review_after`: the value point 1 read, `"ci"` or `"push"`, or `null` when the config could not be read. The `pr` row's `secs` stays wall clock, so it holds the longer of the two.
+
+**Known limits.** When CI fails early, `pr` still waits for the review to end (up to `[review] timeout`) before it reports, and the review's tokens are spent on a head that will change. A reviewer that runs the suite anyway (against the brief) competes with nothing on GitHub, only with this machine.
+
+**Metric:** on this repository, with `after = "push"`, over the next 5 PRs that run the full battery: `pr` row `secs` median 240 s or less (baseline 379 s, with item 95's CI split counted in), and at most 1 in 10 non-reused reviews with `beside_ci: true` on a head whose `pr` row was refused with a CI code. Guard: first-round approvals do not fall below 75% (31 of 39 today), and 0 escapes. **Revert:** `[review] after = "ci"` (or drop the key) in a repository's `.shipcraft.toml`.
+
+**Touches.** Read first, and keep:
+- Item 62: `v1-62.pr-wait`, `v1-62.pr-wait-ci`, `v1-62.pr-failed`, `v1-62.pr-pending-before-failed`, `v1-62.pr-timeout`, `v1-62.pr-timeout-ci`, `v1-62.pr-review-fails`, and the `config-*` cases: with the key absent nothing changes.
+- Item 63: every `v1-63.*` case, unchanged: the brief after green CI stays byte for byte under `"ci"`, and `after_green_ci` keeps its meaning.
+- Item 54: `v1-54.unchanged`, `v1-54.reused-row`: reuse beside CI publishes at once and writes the reused row as today.
+- Item 87: `v1-87.retry-pr`, `v1-87.min-absent`, `v1-87.min-old-zero`: the retry and the `shipcraft_min` refusal pattern.
+- Item 41: `v1-41.github`, `v1-41.github-fails`.
+
+**Current behavior** on these paths (keep unless marked change):
+- `pr` with `ci = "github"` and `review = "local"`: waits for GitHub CI, then reviews only after it passed; a CI stop refuses with `review did not run` in the reason. Keep under `"ci"`; change under `"push"` (point 2).
+- `review` rows: `after_green_ci` on non-reused rows. Keep; `beside_ci` is added (point 3).
+- `pr` rows: `secs`, `queue_secs`, `result`, `pr`, `base`, `locks`. Keep; `review_after` is added.
+- `shipcraft merge`, `shipcraft review`, `shipcraft review --pr`: unchanged.
 
 ### The merge gate
 
