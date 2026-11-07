@@ -1,7 +1,7 @@
 # Dogfood step 3 (2026-10-29), from docs/github-ci.md "The suite in your own checks".
 # Runs nothing until main's .shipcraft.toml has ci = "github" and a non-empty
 # suite_checks; then it publishes shipcraft/ci, the commit re-check, in about
-# 2 minutes, while the `acceptance` workflow runs the battery in 10 shards.
+# 2 minutes, while the `acceptance` workflow runs the battery in 18 shards.
 # Revert: delete this file (and set ci back in .shipcraft.toml).
 # Shipcraft: with [execution] suite_checks, shipcraft/ci re-checks every commit
 # of the PR; the named checks run the suite.

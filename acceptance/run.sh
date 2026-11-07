@@ -31,7 +31,7 @@
 #   SHIPCRAFT_ACCEPTANCE_CASES    space-separated case ids to run (default: all)
 #   SHIPCRAFT_ACCEPTANCE_FILES    space-separated repository paths: run only the cases they define
 #                       (see case_file; default: all)
-#   SHIPCRAFT_ACCEPTANCE_SHARD    k/n: run only shard k of n (round robin), for split CI runs
+#   SHIPCRAFT_ACCEPTANCE_SHARD    k/n: run only shard k of n (by duration, durations.tsv), for split CI runs
 #   SHIPCRAFT_ACCEPTANCE_CASE_TIMEOUT  seconds before a case is killed (default 900)
 #   SHIPCRAFT_ACCEPTANCE_JUNIT    write a JUnit report there: one testcase per case (classname =
 #                       the file that defines it, name = profile::case id); FAIL = failure, harness error or no result
@@ -990,7 +990,7 @@ done
 
 # ---- run the cases, at most $JOBS at a time, each under nice.
 : > "$WORK/plan"
-# SHIPCRAFT_ACCEPTANCE_SHARD=k/n runs every n-th case starting at the k-th (round robin over all
+# SHIPCRAFT_ACCEPTANCE_SHARD=k/n runs shard k of n (spread by duration, tools/shard.py, over all
 # languages), so CI can split the battery across n machines. A sharded run never saves a reuse result.
 SHARD_K=0; SHARD_N=1; g=0
 if [ -n "${SHIPCRAFT_ACCEPTANCE_SHARD:-}" ]; then
@@ -998,11 +998,16 @@ if [ -n "${SHIPCRAFT_ACCEPTANCE_SHARD:-}" ]; then
   case "$SHARD_K/$SHARD_N" in *[!0-9/]*|/*|*/) echo "run.sh: SHIPCRAFT_ACCEPTANCE_SHARD must be k/n" >&2; exit 2 ;; esac
   [ "$SHARD_K" -ge 1 ] && [ "$SHARD_K" -le "$SHARD_N" ] || { echo "run.sh: shard k must be 1..n" >&2; exit 2; }
 fi
+if [ "$SHARD_N" -gt 1 ]; then
+  for l in $LANGS; do for c in $(case_list "$l"); do echo "$l $c"; done; done > "$WORK/all-cases"
+  "$PY" "$ACEITE/tools/shard.py" "$ACEITE/durations.tsv" "$SHARD_K" "$SHARD_N" \
+    < "$WORK/all-cases" > "$WORK/my-shard" || { echo "run.sh: the shard split failed" >&2; exit 2; }
+fi
 for l in $LANGS; do
   i=0
   for c in $(case_list "$l"); do
     i=$((i + 1)); g=$((g + 1))
-    if [ "$SHARD_N" -gt 1 ] && [ $(( (g - 1) % SHARD_N + 1 )) -ne "$SHARD_K" ]; then
+    if [ "$SHARD_N" -gt 1 ] && ! grep -qxF "$l $c" "$WORK/my-shard"; then
       [ -n "$JUNIT" ] && echo "$l $c" >> "$WORK/skipped"; continue
     fi
     [ -n "$JUNIT" ] && echo "$c $(case_file "$c")" >> "$WORK/files"

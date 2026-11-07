@@ -2,8 +2,9 @@ name: acceptance
 
 # The offline black-box battery against nucleo/. Linux gates every PR by impact
 # (acceptance/scope.sh): a PR that changes only docs runs nothing, one that changes only
-# battery item files runs those items, anything else runs the whole battery in 10 shards
-# (about 3 minutes). Main always runs the whole battery. macOS runs it once a day and on
+# battery item files runs those items, anything else runs the whole battery in 18 shards,
+# split by measured case duration (acceptance/durations.tsv). The core is built once, beside
+# the scope job, and every shard downloads it. Main always runs the whole battery. macOS runs it once a day and on
 # demand: GitHub's free macOS runners are few and slow to start.
 # GitHub-hosted runners only: this is a public repository, so self-hosted runners
 # must never be attached to it (a fork PR would run code on that machine).
@@ -93,11 +94,28 @@ jobs:
           if [ "${{ github.event_name }}" = pull_request ]; then
             bash acceptance/scope.sh "origin/$BASE_REF" HEAD | tee -a "$GITHUB_OUTPUT"
           else
-            printf 'mode=full\ncases=\nshards=[1,2,3,4,5,6,7,8,9,10]\n' | tee -a "$GITHUB_OUTPUT"
+            bash acceptance/scope.sh --full | tee -a "$GITHUB_OUTPUT"
           fi
 
+  # The core, built once with a Rust cache, beside the scope job; the shards download it.
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: nucleo
+      - name: Build the core
+        run: cargo build --release -j 4 --manifest-path nucleo/Cargo.toml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shipcraft-linux
+          path: nucleo/target/release/shipcraft
+          retention-days: 1
+
   linux:
-    needs: scope
+    needs: [scope, build]
     if: needs.scope.outputs.mode != 'none'
     name: linux ${{ matrix.shard }}/${{ strategy.job-total }}
     runs-on: ubuntu-latest
@@ -136,8 +154,12 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Build the core
-        run: cargo build --release -j 4 --manifest-path nucleo/Cargo.toml
+      - name: Download the core
+        uses: actions/download-artifact@v4
+        with:
+          name: shipcraft-linux
+          path: nucleo/target/release
+      - run: chmod +x nucleo/target/release/shipcraft
 
       - name: Run the acceptance suite (shard ${{ matrix.shard }}/${{ strategy.job-total }}, ${{ needs.scope.outputs.mode }})
         env:
@@ -146,7 +168,17 @@ jobs:
           SHIPCRAFT_ACCEPTANCE_SHARD: "${{ matrix.shard }}/${{ strategy.job-total }}"
           SHIPCRAFT_ACCEPTANCE_CASES: ${{ needs.scope.outputs.cases }}
           SHIPCRAFT_ACCEPTANCE_VERBOSE: "1"
+          SHIPCRAFT_ACCEPTANCE_JUNIT: ${{ runner.temp }}/junit-${{ matrix.shard }}.xml
         run: bash acceptance/run.sh "$PWD/nucleo/target/release/shipcraft" all
+
+      # Each case's time, to keep acceptance/durations.tsv current (acceptance/tools/durations.py).
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: junit-${{ matrix.shard }}
+          path: ${{ runner.temp }}/junit-${{ matrix.shard }}.xml
+          retention-days: 14
+          if-no-files-found: ignore
 
   # The single check branch protection requires: green when every Linux shard passed,
   # or when the scope found nothing the battery covers.
