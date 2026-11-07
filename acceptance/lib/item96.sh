@@ -277,8 +277,8 @@ else:
   # Reverse ONLY the three built-in instruction regions, then use item82's
   # public normalized whole-template digest: all other instruction bytes fixed.
   if case=='brief-insertions':b=b.replace(' # COMMAND96 '+literal,'',1)
-  b=b.replace('CI is running at this commit ('+sha[:7]+')','CI is green at this commit ('+sha[:7]+')',1)
-  start=b.index('## Steps\n');b=b[:start]+b[start:].replace('CI runs them','CI already ran them',1).replace('CI is running at this commit and the suite is CI\'s job','CI is green at this commit and the suite is CI\'s job',1).replace('The suite: not rerun (CI running at '+sha[:7]+')','The suite: not rerun (CI green at '+sha[:7]+')',1)
+  intent=b.index('## The intent (the PR body)\n');b=b[:intent].replace('CI is running at this commit ('+sha[:7]+')','CI is green at this commit ('+sha[:7]+')',1).replace('CI runs them','CI already ran them',1)+b[intent:]
+  start=b.index('## Steps\n');b=b[:start]+b[start:].replace('CI is running at this commit and the suite is CI\'s job','CI is green at this commit and the suite is CI\'s job',1).replace('The suite: not rerun (CI running at '+sha[:7]+')','The suite: not rerun (CI green at '+sha[:7]+')',1)
   b=re.sub(r'pull request #[^ ]+ in the project [^\n]+\.', 'pull request #PR in the project PROJECT.',b,count=1)
   b=re.sub(r'(?m)^- Title: .*$', '- Title: TITLE',b);b=re.sub(r'(?m)^- Head commit: .*$', '- Head commit: HEAD',b);b=re.sub(r'(?m)^- Merge base with the base branch: .*$', '- Merge base with the base branch: BASE',b)
   scratch=re.search(r'working directory: (.+)/arvore\n',b).group(1);b=b.replace(scratch,'SCRATCH')
