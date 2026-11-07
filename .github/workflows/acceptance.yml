@@ -46,8 +46,10 @@ jobs:
             ${{ runner.temp }}/acceptance-cache/npm
             ${{ runner.temp }}/acceptance-cache/pip
             ${{ runner.temp }}/acceptance-cache/gopath/pkg/mod
-          key: acceptance-cache-${{ runner.os }}-${{ hashFiles('acceptance/run.sh', 'acceptance/lib/v1.sh', 'acceptance/tools/item51.py', 'acceptance/fixtures/**/package*.json') }}
-          restore-keys: acceptance-cache-${{ runner.os }}-
+            ${{ runner.temp }}/acceptance-cache/gobin
+            ${{ runner.temp }}/acceptance-cache/gocache
+          key: acceptance-cache-gobin-${{ runner.os }}-${{ hashFiles('acceptance/run.sh', 'acceptance/lib/v1.sh', 'acceptance/tools/item51.py', 'acceptance/fixtures/**/package*.json') }}
+          restore-keys: acceptance-cache-gobin-${{ runner.os }}-
 
       - name: Set up Go (Go targets)
         uses: actions/setup-go@v5
@@ -135,8 +137,10 @@ jobs:
             ${{ runner.temp }}/acceptance-cache/npm
             ${{ runner.temp }}/acceptance-cache/pip
             ${{ runner.temp }}/acceptance-cache/gopath/pkg/mod
-          key: acceptance-cache-${{ runner.os }}-${{ hashFiles('acceptance/run.sh', 'acceptance/lib/v1.sh', 'acceptance/tools/item51.py', 'acceptance/fixtures/**/package*.json') }}
-          restore-keys: acceptance-cache-${{ runner.os }}-
+            ${{ runner.temp }}/acceptance-cache/gobin
+            ${{ runner.temp }}/acceptance-cache/gocache
+          key: acceptance-cache-gobin-${{ runner.os }}-${{ hashFiles('acceptance/run.sh', 'acceptance/lib/v1.sh', 'acceptance/tools/item51.py', 'acceptance/fixtures/**/package*.json') }}
+          restore-keys: acceptance-cache-gobin-${{ runner.os }}-
 
       - name: Set up Go (Go targets)
         uses: actions/setup-go@v5
