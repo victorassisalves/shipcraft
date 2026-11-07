@@ -52,7 +52,7 @@ flowchart LR
     H --> I["shipcraft merge"]
 ```
 
-The hook only runs the locked cases, so commits stay fast. `shipcraft ci` then repeats every check on every commit of the branch, from a clean checkout, and runs the full suite. A commit made with `--no-verify` or with an edited hook is caught there.
+The hook only runs the locked cases, so commits stay fast. `shipcraft ci` then repeats every check on every commit of the branch, from a clean checkout, and the full suite runs in CI, on your machine or in your GitHub checks (docs-only PRs skip it). A commit made with `--no-verify` or with an edited hook is caught there.
 
 Every refusal is three lines: **what happened, why it matters, and the next step**. Most "Next" lines contain the exact command to run, so an agent that has never heard of Shipcraft can recover on its own.
 
@@ -161,7 +161,7 @@ Upgrading: with the npm install, `pnpm add -DE shipcraft@latest` (or `npm i -D -
 | `shipcraft red` | Runs the suite, requires assertion failures, and writes the lock in `.shipcraft/locks/<id>.json`. |
 | `shipcraft check [--commit-msg <file>]` | Called by the hook. Judges the commit being made against open locks and closes a lock when its cases pass. |
 | `shipcraft close` | Closes a lock in its own commit; the post-commit hook runs it, and you can run it by hand. |
-| `shipcraft ci --base <ref> [--pr]` | Re-checks every commit in `<ref>..HEAD` and runs the full suite on HEAD. Runs locally or in GitHub Actions. |
+| `shipcraft ci --base <ref> [--pr]` | Re-checks every commit in `<ref>..HEAD` and runs the full suite on HEAD, unless the PR is docs only or `[execution] suite_checks` leaves the suite to your GitHub checks. Runs locally or in GitHub Actions. |
 | `shipcraft pr [--title <t>] [--body <file>]` | Pushes the branch, opens or updates the PR, runs CI and review, and publishes the `shipcraft/ci` and `shipcraft/review` statuses. |
 | `shipcraft review [--pr <n>]` | Runs the review on the local HEAD (to catch blockers before opening the PR) or on any PR. |
 | `shipcraft merge <pr> [--no-review "<reason>"]` | Merges only when CI and review are green on the PR's head. `--no-review "<reason>"` is the recorded way out, and the reason shows up in the PR and in the numbers. |
