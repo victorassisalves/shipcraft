@@ -24,10 +24,10 @@ Prose rules in `AGENTS.md` ("never edit the tests") help, but nothing enforces t
 | The problem | What Shipcraft does |
 |---|---|
 | An agent edits, skips or deletes a failing test, or changes the test config, so the suite goes green | The git hook refuses the commit, in three lines: what happened, why, and the next step |
-| Someone skips the hook (`git commit --no-verify`, an edited hook) | `shipcraft ci` re-checks every commit of the branch from a clean checkout, and runs the full suite |
+| Someone skips the hook (`git commit --no-verify`, an edited hook) | `shipcraft ci` re-checks every commit of the branch from a clean checkout; the full suite runs in CI too, on your machine or in your GitHub checks ([docs/github-ci.md](docs/github-ci.md)), except on docs-only PRs |
 | A PR changes the config to switch off its own checks | The PR is judged by the config on the base branch, not by its own |
 | The code that passes the tests was never read by anyone else | A different agent (Codex, Claude or Gemini) reviews the PR against your spec; a blocker counts only if it reproduced it |
-| A merge goes in before CI and review are green | `shipcraft merge` refuses; the one way out, `--no-review "<reason>"`, is recorded in the PR and in the numbers |
+| A merge goes in before CI and review are green | `shipcraft merge` refuses; `--no-review "<reason>"` waives the review, never CI, and the reason is recorded in the PR and in the numbers |
 | Agents that don't know the process | `init` writes the cycle into `AGENTS.md`, and every refusal names the next step, often the exact command |
 | No way to tell whether the process pays for itself | Every hook, CI and review run is logged on your machine; `shipcraft report` gives the times and refusals |
 
