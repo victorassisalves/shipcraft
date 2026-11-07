@@ -3,7 +3,8 @@
 # time against the 11 min median, false hook refusals, hook and red times.
 # Revert: delete this file and .shipcraft/locks/.
 # 2.22 (item 5(b)): item 65 keeps a selected docs/spec.md without cases from sending red to the full run.
-shipcraft_min = "2.22"
+# 2.46 (2026-11-07, POC-028): [review] after needs it.
+shipcraft_min = "2.46"
 
 [[suite]]
 name = "acceptance"
@@ -50,3 +51,8 @@ review = "codex"
 [review]
 spec = "docs/spec.md"
 timeout = 2400
+# POC-028 (2026-11-07, item 96, shipcraft-v2 poc/028-review-beside-ci): the review starts
+# beside GitHub CI instead of after it. Metric over the next 5 full-battery PRs: pr secs
+# median <= 240 s (baseline 379 s), <= 1 in 10 reviews wasted on a head CI rejected,
+# first-round approvals >= 75%, 0 escapes. Revert: after = "ci" (or drop the key).
+after = "push"
