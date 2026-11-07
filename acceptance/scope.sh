@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 # What a PR's CI runs, from the paths it changes (the battery by impact).
-# Usage: acceptance/scope.sh <base-ref> [<head-ref>]
+# Usage: acceptance/scope.sh <base-ref> [<head-ref>]   or   acceptance/scope.sh --full
 # Prints three lines for $GITHUB_OUTPUT:
 #   mode=none    only text nothing executes reads (docs/, root *.md, LICENSE, the points);
 #   mode=items   only acceptance/lib/item*.sh files: their cases, in one shard;
-#   mode=full    anything else, or any doubt: the whole battery in 10 shards.
+#   mode=full    anything else, or any doubt: the whole battery in SHARDS (18) shards.
 # Main and the daily run always run the whole battery; this script only scopes PRs.
 set -euo pipefail
+# 18, not 20: a free account runs 20 jobs at once, and the shipcraft-recheck job and this
+# workflow's scope and build jobs run beside the shards. Revert: SHARDS=10.
+SHARDS=18
+full() { printf 'mode=full\ncases=\nshards=[%s]\n' "$(seq 1 "$SHARDS" | paste -sd, -)"; exit 0; }
+[ "${1:-}" = --full ] && full
 base="$1"; head="${2:-HEAD}"
-
-full() { printf 'mode=full\ncases=\nshards=[1,2,3,4,5,6,7,8,9,10]\n'; exit 0; }
 
 merge_base=$(git merge-base "$base" "$head" 2>/dev/null) || full
 changed=$(git diff --name-only --no-renames "$merge_base" "$head") || full
