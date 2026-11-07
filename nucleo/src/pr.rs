@@ -85,43 +85,51 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>) -> Result<(
         let forma = forma::forma(repo, &config, &base_sha, &head);
         std::env::set_var(forma::AVISOS_ENV, forma.avisos.map_or("null".to_string(), |n| n.to_string()));
 
-        let ci_gate = match ci {
-            Camada::Local => local_ci(repo, &config, &branch, &head, &base, &mut queue_secs)?,
-            Camada::Github if revisao == Camada::Local => wait_github_ci(repo, &config, &head)?,
-            Camada::Github => Gate::Passed,
-            Camada::Desligado => {
-                gh::status(repo, &head, "shipcraft/ci", "success", OFF)?;
-                println!("shipcraft: CI {OFF}");
-                Gate::Passed
-            }
+        let review = |after_green_ci: bool, beside_ci: bool| -> Result<Gate> {
+            let title = gh::json(repo, &["pr", "view", &number.to_string(), "--json", "title"])?["title"]
+                .as_str()
+                .map(str::to_string);
+            let req = Request {
+                repo,
+                config: &config,
+                diff_sha256: diff_sha256(repo, &base_sha, &head),
+                text_sha256: text_sha256(title.as_deref(), body.as_deref()),
+                sha: head.clone(),
+                base_sha: base_sha.clone(),
+                title: title.unwrap_or_default(),
+                body: body.clone().unwrap_or_default(),
+                pr: Some(number),
+                branch: branch.clone(),
+                after_green_ci,
+                beside_ci,
+            };
+            review_and_publish(&req)
         };
-        let gate = match (ci_gate, revisao) {
-            (Gate::Passed, Camada::Local) => {
-                let title = gh::json(repo, &["pr", "view", &number.to_string(), "--json", "title"])?["title"]
-                    .as_str()
-                    .map(str::to_string);
-                let req = Request {
-                    repo,
-                    config: &config,
-                    diff_sha256: diff_sha256(repo, &base_sha, &head),
-                    text_sha256: text_sha256(title.as_deref(), body.as_deref()),
-                    sha: head.clone(),
-                    base_sha,
-                    title: title.unwrap_or_default(),
-                    body: body.clone().unwrap_or_default(),
-                    pr: Some(number),
-                    branch: branch.clone(),
-                    // Item 63: the CI gate passed at this head with local or GitHub CI.
-                    after_green_ci: matches!(ci, Camada::Local | Camada::Github),
-                };
-                review_and_publish(&req)?
+        // Item 96: with `[review] after = "push"`, GitHub CI and the local
+        // review, the review starts at once, beside the CI wait.
+        let gate = if config.revisao.after_push && ci == Camada::Github && revisao == Camada::Local {
+            beside_ci(repo, &config, &head, || review(false, true))?
+        } else {
+            let ci_gate = match ci {
+                Camada::Local => local_ci(repo, &config, &branch, &head, &base, &mut queue_secs)?,
+                Camada::Github if revisao == Camada::Local => wait_github_ci(repo, &config, &head)?,
+                Camada::Github => Gate::Passed,
+                Camada::Desligado => {
+                    gh::status(repo, &head, "shipcraft/ci", "success", OFF)?;
+                    println!("shipcraft: CI {OFF}");
+                    Gate::Passed
+                }
+            };
+            match (ci_gate, revisao) {
+                // Item 63: the CI gate passed at this head with local or GitHub CI.
+                (Gate::Passed, Camada::Local) => review(matches!(ci, Camada::Local | Camada::Github), false)?,
+                (Gate::Passed, _) => {
+                    gh::status(repo, &head, "shipcraft/review", "success", OFF)?;
+                    println!("shipcraft: review {OFF}");
+                    Gate::Passed
+                }
+                (stopped, _) => stopped,
             }
-            (Gate::Passed, _) => {
-                gh::status(repo, &head, "shipcraft/review", "success", OFF)?;
-                println!("shipcraft: review {OFF}");
-                Gate::Passed
-            }
-            (stopped, _) => stopped,
         };
         let summary = medicao::summary(repo, &branch) + "\n" + &medicao::size_text(&config, size) + &forma.text;
         gh::comment(repo, number, &summary)?;
@@ -144,8 +152,31 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>) -> Result<(
     row["pr"] = json!(number);
     row["base"] = json!(base);
     row["queue_secs"] = json!(queue_secs);
+    // Item 96: the `[review] after` this run read.
+    row["review_after"] = json!(if config.revisao.after_push { "push" } else { "ci" });
     medicao::record(repo, row);
     result
+}
+
+/// Item 96: the GitHub CI wait (items 62 and 73, unchanged) and the review run
+/// at the same time, and both end before `pr` reports. An error on either side
+/// ends `pr` (the CI's when both erred); else a CI stop is the refusal, without
+/// `; review did not run`; else the review's gate.
+fn beside_ci(repo: &Repo, config: &Config, head: &str, review: impl FnOnce() -> Result<Gate>) -> Result<Gate> {
+    let (ci_side, review_side) = std::thread::scope(|scope| {
+        let wait = scope.spawn(|| wait_github_ci(repo, config, head));
+        let review_side = review();
+        (wait.join().unwrap_or_else(|_| Err(failed("the GitHub CI wait stopped unexpectedly"))), review_side)
+    });
+    let ci_gate = ci_side?;
+    let review_gate = review_side?;
+    Ok(match ci_gate {
+        Gate::Stopped(code, why) => {
+            let why = why.strip_suffix("; review did not run").map(str::to_string).unwrap_or(why);
+            Gate::Stopped(code, why)
+        }
+        Gate::Passed => review_gate,
+    })
 }
 
 /// Item 3, rule 2: `shipcraft ci --pr` on this machine, through the queue and with
@@ -437,6 +468,7 @@ pub fn local(repo: &Repo) -> Result<()> {
         pr: None,
         branch: repo.branch(),
         after_green_ci: false,
+        beside_ci: false,
     };
     let review = revisao::run(&req)?;
     println!("{}", review.text);
@@ -487,6 +519,7 @@ pub fn of_pr(repo: &Repo, number: &str) -> Result<()> {
         pr: pr["number"].as_u64(),
         branch: field("headRefName"),
         after_green_ci: false,
+        beside_ci: false,
     };
     match review_and_publish(&req)? {
         Gate::Passed => Ok(()),

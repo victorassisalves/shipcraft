@@ -237,6 +237,13 @@ pub struct Revisao {
     pub tempo_max: u64,
     /// Item 87: seconds between attempts after a `Please retry` failure; 0 is one attempt.
     pub retry_wait: u64,
+    /// Item 96: `after` as written, any TOML value until `check_review_after`
+    /// names a wrong one.
+    #[serde(rename = "after")]
+    after_raw: Option<toml::Value>,
+    /// Item 96: `[review] after = "push"`; `false` for `"ci"` and the absent key.
+    #[serde(skip)]
+    pub after_push: bool,
 }
 
 /// Item 11, rule 3: above `aviso_linhas` product lines the summary suggests a
@@ -283,7 +290,7 @@ impl Default for Papeis {
 
 impl Default for Revisao {
     fn default() -> Self {
-        Revisao { spec: None, tempo_max: 1200, retry_wait: 120 }
+        Revisao { spec: None, tempo_max: 1200, retry_wait: 120, after_raw: None, after_push: false }
     }
 }
 
@@ -346,6 +353,8 @@ impl Config {
         // Item 64: after every check that refused before it.
         config.papeis = check_roles(text, std::mem::take(&mut config.papeis_raw))?;
         check_retry_wait(text)?;
+        config.revisao.after_raw = None;
+        config.revisao.after_push = check_review_after(text)?;
         Ok(config)
     }
 
@@ -643,6 +652,35 @@ fn check_retry_wait(text: &str) -> Result<()> {
         format!("[review] retry_wait = {value} needs shipcraft_min = \"2.41\" or above"),
         "older binaries ignore this key, so they would try a review once and could reach another verdict",
         format!("set shipcraft_min = \"2.41\" (or above) in {CONFIG_FILE} and run again"),
+    )
+}
+
+/// Item 96: `[review] after` is `"ci"` (the default) or `"push"`; any other
+/// value refuses, and any explicit one needs 2.46, since an older binary
+/// ignores the key. Returns whether it is `"push"`.
+pub fn check_review_after(text: &str) -> Result<bool> {
+    let Ok(table) = text.parse::<toml::Table>() else { return Ok(false) };
+    let Some(value) = table.get("review").and_then(|r| r.get("after")) else { return Ok(false) };
+    let push = match value.as_str() {
+        Some("ci") => false,
+        Some("push") => true,
+        _ => {
+            return refuse(
+                "config-invalid",
+                format!("[review] after = {value} is not \"ci\" or \"push\""),
+                "the review starts after GitHub CI passed or beside it, and shipcraft does not guess which",
+                format!("use after = \"ci\" or after = \"push\" under [review] in {CONFIG_FILE} and run again"),
+            )
+        }
+    };
+    if min_reaches(&table, "2.46") {
+        return Ok(push);
+    }
+    refuse(
+        "config-invalid",
+        format!("[review] after = {value} needs shipcraft_min = \"2.46\" or above"),
+        "older binaries ignore this key, so they would schedule the review differently",
+        format!("set shipcraft_min = \"2.46\" (or above) in {CONFIG_FILE} and run again"),
     )
 }
 
@@ -1003,6 +1041,23 @@ globs = ["tests/**"]
             "shipcraft_min = \"2.41a\"\n[review]\nretry_wait = 1",
             "shipcraft_min = \"2.41\"\n[review]\nretry_wait = -1",
             "shipcraft_min = \"2.41\"\n[review]\nretry_wait = 1.5",
+        ] {
+            let refused = Config::parse(bad);
+            assert!(matches!(refused, Err(crate::refusal::Stop::Refused(r)) if r.code == "config-invalid"), "{bad}");
+        }
+    }
+
+    #[test]
+    fn review_after_defaults_to_ci_and_any_explicit_value_needs_2_46() {
+        assert!(!Config::parse("").unwrap().revisao.after_push);
+        assert!(!Config::parse("shipcraft_min = \"2.46\"\n[review]\nafter = \"ci\"").unwrap().revisao.after_push);
+        assert!(Config::parse("shipcraft_min = \"2.46\"\n[review]\nafter = \"push\"").unwrap().revisao.after_push);
+        for bad in [
+            "[review]\nafter = \"ci\"",
+            "shipcraft_min = \"2.45.9\"\n[review]\nafter = \"push\"",
+            "shipcraft_min = \"2.46\"\n[review]\nafter = \"PUSH\"",
+            "shipcraft_min = \"2.46\"\n[review]\nafter = 1",
+            "shipcraft_min = \"2.46\"\n[review]\nafter = [\"push\"]",
         ] {
             let refused = Config::parse(bad);
             assert!(matches!(refused, Err(crate::refusal::Stop::Refused(r)) if r.code == "config-invalid"), "{bad}");
