@@ -45,7 +45,8 @@ def snapshot():
 def seal(d):
  c={k:d[k] for k in ('format','state','files','cases','failing_at_red')}
  c['files']=dict(sorted(c['files'].items()))
- if d['format']==4:c.update((k,d[k]) for k in ('kind','reported_at','fixes_release') if k in d)
+ if d['format']==5:c['controls']=d['controls']
+ if d['format'] in (4,5):c.update((k,d[k]) for k in ('kind','reported_at','fixes_release') if k in d)
  c['seal']=''
  return hashlib.sha256(json.dumps(c,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()
 def save(d):
@@ -54,9 +55,9 @@ def fields(d,expected):
  assert all(k in d for k in ('kind','reported_at','fixes_release')),('missing fix fields',d)
  assert tuple(d[k] for k in ('kind','reported_at','fixes_release'))==expected,('metadata values',d,expected)
 def valid_lock(d,expected):
- assert list(d)==['format','state','files','cases','failing_at_red','kind','reported_at','fixes_release','seal'],('format 4 fields/order',d)
- assert d['format']==4,('expected format 4',d)
- fields(d,expected);assert d['seal']==seal(d),('canonical format 4 seal',d)
+ assert list(d)==['format','state','files','cases','failing_at_red','controls','kind','reported_at','fixes_release','seal'],('format 5 fields/order',d)
+ assert d['format']==5,('expected format 5',d)
+ fields(d,expected);assert d['seal']==seal(d),('canonical format 5 seal',d)
  for f,h in d['files'].items():assert h=='sha256:'+hashlib.sha256(Path(f).read_bytes()).hexdigest(),(f,h)
 def redrow(before,expected=None,code=None,redo=False):
  rs=rows();assert rs[:len(before)]==before and len(rs)==len(before)+1,('append exactly one row',rs,before)
@@ -108,6 +109,8 @@ if reader:
  # Seed from today's public RED, then build only the documented wire format.
  run(binary,'red');lock=locks()[0];d=json.loads(lock.read_text())
  d.update(format=4,kind='fix',reported_at=TIME,fixes_release=TAG)
+ d.pop('controls',None)
+ if mode=='redo-unchanged':d.update(format=5,controls=[])
  if mode.startswith('read-seal-kind-'):d.update(kind='feature',reported_at=None,fixes_release=None)
  if mode in ('redo-feature',):d.update(kind='feature',reported_at=None,fixes_release=None);expected=('feature',None,None)
  legacy=mode.startswith(('legacy2-','legacy3-'))
@@ -115,7 +118,7 @@ if reader:
   d['format']=int(mode[6]);[d.pop(k) for k in ('kind','reported_at','fixes_release')]
   if d['format']==2:d['files']={k:v.removeprefix('sha256:') for k,v in d['files'].items()}
  save(d)
- if mode.startswith('future-'):d['format']=5;save(d)
+ if mode.startswith('future-'):d['format']=6;save(d)
  if mode.startswith('read-') and mode not in ('read-status','read-init'):
   defect=mode[5:].rsplit('-',1)[0]
   mutations={'kind-null':('kind',None),'kind-number':('kind',7),'kind-other':('kind','bug'),'time-number':('reported_at',7),'time-invalid':('reported_at','1900-02-29T00:00Z'),'release-number':('fixes_release',7),'release-invalid':('fixes_release','v02.0.0'),'extra-key':('extra',None)}
@@ -139,7 +142,7 @@ if reader:
   else:
    if command=='init':write('lefthook.yml','pre-commit:\n  commands:\n    shipcraft:\n      run: shipcraft check\n      priority: 9\ncommit-msg:\n  commands:\n    shipcraft:\n      run: shipcraft check --commit-msg {1}\npost-commit:\n  commands:\n    shipcraft:\n      run: shipcraft close\n')
    p=run(binary,command,ok=False);lines=(p.stdout+p.stderr).strip().splitlines()[-3:];assert p.returncode==1,(p.returncode,lines)
-  assert lines==[f'shipcraft refused: lock {lock} needs a newer shipcraft (format 5; this one knows formats 2 to 4)','Why: a lock written by a newer shipcraft cannot be judged by an older one','Next: upgrade shipcraft to the version the project pins (package.json, or shipcraft_min), then run the command again'],lines
+  assert lines==[f'shipcraft refused: lock {lock} needs a newer shipcraft (format 6; this one knows formats 2 to 5)','Why: a lock written by a newer shipcraft cannot be judged by an older one','Next: upgrade shipcraft to the version the project pins (package.json, or shipcraft_min), then run the command again'],lines
   assert lock.read_bytes()==original
  elif (mode.startswith('read-') and mode not in ('read-status','read-init')) or (legacy and not mode.endswith(('redo','unchanged'))):
   layer=mode.rsplit('-',1)[1]
@@ -170,7 +173,7 @@ if reader:
    assert p.returncode==0,('redo refused valid lock',p.stdout,p.stderr)
    new=json.loads(lock.read_text());assert locks()==[lock]
    if legacy:assert new['format']==3 and not any(k in new for k in ('kind','reported_at','fixes_release')),new
-   else:fields(new,expected);assert new['format']==4,new
+   else:fields(new,expected);assert new['format']==5 and 'controls' in new,new
    assert new['seal']==seal(new),new
    if mode=='redo-unchanged':assert lock.read_bytes()==original,'unchanged redo replaced metadata'
   if mode!='redo-log-fails':redrow(before,redo=True,code='build-failed' if mode=='redo-refused' else '')
