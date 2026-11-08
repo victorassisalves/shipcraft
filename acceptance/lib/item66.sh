@@ -190,7 +190,7 @@ else:
  if ls:
   d=json.loads(ls[0].read_text())
   want((d.get('kind'),d.get('reported_at'),d.get('fixes_release'))==('feature',None,None),'fix lock values')
-  want(set(d)=={'format','state','files','cases','failing_at_red','kind','reported_at','fixes_release','seal'} and d['state']=='open','lock format changed')
+  want(set(d)=={'format','state','files','cases','failing_at_red','controls','kind','reported_at','fixes_release','seal'} and d['state']=='open','lock format changed')
   want(set(d['files'])==protected,'protected files must not narrow: '+repr(d['files']))
   for f,h in d['files'].items(): want(h=='sha256:'+hashlib.sha256(Path(f).read_bytes()).hexdigest(),'wrong protected hash: '+f)
   for key in ('cases','failing_at_red'):

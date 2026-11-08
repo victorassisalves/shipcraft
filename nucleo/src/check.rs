@@ -19,9 +19,10 @@ use crate::contract::{
     bindings, changed_paths, check_files, check_lefthook, judge_locks, judge_suite, no_report, Change, Scope, Verdict,
 };
 use crate::git::{text, Repo, Snapshot};
+use crate::junit::{Outcome, Report};
 use crate::lock::{lock_files, Lock, LockFiles};
 use crate::marca;
-use crate::refusal::{failed, Result, Stop};
+use crate::refusal::{failed, refuse, short_list, Result, Stop};
 use crate::suite;
 use std::fs;
 
@@ -88,7 +89,12 @@ pub fn run(repo: &Repo, commit_msg: bool) -> Result<()> {
     let dir = copy.as_ref().map_or(repo.root(), |c| c.path());
     let locked = suite::Locked {
         files: binding.iter().flat_map(|(_, _, lock)| lock.files.keys().cloned()).collect(),
-        cases: binding.iter().flat_map(|(_, _, lock)| lock.failing_at_red.iter().cloned()).collect(),
+        // Item 98: with each lock's controls, except where the lock arrives as
+        // `red` or `red --redo` just wrote it (they passed there, on these files).
+        cases: binding
+            .iter()
+            .flat_map(|(_, change, lock)| lock.failing_at_red.iter().chain(controls_judged(change, lock)).cloned())
+            .collect(),
         present: repo.list(&Snapshot::Index, ".")?,
         tmp: repo.root().join(repo.text(&["rev-parse", "--git-path", "shipcraft/tmp"])?),
     };
@@ -104,6 +110,7 @@ pub fn run(repo: &Repo, commit_msg: bool) -> Result<()> {
     let (report, blocking) = suite::run_red(dir, true, &config, &locked)?.or_else(no_report)?;
     let mut closing = Vec::new();
     for (path, change, lock) in binding {
+        check_controls(&report, path, controls_judged(change, lock))?;
         match (
             change,
             judge_suite(
@@ -184,6 +191,38 @@ fn outside_locks(repo: &Repo) -> Result<Vec<(String, bool)>> {
         }
     }
     Ok(outside)
+}
+
+/// Item 98: the controls the hook runs and judges for a lock: none on the
+/// commit that opens it or redoes it.
+fn controls_judged<'a>(change: &Change, lock: &'a Lock) -> &'a [String] {
+    if matches!(change, Change::Opened(_)) {
+        &[]
+    } else {
+        lock.controls()
+    }
+}
+
+/// Item 98: every control passed in the hook's report; the others (failed,
+/// error, skipped or absent) are `control-failed`, in byte order.
+fn check_controls(report: &Report, path: &str, controls: &[String]) -> Result<()> {
+    let failed: Vec<String> = controls
+        .iter()
+        .filter(|case| report.outcome(case) != Some(Outcome::Passed))
+        .map(|case| crate::red::one_line(case))
+        .collect();
+    if failed.is_empty() {
+        return Ok(());
+    }
+    refuse(
+        "control-failed",
+        format!(
+            "control case(s) of lock {path}, passing at RED in the test files it changed, do not pass now: {}",
+            short_list(&failed)
+        ),
+        "the GREEN makes the RED's cases pass without breaking the cases beside them that already passed",
+        "fix the code until these cases pass again; if a control looks wrong, stop and tell the RED author",
+    )
 }
 
 /// The lock turns closed inside the commit itself.

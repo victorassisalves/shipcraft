@@ -234,8 +234,8 @@ else:
   for key in ('cases','failing_at_red'):
    want(any('legacy81' in c.lower() for c in d[key])==(not dropping or mode=='map-suite-local'),'legacy boundary '+key+': '+repr(d[key]))
    if mode not in ('guard','guard-flaky'):want(any('fresh81' in c.lower() for c in d[key]),'lost own failure '+key)
-  want(d['format']==4 and d['state']=='open','format/state changed')
-  want(set(d)=={'format','state','files','cases','failing_at_red','kind','reported_at','fixes_release','seal'},'lock schema changed')
+  want(d['format']==5 and d['state']=='open','format/state changed')
+  want(set(d)=={'format','state','files','cases','failing_at_red','controls','kind','reported_at','fixes_release','seal'},'lock schema changed')
   want(old in d['files'],'excluded test lost protection')
   eligible=subprocess.check_output(['git','ls-files','-c','-o','--exclude-standard','-z']).decode().split('\0')
   expected_files={'.shipcraft.toml'}|{f for f in eligible if f and Path(f).is_file() and (f.endswith('_test.go') if lang=='go' else any(f.startswith(('old' if suite=='alias' else suite)+'/tests/') for suite in suites))}
