@@ -71,11 +71,23 @@ pub fn rows(repo: &Repo) -> Vec<Value> {
 }
 
 /// What a CI run says of itself in its row: whether the PR was docs only
-/// (item 40), and whether the suite was left to `suite_checks` (item 62).
-#[derive(Default, Clone, Copy)]
+/// (item 40), whether the suite was left to `suite_checks` (item 62), and
+/// the failing cases at HEAD when it refused `suite-red` (item 97).
+#[derive(Default, Clone)]
 pub struct CiRow {
     pub docs_only: bool,
     pub suite_in_checks: bool,
+    pub failed: Option<Vec<String>>,
+}
+
+/// Item 97: a `suite-red` row lists at most this many failing cases.
+const FAILED_MAX: usize = 50;
+
+/// Item 97: the first `FAILED_MAX` failing ids, in the order given (byte
+/// order), and how many failed in all.
+fn put_failed(row: &mut Value, failed: &[String]) {
+    row["failed"] = json!(failed.iter().take(FAILED_MAX).collect::<Vec<_>>());
+    row["failed_count"] = json!(failed.len());
 }
 
 /// The row of a hook or CI run, from how the command ended; `ci` only on
@@ -88,6 +100,9 @@ pub fn layer(repo: &Repo, camada: &str, started: Instant, result: &Result<()>, c
     if let Some(ci) = ci {
         row["docs_only"] = json!(ci.docs_only);
         row["suite_in_checks"] = json!(ci.suite_in_checks);
+        if let Some(failed) = &ci.failed {
+            put_failed(&mut row, failed);
+        }
     }
     record(repo, row);
 }
@@ -219,4 +234,29 @@ pub fn size_text(config: &Config, (added, removed): (u64, u64)) -> String {
         text += &format!("\n{AVISO}\n");
     }
     text
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{put_failed, FAILED_MAX};
+    use serde_json::json;
+
+    #[test]
+    fn failed_keeps_the_first_fifty_and_counts_all() {
+        let ids: Vec<String> = (0..51).map(|i| format!("t::case_{i:02}")).collect();
+        let mut row = json!({"layer": "ci"});
+        put_failed(&mut row, &ids);
+        assert_eq!(row["failed"], json!(ids[..FAILED_MAX]));
+        assert_eq!(row["failed"].as_array().unwrap().len(), 50);
+        assert_eq!(row["failed"][49], "t::case_49");
+        assert_eq!(row["failed_count"], 51);
+    }
+
+    #[test]
+    fn failed_under_the_cut_is_whole() {
+        let mut row = json!({"layer": "ci"});
+        put_failed(&mut row, &["api:t::x".to_string()]);
+        assert_eq!(row["failed"], json!(["api:t::x"]));
+        assert_eq!(row["failed_count"], 1);
+    }
 }

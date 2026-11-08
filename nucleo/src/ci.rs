@@ -124,6 +124,8 @@ pub fn run(repo: &Repo, base: &str, pr: bool, row: &mut medicao::CiRow) -> Resul
         }
     }
     if !cycle_open && !report.is_green() {
+        // Item 97: the row names the cases, from the report already read.
+        row.failed = Some(report.not_green());
         return refuse(
             "suite-red",
             "the suite fails at HEAD and there is no open cycle",

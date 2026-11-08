@@ -91,6 +91,16 @@ impl Report {
     pub fn is_green(&self) -> bool {
         self.cases.values().all(|o| matches!(o, Outcome::Passed | Outcome::Skipped))
     }
+
+    /// Item 97: the cases that keep the report from being green (failures
+    /// and errors), each once, in byte order of the full id.
+    pub fn not_green(&self) -> Vec<String> {
+        self.cases
+            .iter()
+            .filter(|(_, o)| !matches!(o, Outcome::Passed | Outcome::Skipped))
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
 }
 
 /// Item 52: a failed case `C::N` (C not empty) is a vitest block whose
@@ -132,5 +142,73 @@ fn case_id(classname: &str, name: &str) -> String {
         name.to_string()
     } else {
         format!("{classname}::{name}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Report;
+
+    fn report(cases: &str) -> Report {
+        Report::parse(&format!("<testsuite>{cases}</testsuite>")).unwrap()
+    }
+
+    #[test]
+    fn not_green_holds_failures_and_errors_only() {
+        let r = report(
+            r#"<testcase classname="t" name="fail"><failure/></testcase>
+               <testcase classname="t" name="err"><error/></testcase>
+               <testcase classname="t" name="skip"><skipped/></testcase>
+               <testcase classname="t" name="pass"/>"#,
+        );
+        assert_eq!(r.not_green(), ["t::err", "t::fail"]);
+    }
+
+    #[test]
+    fn a_repeated_id_counts_once_with_its_worst_outcome() {
+        let r = report(
+            r#"<testcase classname="t" name="retry"><failure/></testcase>
+               <testcase classname="t" name="retry"/>
+               <testcase classname="t" name="late"/>
+               <testcase classname="t" name="late"><error/></testcase>
+               <testcase classname="t" name="ok"/>
+               <testcase classname="t" name="ok"/>"#,
+        );
+        assert_eq!(r.not_green(), ["t::late", "t::retry"]);
+    }
+
+    #[test]
+    fn ids_carry_the_suite_prefix_and_sort_in_byte_order_across_suites() {
+        let mut all = Report::empty();
+        all.absorb("web", report(r#"<testcase classname="a" name="x"><failure/></testcase>"#));
+        all.absorb(
+            "",
+            report(
+                r#"<testcase classname="tests.test_value" name="test_value"><failure/></testcase>
+                   <testcase classname="Zeta" name="up"><error/></testcase>"#,
+            ),
+        );
+        all.absorb(
+            "api",
+            report(
+                r#"<testcase classname="tests.test_value" name="test_value"><error/></testcase>
+                   <testcase classname="tests.test_value" name="fine"/>"#,
+            ),
+        );
+        assert_eq!(
+            all.not_green(),
+            ["Zeta::up", "api:tests.test_value::test_value", "tests.test_value::test_value", "web:a::x"]
+        );
+    }
+
+    #[test]
+    fn a_group_failure_counts_once_under_its_id() {
+        let r = report(
+            r#"<testcase classname="src/a.test.ts" name="block"><failure/></testcase>
+               <testcase classname="src/a.test.ts" name="block &gt; one"><skipped/></testcase>
+               <testcase classname="src/a.test.ts" name="block &gt; two"><skipped/></testcase>"#,
+        );
+        assert_eq!(r.group_failures(), ["src/a.test.ts::block"]);
+        assert_eq!(r.not_green(), ["src/a.test.ts::block"]);
     }
 }
