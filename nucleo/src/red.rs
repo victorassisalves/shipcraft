@@ -71,6 +71,8 @@ pub fn run(
     let failing = failing_at_red(&report, "shipcraft red")?;
     let left = leave_out(repo, &config, &changed, all, None, &failing)?;
     let (cases, failing) = without(&left.cases, report.cases_run(), failing);
+    // Item 98: from the report `red` accepted, before item 53's second run.
+    let controls = controls(repo, &config, &changed, all, &report, &cases)?;
 
     let files = locked_files(repo, &config)?;
     refuse_a_suite_without_tests(repo, &config, &files, &failing)?;
@@ -78,7 +80,7 @@ pub fn run(
     // Item 53: hashed as the second run leaves the files.
     let files = locked_files(repo, &config)?;
 
-    let lock = Lock::open(files, cases, failing, fix);
+    let lock = Lock::open(files, cases, failing, controls, fix);
     let path = new_lock_path();
     let full_path = repo.path(&path);
     fs::create_dir_all(full_path.parent().expect("a lock path has a directory"))
@@ -87,6 +89,7 @@ pub fn run(
 
     print_dropped(&dropped);
     left.print();
+    print_controls(&lock);
     println!(
         "shipcraft: RED locked at {path}: {} file(s), {} case(s), {} failing: {}",
         lock.files.len(),
@@ -138,12 +141,19 @@ pub fn redo(
     let failing = failing_at_red(&report, "shipcraft red --redo")?;
     let left = leave_out(repo, &config, &changed, all, Some(&old), &failing)?;
     let (run, failing) = without(&left.cases, run, failing);
+    // Item 98: with no changed paths (the base is HEAD) the old lock's controls
+    // that still hold are kept; otherwise they are recomputed as `red` does.
+    let controls = match &changed {
+        Ok(changed) if !all && changed.paths.is_empty() => kept_controls(&old, &run, &report),
+        _ => controls(repo, &config, &changed, all, &report, &run)?,
+    };
     let files = locked_files(repo, &config)?;
     refuse_a_suite_without_tests(repo, &config, &files, &failing)?;
     let (failing, dropped) = confirm(repo, &config, &files, failing, "shipcraft red --redo")?;
     let files = locked_files(repo, &config)?;
     // Item 75: format 4 keeps its fix fields; a format 2 or 3 lock becomes format 3.
-    let lock = old.redone(files, run, failing);
+    // Item 98: a format 4 or 5 lock becomes format 5, with its controls.
+    let lock = old.redone(files, run, failing, controls);
 
     let full_path = repo.path(&lock_path);
     let in_tree = fs::read(&full_path).ok().and_then(|bytes| Lock::parse(&bytes));
@@ -156,6 +166,7 @@ pub fn redo(
     print_dropped(&dropped);
     left.print();
     *unchanged = Some(left);
+    print_controls(&lock);
 
     let minus = |a: &[String], b: &[String]| a.iter().filter(|case| !b.contains(case)).cloned().collect::<Vec<_>>();
     let list = |cases: Vec<String>| if cases.is_empty() { "none".to_string() } else { cases.join(", ") };
@@ -474,6 +485,79 @@ fn leave_out(
     Ok(LeftOut { cases, unread: None })
 }
 
+/// Item 98: the controls, byte-sorted: the cases of `cases` that passed in
+/// `report` (the report `red` accepted) and that item 81's mapper holds, per
+/// suite and over all of the suite's passing cases at once, to a changed test
+/// file. None with `--all` or without changed paths; none for a suite the
+/// mapper cannot map.
+fn controls(
+    repo: &Repo,
+    config: &Config,
+    changed: &std::result::Result<narrow::Changed, Fallback>,
+    all: bool,
+    report: &Report,
+    cases: &[String],
+) -> Result<Vec<String>> {
+    let Ok(changed) = changed else { return Ok(Vec::new()) };
+    if all {
+        return Ok(Vec::new());
+    }
+    let changed_paths: BTreeSet<&[u8]> = changed.paths.iter().map(|(_, path)| path.as_slice()).collect();
+    let passing: Vec<&String> = cases.iter().filter(|case| report.outcome(case) == Some(Outcome::Passed)).collect();
+    let locked = config.test_files(repo)?;
+    let present = repo.files()?;
+    let mut controls = BTreeSet::new();
+    for suite in config.suites() {
+        let own: Vec<(&String, &str)> =
+            passing.iter().filter_map(|case| config.own(&suite, case).map(|id| (*case, id))).collect();
+        if own.is_empty() {
+            continue;
+        }
+        let ids: Vec<&str> = own.iter().map(|(_, id)| *id).collect();
+        let held = suite::holders(repo.root(), &suite, &locked, &present, &ids);
+        controls.extend(held_in_changed(&own, held.as_deref(), &suite.prefix(), &changed_paths));
+    }
+    Ok(controls.into_iter().collect())
+}
+
+/// Item 98: the cases of one suite (`own`, with their ids in the suite) whose
+/// file, `held` in the same order from the suite's root, is a changed path;
+/// none when the suite has no mapping.
+fn held_in_changed(
+    own: &[(&String, &str)],
+    held: Option<&[String]>,
+    prefix: &str,
+    changed_paths: &BTreeSet<&[u8]>,
+) -> Vec<String> {
+    let Some(held) = held else { return Vec::new() };
+    own.iter()
+        .zip(held)
+        .filter(|(_, file)| changed_paths.contains(format!("{prefix}{file}").as_bytes()))
+        .map(|((case, _), _)| (*case).clone())
+        .collect()
+}
+
+/// Item 98: a redo with no changed paths keeps the old lock's controls that
+/// are still in `cases` and passed in `report`, in their (byte) order.
+fn kept_controls(old: &Lock, cases: &[String], report: &Report) -> Vec<String> {
+    old.controls()
+        .iter()
+        .filter(|case| cases.contains(case) && report.outcome(case) == Some(Outcome::Passed))
+        .cloned()
+        .collect()
+}
+
+/// Item 98: the line right before `RED locked at` / `RED redone at`, when the
+/// lock written is format 5.
+fn print_controls(lock: &Lock) {
+    if lock.controls.is_some() {
+        println!(
+            "shipcraft: controls: {} passing case(s) of the changed test files; the hook runs them too",
+            lock.controls().len()
+        );
+    }
+}
+
 /// Item 53: reruns once, as the hook runs them, the suites that have a case
 /// of `failing`, on the working tree, with `files` as the lock's files; a case
 /// stays failing unless its suite's second report shows it passed. The cases
@@ -665,4 +749,73 @@ fn warn_absent_suites(repo: &Repo, config: &Config, base: &narrow::Base, lock: &
         "the lock has cases in suite(s) absent from {shown}'s .shipcraft.toml: {}; CI judges a PR by its base's config and will refuse them as case-missing; bring the suite to {shown} in a PR of its own, then rebase this branch",
         short_list(&absent)
     ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lock::Kind;
+
+    fn report() -> Report {
+        Report::parse(
+            r#"<testsuite>
+                 <testcase classname="t" name="fail"><failure/></testcase>
+                 <testcase classname="t" name="pass"/>
+                 <testcase classname="t" name="also"/>
+                 <testcase classname="t" name="skip"><skipped/></testcase>
+                 <testcase classname="u" name="pass"/>
+               </testsuite>"#,
+        )
+        .unwrap()
+    }
+
+    fn strings(ids: &[&str]) -> Vec<String> {
+        ids.iter().map(|id| id.to_string()).collect()
+    }
+
+    #[test]
+    fn a_control_is_a_case_held_to_a_changed_path() {
+        let (a, b, c) = ("t::pass".to_string(), "t::also".to_string(), "u::pass".to_string());
+        let own = [(&a, "t::pass"), (&b, "t::also"), (&c, "u::pass")];
+        let held = strings(&["tests/t.py", "tests/t.py", "tests/u.py"]);
+        let changed: BTreeSet<&[u8]> = [b"api/tests/t.py".as_slice()].into();
+        assert_eq!(held_in_changed(&own, Some(&held), "api/", &changed), strings(&["t::pass", "t::also"]));
+        // Without the suite's prefix the path is not the changed one.
+        assert!(held_in_changed(&own, Some(&held), "", &changed).is_empty());
+        // A suite the mapper cannot map contributes nothing.
+        assert!(held_in_changed(&own, None, "api/", &changed).is_empty());
+    }
+
+    #[test]
+    fn a_redo_without_changed_paths_keeps_the_old_controls_that_still_pass() {
+        let fix = Fix { kind: Kind::Feature, reported_at: None, fixes_release: None };
+        let cases = strings(&["t::also", "t::fail", "t::gone", "t::pass", "u::pass"]);
+        let old = Lock::open(
+            BTreeMap::new(),
+            cases.clone(),
+            strings(&["t::fail"]),
+            strings(&["t::also", "t::gone", "t::pass", "u::pass"]),
+            fix,
+        );
+        let now = strings(&["t::also", "t::fail", "t::pass"]);
+        // `t::gone` is no longer a case, `u::pass` is not in the new cases.
+        assert_eq!(kept_controls(&old, &now, &report()), strings(&["t::also", "t::pass"]));
+        // A control that no longer passes is not kept.
+        let failing =
+            Report::parse(r#"<testsuite><testcase classname="t" name="pass"><failure/></testcase></testsuite>"#)
+                .unwrap();
+        assert!(kept_controls(&old, &now, &failing).is_empty());
+    }
+
+    #[test]
+    fn the_controls_line_is_only_for_format_5() {
+        let fix = Fix { kind: Kind::Feature, reported_at: None, fixes_release: None };
+        let lock = Lock::open(BTreeMap::new(), strings(&["t::fail"]), strings(&["t::fail"]), Vec::new(), fix);
+        assert!(lock.controls.is_some());
+        let redone = lock.redone(BTreeMap::new(), lock.cases.clone(), lock.failing_at_red.clone(), Vec::new());
+        assert!(redone.controls.is_some(), "a format 5 lock redone stays format 5");
+        let three = Lock { formato: 3, fix: None, controls: None, ..lock.clone() };
+        let redone = three.redone(BTreeMap::new(), three.cases.clone(), three.failing_at_red.clone(), Vec::new());
+        assert!(redone.controls.is_none(), "a format 3 redo prints no controls line");
+    }
 }
