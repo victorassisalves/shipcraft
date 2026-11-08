@@ -1909,6 +1909,34 @@ Since item 63 the reviewer does not rerun the suite after green CI, so waiting f
 - The review's temporary folder (detached worktree, `brief.md`, the reviewer's output files), its removal, and the queue's directories, ticket and slot files (released on drop). Keep.
 - The standing effects: a row appended to `.git/shipcraft/runs.jsonl` per run (a failed append changes no exit code), with the fields rows carry today (`locks`, `product_lines`, `shape_warnings`, roles, tokens). Keep.
 
+### A `suite-red` row names the failing cases (item 97)
+
+When `shipcraft ci` refuses `suite-red`, its run-log row says only "the suite fails at HEAD and there is no open cycle". POC-037 (shipcraft-v2 `poc/037-flake-or-real-red`, 2026-11-08) read the 45 `suite-red` rows of the two Draken repositories: 17 were followed by a green CI on the same commit with no new commit (flaky, 104 min of CI), and none of the 45 rows names a failing case, so a flaky red cannot be told from a real one, or rerun, after the fact. Victor's decision (2026-11-08, "Sim, medir adiante"): measure from now on. This item only records; it changes no verdict.
+
+1. **The change.** A `ci` row whose `code` is `suite-red` gains two fields:
+   - `failed`: the ids of the cases that failed at HEAD, written as `failing_at_red` writes them (with their suite prefix), in byte order, at most 50;
+   - `failed_count`: how many cases failed at HEAD in all, an integer that can be above 50.
+
+   A failed case is one whose outcome in the suite report is neither passed nor skipped: exactly the cases that make the suite not green. A group failure (item 52) appears under the id the report gives it. The fields are written wherever `ci` refuses `suite-red`: `shipcraft ci` run by hand or in a workflow, and the CI that `shipcraft pr` runs with `ci = "local"`.
+2. **What does not change.**
+   - The refusal itself: its code, its printed lines, its `reason` field, its exit code and where it is judged.
+   - Every other row: a `ci` row that passes, or refuses with any other code, or ends in an error, has neither field; `hook`, `red`, `close`, `pr`, `review` and `merge` rows are written as today.
+   - `report` and `shipcraft pr`'s summary do not read the new fields.
+   - The lock format and every command's output.
+3. **Current behavior** on the paths this item touches (rule 14):
+   - `ci`'s order of checks and its refusals (`lock-not-closed`, `case-broke`, `no-report`, the build and `check` refusals, `suite-red`): keep.
+   - The `ci` row's other fields (`docs_only`, `suite_in_checks`, `lock`, `locks`, `reason`, `secs`, `at`, `branch`, `commit`): keep, on every `ci` row.
+   - Recording is best effort: a failed append changes no exit code. Keep.
+   - The standing effects the spec-review brief lists: keep.
+4. **Touches.**
+   - **Assertions that change, and nothing else:** the version: 2.46.0 in section 11, `v1-62.version` and the other version cases item 69 lists. A case that asserts the exact key set of a `ci` row that refused `suite-red` gains `failed` and `failed_count` in that set, and nothing else.
+   - **Must keep passing unchanged:** `v1-59.ci`, `v1-59.ci-mixed`, `v1-59.ci-present`, `v1-59.ci-unreadable`, `v1-59.ci-bad-config`, `v1-59.ci-longest`, `v1-59.ci-remedy`, `v1-59.files-many` (exact key sets of other `ci` rows); item 43's `suite-red` cases (`acceptance/lib/item43.sh`); item 81's case that CI catches an excluded failure (`acceptance/lib/item81.sh`); item 40's `docs_only` cases; item 62's `suite_in_checks` cases; item 52's group-failure cases.
+   - **New cases:** a suite with one failing case at HEAD and no open cycle: the `suite-red` row has `failed` with that one id (suite prefix included) and `failed_count` 1; two suites, each with failing cases: both suites' ids, in byte order; 51 failing cases: `failed` holds the first 50 in byte order and `failed_count` is 51; a group failure: its group id; the same failure through `shipcraft pr` with `ci = "local"`: the `ci` row has both fields; a passing `ci`, a `no-report`, a `lock-not-closed` and an error row: neither field; the printed refusal byte for byte as before.
+5. **Measure and revert.**
+   - **Metric:** over the next 10 `suite-red` rows in this repository's and adopters' logs (once they run 2.47), 10 of 10 carry `failed` with at least one id and the right `failed_count`. POC-037 then classifies them by a rerun of exactly those cases on the same commit.
+   - **Revert:** a release drops the two fields; rows without them stay valid for every reader.
+6. **Known limits.** Only a suite that wrote its report gets ids: a `no-report` row stays as it is. Above 50 failures the list is cut (the count is not). The ids say which cases failed, not why.
+
 ### The merge gate
 
 `shipcraft merge <pr>` merges only with `shipcraft/ci` and `shipcraft/review` at `success` on the PR's current HEAD; an off layer is not required. `--no-review "<reason>"` waives the review, never CI, and records the reason in the PR and the run log. Where GitHub offers branch protection, `init --github` makes both statuses required; otherwise `shipcraft merge` is the gate, and `shipcraft status` says so. `shipcraft ci` on the default branch warns, with exit `0`, about each merge that bypassed the gate, and records it as an `escape`.
@@ -2042,6 +2070,7 @@ Each hook, CI, review and merge run appends one JSON line to `.git/shipcraft/run
 | `product_lines`, `shape_warnings` | On rows from `shipcraft pr`: product lines, and files that got a shape warning (`null` when there is no threshold). |
 | `docs_only` | On `ci` rows: whether the PR was judged docs only (item 40). |
 | `suite_in_checks` | On `ci` rows: whether the suite was left to `[execution] suite_checks` (item 62). |
+| `failed`, `failed_count` | On `ci` rows that refused `suite-red`: the failing case ids at HEAD (byte order, at most 50) and how many failed in all (item 97). |
 | `queue_secs` | On `pr` rows: seconds the local CI waited for a slot, rounded down; `0` when it skipped the queue, `null` without local CI (item 41). |
 | `tokens`, `agent`, `pr`, `diff_sha256`, `text_sha256` | On `review` rows: tokens used (or `null`), the agent, the PR, and the two reuse keys (diff, and title and body; item 54). |
 | `after_green_ci` | On `review` rows that are not reused: whether the review came after green CI at the same head, with the brief that does not rerun the suite (item 63). |
@@ -2102,4 +2131,4 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.46.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.47.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
