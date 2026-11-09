@@ -869,7 +869,8 @@ Found on Hands-off on 2026-11-09 (POC-044, item 1). The session ran `red` and co
    - `pr-not-on-branch` has no acceptance case today, so point 2 adds one.
    - **The version:** 2.50.0 in §11, and `v1-87.version` with the version cases item 69 lists.
    - **New cases**, about 10: each condition of point 1 alone (default branch with origin and ci local; review local with ci off; both off; a non-default branch; detached HEAD; no origin; `origin/HEAD` naming a branch other than `main`), redo rewrite and unchanged redo, the line right before `next:` with `next:` still last, item 98's controls line still right before `RED locked at`, exit code and lock unchanged, and point 2's detached-HEAD text.
-5. **Measure and revert.** Metric: 0 `pr-not-on-branch` refusals after a `red` that passed, on adopters' run logs (Hands-off, Draken, draken-platform), over the next 20 locks. Revert: drop the line.
+5. **Known limits.** `red` reads the working tree's config and fetches nothing, while `pr` fetches and judges by the base branch's config. So a stale `origin/HEAD`, or a working-tree config whose layers differ from the base's, can make the warning and `pr` disagree. The warning is a hint, and `pr`'s refusal stays the gate.
+6. **Measure and revert.** Metric: 0 `pr-not-on-branch` refusals after a `red` that passed, on adopters' run logs (Hands-off, Draken, draken-platform), over the next 20 locks. Revert: drop the line.
 
 ### `report` reads the project's release tags (item 99)
 
