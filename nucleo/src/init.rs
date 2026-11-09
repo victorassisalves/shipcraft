@@ -13,6 +13,7 @@ use crate::config::{minimum_version, CONFIG_FILE};
 use crate::gh;
 use crate::git::{git_in, text, Repo, Snapshot};
 use crate::glob;
+use crate::init_hooks;
 use crate::init_msg::{self, Plan};
 use crate::init_tool::{self, Tool};
 use crate::jsonc;
@@ -916,7 +917,15 @@ enum Hook {
 
 /// `shipcraft status`: whether commits go through shipcraft; any doubt reads as no hook.
 pub fn hook_status(repo: &Repo) -> String {
-    match decide_hook(repo, false) {
+    // core.hooksPath is read once, for item 101's route and for today's.
+    let path = hooks_path(repo);
+    // Item 101: hooks a project keeps in its own core.hooksPath.
+    if let Ok(HooksPath::Set(dir)) = &path {
+        if let Some(line) = init_hooks::status(repo, dir) {
+            return line;
+        }
+    }
+    match path.and_then(|path| decide_hook_with(repo, false, path)) {
         decided if init_tool::present(repo) => {
             init_tool::status(
                 decided.and_then(|h| if let Hook::Tool(t) = h { Ok(t) } else { Err(failed(String::new())) }),
@@ -971,23 +980,42 @@ fn own_hook(path: &Path) -> bool {
     fs::read_to_string(path).is_ok_and(|t| t.contains(HOOK_MARK))
 }
 
+/// `git config core.hooksPath`, read once for `init` and `status`.
+pub(crate) enum HooksPath {
+    Unset,
+    /// The raw value.
+    Set(String),
+    /// Any exit other than 0 or 1: the first line of git's error.
+    Fails(String),
+}
+
+/// The raw value, letter by letter (15a.3): '.git/hooks/', './.git/hooks',
+/// the absolute path or a space refuse, even when they name the same directory.
+/// Exit 1 is an unset key; any other failure is not absence (15a.2).
+pub(crate) fn hooks_path(repo: &Repo) -> Result<HooksPath> {
+    let out = git_in(repo.root(), &["config", "core.hooksPath"])?;
+    Ok(match out.status.code() {
+        Some(1) => HooksPath::Unset,
+        Some(0) => HooksPath::Set(text(out.stdout.strip_suffix(b"\n").unwrap_or(&out.stdout))),
+        _ => HooksPath::Fails(text(&out.stderr).lines().next().unwrap_or_default().to_string()),
+    })
+}
+
 /// Item 15a: the hook is decided before any question or write. shipcraft installs
 /// its own hook only where no other tool manages pre-commit, and integrates
 /// with the lefthook only where it surely runs the hook (item 15b); any doubt
 /// is a refusal that leaves the tree as it was (rule 17).
 fn decide_hook(repo: &Repo, local: bool) -> Result<Hook> {
+    decide_hook_with(repo, local, hooks_path(repo)?)
+}
+
+/// `decide_hook` with `core.hooksPath` already read.
+fn decide_hook_with(repo: &Repo, local: bool, path: HooksPath) -> Result<Hook> {
     let stop = |what: String| init_msg::alien(what.clone(), &what);
-    // The raw value, letter by letter (15a.3): '.git/hooks/', './.git/hooks',
-    // the absolute path or a space refuse, even when they name the same directory.
-    // Exit 1 is an unset key; any other failure is not absence (15a.2).
-    let out = git_in(repo.root(), &["config", "core.hooksPath"])?;
-    let dir = match out.status.code() {
-        Some(1) => None,
-        Some(0) => Some(text(out.stdout.strip_suffix(b"\n").unwrap_or(&out.stdout))),
-        _ => {
-            let why = text(&out.stderr).lines().next().unwrap_or_default().to_string();
-            return stop(format!("git config fails ({why})"));
-        }
+    let dir = match path {
+        HooksPath::Unset => None,
+        HooksPath::Set(dir) => Some(dir),
+        HooksPath::Fails(why) => return stop(format!("git config fails ({why})")),
     };
     // Item 25 (changes 15a.2 and 15a.3): `.husky/` or the pre-commit config.
     if init_tool::present(repo) || init_tool::husky_path(dir.as_deref()) {
