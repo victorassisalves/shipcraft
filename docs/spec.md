@@ -1738,17 +1738,17 @@ Found on Hands-off on 2026-11-09 (POC-044, finding 4). The project keeps its hoo
    Every other case keeps today's route and text: unset, `.git/hooks`, husky, pre-commit or lefthook.
 2. **What `status` prints then.** It reads the two hook files git runs, `git rev-parse --git-path hooks/commit-msg` and `hooks/post-commit` (`Repo::hook_path`, which honours `core.hooksPath` and worktrees), following symlinks.
    - **Reading a hook.** The file is read as bytes and split on `\n`. A trailing `\r` is stripped from each line. Bytes that are not UTF-8 are compared as bytes, so a Latin-1 comment does not hide a call line. A file that exists but cannot be read (permission, I/O) counts as `missing or not executable`.
-   - A hook **calls shipcraft** when it is a readable, executable regular file holding a *call line*. A call line, after leading spaces and tabs and an optional `exec` followed by spaces or tabs, starts with a command word and is followed by spaces or tabs and the arguments:
+   - A hook **calls shipcraft** when it is a readable, executable regular file holding a *call line*. Executable means any execute bit set, after following symlinks, as the own-hook route reads it today. A call line, after leading spaces and tabs and an optional `exec` followed by spaces or tabs, starts with a command word and is followed by spaces or tabs and the arguments:
      - `check --commit-msg` in `commit-msg`;
      - `close` in `post-commit`.
 
-     After the arguments comes the end of the line, or a space or tab. The command word is either unquoted text up to the first space or tab, or text in double or single quotes. Its last `/`-separated component must be exactly `shipcraft`. Lines whose first non-blank character is `#` are skipped. Nothing is expanded or run. Examples that call shipcraft:
+     After the arguments comes the end of the line, or a space or tab. The command word is one shell word: consecutive segments, each either unquoted text (no space, tab or quote) or text in double or single quotes (no escapes; an unclosed quote is not a call), ending at the first unquoted space or tab. Its value is the segments joined without their quotes, and its last `/`-separated component must be exactly `shipcraft`. So `"$HOME"/bin/shipcraft close` calls shipcraft (value `$HOME/bin/shipcraft`). Lines whose first non-blank character is `#` are skipped. Nothing is expanded or run. Examples that call shipcraft:
      - `exec "$HOME/.local/shipcraft-2/bin/shipcraft" check --commit-msg "$1"`;
      - `shipcraft close`;
      - `	/usr/local/bin/shipcraft close`.
 
      Examples that do not: `# shipcraft close`, `echo shipcraft close`, `shipcraft-old close`, `shipcraft closed`.
-   - **Both call shipcraft:** one line `shipcraft: hooks in core.hooksPath <dir> call shipcraft (commit-msg and post-commit)`, where `<dir>` is the raw value.
+   - **Both call shipcraft:** one line `shipcraft: hooks in core.hooksPath <dir> call shipcraft (commit-msg and post-commit)`, where `<dir>` is the raw value (lossy UTF-8, as `init`'s refusal prints it). In the problems below, `<dir>/<hook>` drops one trailing `/` from `<dir>` before joining. An empty value is printed empty.
    - **Otherwise:** one line `shipcraft: missing hook: <problems>; add the shipcraft calls there (shipcraft init does not write under core.hooksPath)`. `<problems>` holds, joined by `, `, in this order, each that applies:
      - `<dir>/commit-msg is missing or not executable`;
      - `<dir>/commit-msg does not call shipcraft check --commit-msg`;
