@@ -298,7 +298,12 @@ impl TempDir {
     pub fn new(prefix: &str) -> Result<TempDir> {
         let nanos =
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-        let path = std::env::temp_dir().join(format!("{prefix}-{}-{nanos}", std::process::id()));
+        // The clock alone can repeat within a process (microsecond resolution on macOS),
+        // so two threads creating a TempDir at once shared one folder: the item 100
+        // unit tests failed about 1 run in 7. A per-process counter makes the name unique.
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!("{prefix}-{}-{nanos}-{seq}", std::process::id()));
         fs::create_dir_all(&path).map_err(|e| failed(format!("create {}: {e}", path.display())))?;
         Ok(TempDir(path.canonicalize().unwrap_or(path)))
     }
