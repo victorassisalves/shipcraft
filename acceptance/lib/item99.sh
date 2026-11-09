@@ -104,12 +104,13 @@ elif case=='tie':
  git('tag','-a','v1.9.0',r1,'-m','tie99',at=T+86400);git('tag','v1.10.0',r2)
  config('[report]\nrelease_tags="v*"\n')
  d=decoded(report('--json','--since','v1.9.0'))
- assert d['git']['releases']==1 and d['lead_time']['n']==0 and d['lead_time']['missing']==0,d
- assert d['rework_rate']['n']==0,d
+ assert d['git']['releases']==2 and d['deploys']['n']==2,d
+ assert d['lead_time']==dict(value=dict(median=43350,p90=86500),n=2,missing=0,reason=None),d
+ assert d['rework_rate']['n']==1 and d['rework_rate']['missing']==0,d
 elif case=='since-release':
  tags(('deploy-a','deploy-b'));config('[report]\nrelease_tags="deploy-*"\n')
  d=decoded(report('--since','deploy-b','--json'))
- assert d['since']=='deploy-b' and d['git']['releases']==1,d
+ assert d['since']=='deploy-b' and d['git']['releases']==2 and d['deploys']['n']==1,d
  assert d['lead_time']==dict(value=dict(median=200,p90=200),n=1,missing=0,reason=None),d
 elif case=='since-missing':
  tags(('deploy-a','deploy-b'));config('[report]\nrelease_tags="deploy-*"\n')
@@ -118,6 +119,7 @@ elif case=='since-missing':
 elif case=='since-offbranch':
  tags(('deploy-a','deploy-b'));config('[report]\nrelease_tags="deploy-*"\n')
  git('checkout','-qb','side99',r1);save(T+20);git('tag','deploy-side');git('checkout','-q','main')
+ config('[report]\nrelease_tags="deploy-*"\n')
  p=report('--json','--since','deploy-side')
  assert p.returncode==2 and p.stdout==b'' and p.stderr.strip()==b'report: --since deploy-side is not a release tag on refs/heads/main',(p.returncode,p.stdout,p.stderr)
 elif case=='since-mismatch':
@@ -149,8 +151,8 @@ elif case=='reader-variants':
  tags(('deploy-a','deploy-b'))
  for body in ('report = { release_tags = "deploy-*" } # inline\n', "report.release_tags = 'deploy-*' # dotted literal\r\n", '["report"]\r\n"release_tags" = "depl\\u006fy-*" # escape\r\n'):
   config(body);d=decoded(report('--json'));assert d['git']['release_tags']=='deploy-*' and d['git']['releases']==2,(body,d)
- git('tag','!release+().{}~',r2);config('[report]\nrelease_tags="!release+().{}~"\n')
- d=decoded(report('--json'));assert d['git']['releases']==1 and d['git']['release_tags']=='!release+().{}~',d
+ git('tag','!release+().{}',r2);config('[report]\nrelease_tags="!release+().{}"\n')
+ d=decoded(report('--json'));assert d['git']['releases']==1 and d['git']['release_tags']=='!release+().{}',d
 elif case=='coverage-default':
  tags(('v1.0.0','v2.0.0'))
  d=decoded(report('--json'));assert d['git']['release_tags'] is None,d
