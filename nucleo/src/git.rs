@@ -205,6 +205,19 @@ impl Repo {
             .unwrap_or_else(|| "main".to_string())
     }
 
+    /// Item 100: the branch HEAD is on, when it is the default branch `pr`
+    /// refuses on (`default_branch`) and a remote `origin` exists. None on a
+    /// detached HEAD, on another branch, without `origin`, or when a git call
+    /// fails.
+    pub fn on_default_branch(&self) -> Option<String> {
+        let branch = self.try_text(&["symbolic-ref", "-q", "--short", "HEAD"])?;
+        if branch.is_empty() || branch != self.default_branch() {
+            return None;
+        }
+        self.try_text(&["remote", "get-url", "origin"])?;
+        Some(branch)
+    }
+
     /// `.git/shipcraft/`, in the main repository even from a worktree.
     pub fn shipcraft_dir(&self) -> Result<PathBuf> {
         Ok(self.root.join(self.text(&["rev-parse", "--git-common-dir"])?).join("shipcraft"))
@@ -360,4 +373,64 @@ pub fn text(bytes: &[u8]) -> String {
 
 fn split_nul(bytes: &[u8]) -> Vec<String> {
     bytes.split(|b| *b == 0).filter(|s| !s.is_empty()).map(text).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Runs git in `dir` for a test's setup, with no user or system config.
+    fn git(dir: &Path, args: &[&str]) {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@example.invalid")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@example.invalid")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", text(&out.stderr));
+    }
+
+    /// A repository on `main` with one commit.
+    fn repo(dir: &TempDir) -> Repo {
+        git(dir.path(), &["init", "-q", "-b", "main"]);
+        git(dir.path(), &["commit", "-q", "--allow-empty", "-m", "first"]);
+        Repo { root: dir.path().to_path_buf() }
+    }
+
+    #[test]
+    fn on_the_default_branch_needs_head_on_it_and_an_origin() {
+        let dir = TempDir::new("shipcraft-test-item100").unwrap();
+        let repo = repo(&dir);
+        // No origin: nothing.
+        assert_eq!(repo.on_default_branch(), None);
+        git(dir.path(), &["remote", "add", "origin", "https://example.invalid/r.git"]);
+        // No origin/HEAD: the default is `main`, and that fallback is not a failure.
+        assert_eq!(repo.on_default_branch(), Some("main".to_string()));
+        // Another branch: nothing.
+        git(dir.path(), &["switch", "-q", "-c", "item/1"]);
+        assert_eq!(repo.on_default_branch(), None);
+        // Detached HEAD: nothing.
+        git(dir.path(), &["switch", "-q", "--detach"]);
+        assert_eq!(repo.on_default_branch(), None);
+    }
+
+    #[test]
+    fn origin_head_names_the_default_branch() {
+        let dir = TempDir::new("shipcraft-test-item100").unwrap();
+        let repo = repo(&dir);
+        git(dir.path(), &["remote", "add", "origin", "https://example.invalid/r.git"]);
+        let head = repo.text(&["rev-parse", "HEAD"]).unwrap();
+        git(dir.path(), &["update-ref", "refs/remotes/origin/trunk", &head]);
+        git(dir.path(), &["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk"]);
+        // On `main`, which origin does not name: nothing.
+        assert_eq!(repo.on_default_branch(), None);
+        git(dir.path(), &["switch", "-q", "-c", "trunk"]);
+        assert_eq!(repo.on_default_branch(), Some("trunk".to_string()));
+    }
 }

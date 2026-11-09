@@ -38,8 +38,8 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>) -> Result<(
         return refuse(
             "pr-not-on-branch",
             format!(
-                "shipcraft pr needs a working branch, and HEAD is at {}",
-                if branch.is_empty() { "nenhum branch" } else { &branch }
+                "shipcraft pr needs a working branch, and HEAD is {}",
+                if branch.is_empty() { "detached (no branch)".to_string() } else { format!("at {branch}") }
             ),
             format!("a PR brings a branch into {base}; {base} cannot open a PR into itself"),
             "create a branch (git switch -c <name>) and run shipcraft pr on it",
