@@ -890,12 +890,12 @@ On all three, every DORA metric reads `n 0`. The project, not Shipcraft, knows w
 
      So `v1-76.since`, `since-order` and `failure-scoped` are unchanged. Example: with `release_tags = "v*"`, a fix naming the release `v1.0.0` is a measured failure. With `deploy-*`, a fix's `vX.Y.Z` names no release and counts as missing.
 3. **What the report says.**
-   - The `git` object gains `"release_tags"`, placed after `"releases"` and before `"reason"`. Its value is the pattern string when `release_tags` is valid, else `null`: the default reading and an invalid `[report]` both give `null`, and in the latter case `reason` says why. The field is present on every `dora` line, also when git made the rest `null`.
-   - The text block's second coverage line ends with `release tags: <pattern>` when the key is set, or `release tags: vX.Y.Z` without it.
+   - The `git` object gains `"release_tags"`. Keys serialize in byte order as today, so the object reads `default_branch`, `reason`, `release_tags`, `releases`. Its value is the pattern string when `release_tags` is valid, else `null`: the default reading and an invalid `[report]` both give `null`, and in the latter case `reason` says why. The field is present on every `dora` line, also when git made the rest `null`.
+   - The text block's second coverage line ends with `; release tags: <pattern>` when `release_tags` is valid, or `; release tags: vX.Y.Z` otherwise (the default reading, or an invalid `[report]`, whose reason the same line already shows), replacing its final period.
 4. **Current behavior** on the paths this item touches (rule 14):
    - Every item 76 rule without the key: keep. Release reads, order, `--since`, every metric, coverage lines, partial and shallow clones, the environment scrubbing, exit codes.
    - `report` without `--github` reads no `.shipcraft.toml` today: change, as point 2 says, reading only `[report]`. It still writes nothing, appends no run-log row, and runs no test, agent or network call: keep.
-   - `report --github` (item 79, `relatorio_gh.rs`) already reads and validates the whole working-tree config for its GitHub enrichment, and gives selected locks `config unreadable` when that fails: keep, unchanged and independent of this reader. Since an unparseable file leaves item 76's evidence as it is (point 2), `v1-79.unobserved-config` keeps its selection and reason.
+   - `report --github` (item 79, `relatorio_gh.rs`) already reads and validates the whole working-tree config for its GitHub enrichment, and gives selected locks `config unreadable` when that fails: keep. Since an unparseable file leaves item 76's evidence as it is (point 2), `v1-79.unobserved-config` keeps its selection and reason. With an invalid `[report]`, that whole-config validation now fails too (point 1), so the locks `--github` selects get its existing `config unreadable`. DORA is `null` in that case anyway, so only `merged` locks are selected.
    - The config reader ignores unknown tables, so `[report]` is silently accepted today: change. `[report]` is validated (point 1). Any other unknown table or key: keep as today.
    - An older binary reading a config with `[report]` ignores it, so no `shipcraft_min` raise is needed: keep.
    - The standing effects the spec-review brief lists: keep.
@@ -907,7 +907,7 @@ On all three, every DORA metric reads `n 0`. The project, not Shipcraft, knows w
      - `v1-75.*`;
      - the config refusal cases of items 31 and 45, and E1's legacy-key cases;
      - item 10's run-log check.
-   - **Assertions that change, and nothing else in them:** item 83's byte snapshots `v1-83.json-local`, `json-release`, `json-github`, `json-metrics` and `json-fraction`, and their fixed points in `acceptance/pontos/83.md`. Each gains `"release_tags":null` in the `git` object, between `releases` and `reason`. The RED lists every other case that compares the whole `git` object byte for byte.
+   - **Assertions that change, and nothing else in them:** item 83's byte snapshots `v1-83.json-local`, `json-release`, `json-github`, `json-metrics` and `json-fraction`, and their fixed points in `acceptance/pontos/83.md`. Each gains `"release_tags":null` in the `git` object, between `reason` and `releases`. The RED lists every other case that compares the whole `git` object byte for byte.
    - **The version:** 2.49.0 in §11, `v1-87.version` and the version cases item 69 lists.
    - **New cases**, at most 40, in item 76's fixture style (real repositories, annotated and lightweight tags, battery-written run logs):
      - `deploy-*` releases giving `deploys`, `lead_time` and `rework_rate` with `missing` 0;
