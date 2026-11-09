@@ -1725,6 +1725,65 @@ The brief asks for a reproduced violation of the spec or the intent, or a crash 
 5. **Known limits.** No test can check the reviewer's judgment: the cases pin the words, and the metric says whether they work. "Real user" and "without forcing" are the reviewer's reading, and reviews already differ between runs (draken-platform PR #77 was approved, then refused with only `.gitleaksignore` changed). The classification behind this item is one agent's. Notes live in the PR comment only: nothing tracks them after the merge, and a later review has no memory of them. It finds the defect again only if it looks there. The 31 above overstates what becomes a note, since it counts rare defects that risk data or access.
 
 
+### `status` reads the hooks under `core.hooksPath` (item 101)
+
+Found on Hands-off on 2026-11-09 (POC-044, finding 4). The project keeps its hooks in `scripts/hooks` (`core.hooksPath = scripts/hooks`). Its `commit-msg` runs `exec "$HOME/.local/shipcraft-2/bin/shipcraft" check --commit-msg "$1"`, and its `post-commit` runs `exec "$HOME/.local/shipcraft-2/bin/shipcraft" close`. Git runs both, and every RED commit was checked. Yet `shipcraft status` printed `shipcraft: missing hook: the commit does not go through `shipcraft check`; run `shipcraft init``. `init` refuses any `core.hooksPath` other than `.git/hooks` (item 15a), so the advice cannot be followed. Every agent that read `status` saw it, and one following it would change the project's hooks. Victor's decision (2026-11-09): "Sim, próximo item".
+
+1. **When this applies.** `git config core.hooksPath` is set (exit 0), and all of these hold:
+   - its raw value is not exactly `.git/hooks`;
+   - it is not a husky path (item 25's `init_tool::husky_path`);
+   - item 25's `init_tool::present` is false;
+   - no lefthook file (`LEFTHOOK_FILES`) exists.
+
+   Every other case keeps today's route and text: unset, `.git/hooks`, husky, pre-commit or lefthook.
+2. **What `status` prints then.** It reads the two hook files git runs, `git rev-parse --git-path hooks/commit-msg` and `hooks/post-commit` (`Repo::hook_path`, which honours `core.hooksPath` and worktrees), following symlinks.
+   - A hook **calls shipcraft** when it is a readable, executable regular file holding a *call line*. A call line, after leading spaces and tabs and an optional `exec` followed by spaces or tabs, starts with a command word and is followed by spaces or tabs and the arguments:
+     - `check --commit-msg` in `commit-msg`;
+     - `close` in `post-commit`.
+
+     After the arguments comes the end of the line, or a space or tab. The command word is either unquoted text up to the first space or tab, or text in double or single quotes. Its last `/`-separated component must be exactly `shipcraft`. Lines whose first non-blank character is `#` are skipped. Nothing is expanded or run. Examples that call shipcraft:
+     - `exec "$HOME/.local/shipcraft-2/bin/shipcraft" check --commit-msg "$1"`;
+     - `shipcraft close`;
+     - `	/usr/local/bin/shipcraft close`.
+
+     Examples that do not: `# shipcraft close`, `echo shipcraft close`, `shipcraft-old close`, `shipcraft closed`.
+   - **Both call shipcraft:** one line `shipcraft: hooks in core.hooksPath <dir> call shipcraft (commit-msg and post-commit)`, where `<dir>` is the raw value.
+   - **Otherwise:** one line `shipcraft: missing hook: <problems>; add the shipcraft calls there (shipcraft init does not write under core.hooksPath)`. `<problems>` holds, joined by `, `, in this order, each that applies:
+     - `<dir>/commit-msg is missing or not executable`;
+     - `<dir>/commit-msg does not call shipcraft check --commit-msg`;
+     - `<dir>/post-commit is missing or not executable`;
+     - `<dir>/post-commit does not call shipcraft close`.
+
+     For each hook, only one of its two problems is listed: the first that applies.
+   - A git call that fails while checking: today's `missing hook ... run shipcraft init` line is replaced by `shipcraft: missing hook: could not read the hooks under core.hooksPath <dir>`. `status` still exits as today.
+3. **Current behavior** (rule 14):
+   - The `status` hook line with `core.hooksPath` outside `.git/hooks` and no husky, pre-commit or lefthook: change, as points 1 and 2 say.
+   - Every other `status` line, its order, exit codes, and the husky, lefthook, pre-commit and own-hook routes: keep.
+   - `init` and its refusal on `core.hooksPath` (item 15a): keep. Its wrong `Next:` line is a separate item.
+   - `status` writes nothing and runs no hook: keep.
+4. **Touches.**
+   - **Must keep passing unchanged:**
+     - item 15a's `core.hooksPath` refusal cases;
+     - item 25's husky and pre-commit status cases;
+     - item 20.3's lefthook status cases;
+     - item 58's status cases;
+     - item 89's AGENTS.md status line.
+
+     The RED searches `acceptance/` for `status` cases whose fixture sets `core.hooksPath` to another directory and lists any whose hook line changes.
+   - **The version:** 2.51.0 in §11, and `v1-87.version` with the version cases item 69 lists.
+   - **New cases**, about 15:
+     - Hands-off's real hook text, both hooks: the hooks line;
+     - the hook that is missing, not executable, a symlink to an executable, and a directory;
+     - each non-call example above;
+     - single quotes, no `exec`, and a tab indent;
+     - the order of several problems;
+     - a worktree of the same repository: the same line;
+     - the husky, lefthook and unset routes unchanged (controls).
+5. **Measure and revert.**
+   - **Metric:** on Hands-off with this release, `shipcraft status` prints the hooks line, and no agent there runs `shipcraft init` because of `status`.
+   - **Revert:** a release that goes back to the one `missing hook` line.
+6. **Known limits.** The check is textual: a hook that calls shipcraft through a wrapper script or a shell function reads as `does not call`. A hook that has the call line but exits before it reads as calling.
+
 ### `status` says when `AGENTS.md`'s block is not this version's (item 89)
 
 `init` writes the shipcraft block to `AGENTS.md`, and only a later `init` updates it. Nothing says when that is due. draken-platform kept its 2026-10-27 block until 11-05, without the lanes, the limit of about 40 cases or "only Blocking findings open another round", while its binary moved on many versions; its median PR on 11-04 was 871 changed lines against 271 on draken, which had those rules. Victor's decision (2026-11-05, "resolve", after this was recommended): `status` says so.
@@ -2301,4 +2360,4 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.50.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.51.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
