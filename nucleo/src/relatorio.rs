@@ -5,7 +5,10 @@
 //! no network read; a key without data says so with a count.
 //! Item 79: `[--github]` fills the selected locks' waiting and merge times
 //! from GitHub through `gh` (relatorio_gh); without it, nothing changes.
+//! Item 99: `[report] release_tags` in `<root>/.shipcraft.toml` names the
+//! project's release tags; without it, item 76's `vX.Y.Z` tags.
 
+use crate::config::{self, CONFIG_FILE};
 use crate::lock::{self, Lock};
 use crate::refusal::Result;
 use crate::relatorio_gh::{Asker, Pr};
@@ -17,8 +20,99 @@ use std::process::{Command, Stdio};
 
 type Row = Map<String, Value>;
 
-pub fn run(as_json: bool, since: Option<&str>, github: bool) -> Result<()> {
-    let found = discover();
+/// Item 99: which tags are releases, from the `[report]` table alone.
+enum Selection {
+    /// Item 76's `vX.Y.Z` tags: no key, or a file this reader does not read.
+    Default,
+    /// A valid `release_tags`.
+    Pattern(String),
+    /// An invalid `[report]`: the problem, and no git evidence.
+    Invalid(String),
+}
+
+impl Selection {
+    /// `<root>/.shipcraft.toml` from the working tree; never refuses.
+    fn read(root: &Path) -> Selection {
+        let path = root.join(CONFIG_FILE);
+        if !fs::metadata(&path).is_ok_and(|m| m.is_file()) {
+            return Selection::Default;
+        }
+        let Some(text) = fs::read(&path).ok().and_then(|b| String::from_utf8(b).ok()) else {
+            return Selection::Default;
+        };
+        let Ok(table) = text.parse::<toml::Table>() else { return Selection::Default };
+        match config::report_release_tags(&table) {
+            Ok(None) => Selection::Default,
+            Ok(Some(pattern)) => Selection::Pattern(pattern),
+            Err(problem) => Selection::Invalid(problem),
+        }
+    }
+
+    /// Whether a tag name is of the releases' grammar.
+    fn names(&self, tag: &str) -> bool {
+        match self {
+            Selection::Pattern(pattern) => matches(pattern.as_bytes(), tag.as_bytes()),
+            _ => lock::valid_tag(tag),
+        }
+    }
+
+    fn pattern(&self) -> Option<&str> {
+        match self {
+            Selection::Pattern(pattern) => Some(pattern),
+            _ => None,
+        }
+    }
+}
+
+/// Item 99: `*` matches any run of bytes, `/` and the empty run included;
+/// every other byte matches itself; the whole name must match.
+fn matches(pattern: &[u8], name: &[u8]) -> bool {
+    let (mut p, mut n) = (0, 0);
+    let mut star: Option<(usize, usize)> = None;
+    while n < name.len() {
+        if p < pattern.len() && pattern[p] == b'*' {
+            star = Some((p, n));
+            p += 1;
+        } else if p < pattern.len() && pattern[p] == name[n] {
+            p += 1;
+            n += 1;
+        } else if let Some((sp, sn)) = star {
+            p = sp + 1;
+            n = sn + 1;
+            star = Some((sp, sn + 1));
+        } else {
+            return false;
+        }
+    }
+    pattern[p..].iter().all(|b| *b == b'*')
+}
+
+/// What `report` reads before any git call: the repository and run log, and
+/// the release selection (item 99), so `main` checks `--since`'s grammar first.
+pub struct Prepared {
+    found: Option<(PathBuf, PathBuf)>,
+    selection: Selection,
+}
+
+impl Prepared {
+    pub fn read() -> Prepared {
+        let found = discover();
+        let selection = found.as_ref().map_or(Selection::Default, |(root, _)| Selection::read(root));
+        Prepared { found, selection }
+    }
+
+    /// `--since`'s grammar: the pattern when `release_tags` is valid, item
+    /// 76's `vX.Y.Z` with the default reading, none with an invalid `[report]`.
+    pub fn since_grammar(&self, tag: &str) -> bool {
+        match &self.selection {
+            Selection::Invalid(_) => true,
+            selection => selection.names(tag),
+        }
+    }
+}
+
+pub fn run(prepared: Prepared, as_json: bool, since: Option<&str>, github: bool) -> Result<()> {
+    let Prepared { found, selection } = prepared;
     let bytes = found.as_ref().and_then(|(_, log)| fs::read(log).ok()).unwrap_or_default();
     let (rows, gaps) = read(&bytes);
     let mut ids: Vec<String> = Vec::new();
@@ -29,9 +123,11 @@ pub fn run(as_json: bool, since: Option<&str>, github: bool) -> Result<()> {
     }
     let root = found.as_ref().map(|(root, _)| root.clone()).unwrap_or_default();
     let git = Git { root: root.clone() };
-    let evidence = match &found {
-        Some(_) => Evidence::read(&git, &ids),
-        None => Err("no git repository found".to_string()),
+    let evidence = match (&found, &selection) {
+        (None, _) => Err("no git repository found".to_string()),
+        // Item 99: an invalid `[report]` reads no git, as a git failure.
+        (Some(_), Selection::Invalid(problem)) => Err(format!("[report] in {CONFIG_FILE} is invalid: {problem}")),
+        (Some(_), selection) => Evidence::read(&git, &ids, selection),
     };
     if let (Some(tag), Ok(ev)) = (since, &evidence) {
         if !ev.releases.iter().any(|r| r.name == tag) {
@@ -41,7 +137,8 @@ pub fn run(as_json: bool, since: Option<&str>, github: bool) -> Result<()> {
     }
     let facts = evidence.as_ref().ok().map(|ev| Facts::of(ev, &rows, &ids));
     let mut report = Report::of(&rows, &ids, facts.as_ref());
-    let dora = dora(&rows, evidence.as_ref().map(|ev| (ev, facts.as_ref().expect("facts with evidence"))), since);
+    let evidence_facts = evidence.as_ref().map(|ev| (ev, facts.as_ref().expect("facts with evidence")));
+    let dora = dora(&rows, evidence_facts, since, selection.pattern());
     // Item 79: after item 76's reads, and before the day rows take the waiting.
     let summary = github.then(|| ask_github(&root, &rows, &mut report, evidence.as_ref().ok().map(|ev| (&git, ev))));
     let gaps: Vec<Value> =
@@ -252,7 +349,8 @@ fn utf8(args: &[&str], out: Vec<u8>) -> std::result::Result<String, String> {
     String::from_utf8(out).map_err(|_| unreadable(args))
 }
 
-/// A release: a `vX.Y.Z` tag whose commit is on the default branch.
+/// A release: a tag of the selection's grammar (item 76's `vX.Y.Z`, or item
+/// 99's pattern) whose commit is on the default branch.
 struct Release {
     name: String,
     time: i64,
@@ -274,7 +372,7 @@ struct Evidence {
     /// Item 79: the default branch's commit, for the ancestry check.
     tip_commit: String,
     tip: BTreeMap<String, String>,
-    /// Ordered by time, then by version.
+    /// Ordered by time, then by version (by tag name under a pattern).
     releases: Vec<Release>,
     /// Fix data from the first valid lock file among the tip, the latest
     /// release that holds it and HEAD; absent when none has one.
@@ -282,7 +380,7 @@ struct Evidence {
 }
 
 impl Evidence {
-    fn read(git: &Git, log_ids: &[String]) -> std::result::Result<Evidence, String> {
+    fn read(git: &Git, log_ids: &[String], selection: &Selection) -> std::result::Result<Evidence, String> {
         let probe = ["config", "--get-regexp", r"^(extensions\.partialclone|remote\..*\.promisor)$"];
         if let Some(out) = git.maybe(&probe)? {
             if partial(&utf8(&probe, out)?) {
@@ -307,7 +405,7 @@ impl Evidence {
         let names = utf8(&list, git.ok(&list)?)?;
         let mut releases = Vec::new();
         let mut commits = BTreeMap::new();
-        for name in names.lines().filter(|n| lock::valid_tag(n)) {
+        for name in names.lines().filter(|n| selection.names(n)) {
             let Some(commit) = git.commit(&format!("refs/tags/{name}"))? else { continue };
             let ancestry = ["merge-base", "--is-ancestor", commit.as_str(), tip_commit.as_str()];
             match git.call(&ancestry)? {
@@ -320,7 +418,14 @@ impl Evidence {
             commits.insert(name.to_string(), commit);
             releases.push(Release { name: name.to_string(), time, locks });
         }
-        releases.sort_by(|a, b| a.time.cmp(&b.time).then_with(|| version_cmp(&a.name, &b.name)));
+        // Item 99: the version tie-break only for item 76's tags; under a
+        // pattern, the tag name in byte order.
+        releases.sort_by(|a, b| {
+            a.time.cmp(&b.time).then_with(|| match selection {
+                Selection::Pattern(_) => a.name.as_bytes().cmp(b.name.as_bytes()),
+                _ => version_cmp(&a.name, &b.name),
+            })
+        });
         let tip = git.locks(&tip_commit)?;
         let head = match git.commit("HEAD")? {
             Some(commit) => Some((git.locks(&commit)?, commit)),
@@ -519,14 +624,19 @@ fn metric(value: Option<Value>, n: usize, missing: usize, why: impl FnOnce() -> 
     json!({"value": value, "n": n, "missing": missing, "reason": reason})
 }
 
-fn dora(rows: &[Row], evidence: std::result::Result<(&Evidence, &Facts), &String>, since: Option<&str>) -> Value {
+fn dora(
+    rows: &[Row],
+    evidence: std::result::Result<(&Evidence, &Facts), &String>,
+    since: Option<&str>,
+    release_tags: Option<&str>,
+) -> Value {
     const KEYS: [&str; 5] = ["deploys", "lead_time", "rework_rate", "time_to_recover", "change_failure_rate"];
     let (ev, facts) = match evidence {
         Ok(found) => found,
         Err(reason) => {
             let mut out = json!({
                 "kind": "dora",
-                "git": {"default_branch": null, "releases": null, "reason": reason},
+                "git": {"default_branch": null, "releases": null, "release_tags": release_tags, "reason": reason},
                 "since": since,
             });
             for key in KEYS {
@@ -633,7 +743,7 @@ fn dora(rows: &[Row], evidence: std::result::Result<(&Evidence, &Facts), &String
     };
     json!({
         "kind": "dora",
-        "git": {"default_branch": ev.branch, "releases": ev.releases.len(), "reason": null},
+        "git": {"default_branch": ev.branch, "releases": ev.releases.len(), "release_tags": release_tags, "reason": null},
         "since": since,
         "deploys": deploys, "lead_time": lead_time, "rework_rate": rework_rate,
         "time_to_recover": time_to_recover, "change_failure_rate": change_failure_rate,
@@ -1018,14 +1128,16 @@ fn dora_text(meta: &Value, dora: &Value) -> String {
     };
     let git = &dora["git"];
     let since = dora["since"].as_str().map(|s| format!(", since {s}")).unwrap_or_default();
+    // Item 99: the line ends with the release tags read, `vX.Y.Z` without the key.
+    let tags = git["release_tags"].as_str().unwrap_or("vX.Y.Z");
     out += &match git["default_branch"].as_str() {
         Some(branch) => format!(
-            "git: default branch {branch}; {} release(s){since}; lock rows without log times come from the branch tip.\n",
+            "git: default branch {branch}; {} release(s){since}; lock rows without log times come from the branch tip; release tags: {tags}\n",
             // The releases read: all of them, or those at or after `--since` (deploys' `n`).
             dora["deploys"]["n"]
         ),
         None => format!(
-            "git: no evidence ({}){since}; lock rows without log times come from the branch tip when git reads.\n",
+            "git: no evidence ({}){since}; lock rows without log times come from the branch tip when git reads; release tags: {tags}\n",
             git["reason"].as_str().unwrap_or_default()
         ),
     };
@@ -1096,6 +1208,54 @@ mod tests {
         }
         assert_eq!(percent(2.0 / 3.0), "67%");
         assert_eq!(percent(0.0), "0%");
+    }
+
+    #[test]
+    fn release_tag_patterns_match_whole_names() {
+        let m = |p: &str, n: &str| matches(p.as_bytes(), n.as_bytes());
+        assert!(m("deploy-*", "deploy-20261107-1730"));
+        assert!(m("deploy-*", "deploy-"));
+        assert!(!m("deploy-*", "deployed/prod"));
+        assert!(m("draken-platform-v*", "draken-platform-v0.1.0"));
+        assert!(!m("draken-platform-v*", "v1.0.0"));
+        assert!(m("v*", "v2.48.0") && m("v*", "v2"));
+        assert!(!m("v*", "xv2"));
+        assert!(m("rel/*", "rel/a/b"));
+        assert!(m("*-prod", "a/b-prod") && !m("*-prod", "a-prod-x"));
+        assert!(m("a*b*c", "aXbYbZc") && !m("a*b*c", "aXbYbZ"));
+        assert!(m("a**", "a") && m("exact", "exact") && !m("exact", "exact2"));
+    }
+
+    #[test]
+    fn selection_reads_only_the_report_table_and_never_refuses() {
+        let dir = std::env::temp_dir().join(format!("item99-sel-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let read = |content: Option<&[u8]>| {
+            let path = dir.join(CONFIG_FILE);
+            let _ = fs::remove_file(&path);
+            let _ = fs::remove_dir_all(&path);
+            if let Some(bytes) = content {
+                fs::write(&path, bytes).unwrap();
+            }
+            match Selection::read(&dir) {
+                Selection::Default => "default".to_string(),
+                Selection::Pattern(p) => format!("pattern {p}"),
+                Selection::Invalid(p) => format!("invalid {p}"),
+            }
+        };
+        assert_eq!(read(None), "default");
+        assert_eq!(read(Some(b"this is not toml")), "default");
+        assert_eq!(read(Some(b"x = \"\xff\"")), "default");
+        assert_eq!(read(Some(b"[[suite]]\nroot = \"a\"\n")), "default");
+        assert_eq!(read(Some(b"[report]\n")), "default");
+        assert_eq!(read(Some(b"shipcraft_min = \"99\"\n[report]\nrelease_tags = \"deploy-*\"")), "pattern deploy-*");
+        assert_eq!(read(Some(b"[report]\nrelease_tag = \"deploy-*\"")), "invalid unknown key release_tag");
+        assert_eq!(read(Some(b"report = \"v*\"")), "invalid [report] is not a table");
+        fs::remove_file(dir.join(CONFIG_FILE)).unwrap();
+        fs::create_dir_all(dir.join(CONFIG_FILE)).unwrap();
+        assert!(matches!(Selection::read(&dir), Selection::Default));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

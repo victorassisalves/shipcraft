@@ -837,6 +837,99 @@ Victor's decision (2026-10-31): a local DORA readout in the product, from the ru
    - A negative tag or commit time is accepted as a decimal integer.
    - `extensions.partialclone` set with no value is not a partial clone.
    - The cleared environment variables are a fixed list (today's `git rev-parse --local-env-vars` plus `GIT_CEILING_DIRECTORIES`), not read at run time.
+### `report` reads the project's release tags (item 99)
+
+Item 76's DORA readout counts only `vX.Y.Z` tags as releases. Adopters measured on 2026-11-09:
+- Hands-off deploys on its own runner and tags each deploy `deploy-<date>-<time>`.
+- draken-platform tags `draken-platform-v0.1.0`.
+- Draken does not tag at all.
+
+On all three, every DORA metric reads `n 0`. The project, not Shipcraft, knows what its release tag looks like. Victor's decision (2026-11-09): "Vamos fazer isso?", answering the proposal that `report` read each project's release tag pattern from `.shipcraft.toml`.
+
+1. **The key.** `[report] release_tags = "<pattern>"` in `.shipcraft.toml`.
+   - **Default:** with the key absent, the `[report]` table absent, or no `.shipcraft.toml` at the root, releases are item 76's `v<X>.<Y>.<Z>` tags, unchanged.
+   - **Pattern grammar:**
+     - a non-empty string of printable ASCII (bytes 0x21 to 0x7E);
+     - with no `?`, `[`, `]` or `\`;
+     - holding at least one byte other than `*`.
+   - **Matching:** `*` matches any run of bytes, empty included, `/` included. Every other byte matches itself. The whole tag name, as `git for-each-ref refs/tags --format='%(refname:strip=2)'` prints it, must match. Examples:
+     - `deploy-*` matches `deploy-20261107-1730`, not `deployed/prod`;
+     - `draken-platform-v*` matches `draken-platform-v0.1.0`;
+     - `v*` matches `v2.48.0` and `v2`.
+   - **Validation:** any other value, or a value that is not a string, is refused `config-invalid` wherever the config is read and validated today: hook, `ci`, `red`, `pr`, `merge`, `status`. The refusal names the key and what is wrong. Other keys in `[report]` are refused the same way, so a typo is not ignored.
+2. **What `report` does with it.**
+   - **Reading the config.** `report` reads only the `[report]` table of `<root>/.shipcraft.toml`, where `<root>` is item 76's folder, from the working tree. It never refuses on the config:
+     - The default reading (item 76's `vX.Y.Z`, exactly as today) applies when any of these holds:
+       - the path is absent;
+       - it is not a regular file or cannot be read;
+       - it is not UTF-8;
+       - it does not parse as TOML;
+       - it has no `[report]` table;
+       - it has a `[report]` table with no keys at all.
+
+       Nothing here is reported, so `v1-76.invalid-config` keeps its successful git evidence. The hook and the other commands refuse such a file anyway.
+     - A file that parses and has a `[report]` that is not a table, holds a key other than `release_tags`, or holds an invalid `release_tags` makes every git-derived value `null`, with the reason `[report] in .shipcraft.toml is invalid: <problem>`. The run-log part prints as usual and the exit is 0, as with item 76's git failures. `<problem>` is exactly one of these, the first that applies in this order:
+       - `[report] is not a table`;
+       - `unknown key <key>`, naming the first unknown key in byte order;
+       - `release_tags is not a string`;
+       - `release_tags is empty`;
+       - `release_tags has a byte outside 0x21-0x7E`;
+       - `release_tags has ?, [, ] or \`;
+       - `release_tags is only *`.
+     - Every other key of the file (suites, `shipcraft_min`, `[execution]`) is not read by this reader.
+   - **Release tags.** With the key set, a release is a tag whose name matches the pattern, whose `^{commit}` is a commit, and whose commit is on the default branch: item 76's reads, unchanged except the name filter. A matching tag on a blob or tree is skipped, as today. The time is item 76's (tagger date, else committer date).
+   - **Tag names stay exact.** Git refuses `*`, `?` and `[` in ref names (`git check-ref-format`), and a tag `a` and a tag `a/b` cannot coexist. So item 76's per-tag reads (`rev-parse`, and `for-each-ref refs/tags/<name>` for the tagger date) select exactly one tag, under any pattern.
+   - **Order.** Releases are ordered by time, ties by tag name in byte order. Item 76's version tie-break applies only without the key.
+   - **`--since <tag>`.**
+     - With a valid `release_tags`: before any git read, the grammar check is the pattern. A name that does not match is the usage refusal, exit 2. A name that matches but is not a release is item 76's `not a release tag` refusal, exit 2.
+     - With the default reading, whatever caused it (an absent, unreadable or unparseable file included): item 76's `v<X>.<Y>.<Z>` check and git evidence, unchanged.
+     - With an invalid `[report]`: `--since` is not checked against any grammar. The report prints with `since` kept and every DORA metric `null` with point 2's reason, exit 0, as item 76 does when git evidence is unavailable.
+   - **`fixes_release` is unchanged:** item 75's lock field and `red --fixes-release` still take only `v<X>.<Y>.<Z>`. Item 76's `change_failure_rate` code is kept as it is:
+     - a shipped `fix` lock counts in `missing` when its `fixes_release` is `null` or names no release of the repository, all releases under the active selection and not only the releases read;
+     - the numerator counts the releases read that are named.
+
+     So `v1-76.since`, `since-order` and `failure-scoped` are unchanged. Example: with `release_tags = "v*"`, a fix naming the release `v1.0.0` is a measured failure. With `deploy-*`, a fix's `vX.Y.Z` names no release and counts as missing.
+3. **What the report says.**
+   - The `git` object gains `"release_tags"`. Keys serialize in byte order as today, so the object reads `default_branch`, `reason`, `release_tags`, `releases`. Its value is the pattern string when `release_tags` is valid, else `null`: the default reading and an invalid `[report]` both give `null`, and in the latter case `reason` says why. The field is present on every `dora` line, also when git made the rest `null`.
+   - The text block's second coverage line ends with `; release tags: <pattern>` when `release_tags` is valid, or `; release tags: vX.Y.Z` otherwise (the default reading, or an invalid `[report]`, whose reason the same line already shows), replacing its final period.
+4. **Current behavior** on the paths this item touches (rule 14):
+   - Every item 76 rule without the key: keep. Release reads, order, `--since`, every metric, coverage lines, partial and shallow clones, the environment scrubbing, exit codes.
+   - `report` without `--github` reads no `.shipcraft.toml` today: change, as point 2 says, reading only `[report]`. It still writes nothing, appends no run-log row, and runs no test, agent or network call: keep.
+   - `report --github` (item 79, `relatorio_gh.rs`) already reads and validates the whole working-tree config for its GitHub enrichment, and gives selected locks `config unreadable` when that fails: keep. Since an unparseable file leaves item 76's evidence as it is (point 2), `v1-79.unobserved-config` keeps its selection and reason. With an invalid `[report]`, that whole-config validation now fails too (point 1), so the locks `--github` selects get its existing `config unreadable`. DORA is `null` in that case anyway, so only `merged` locks are selected.
+   - The config reader ignores unknown tables, so `[report]` is silently accepted today: change. `[report]` is validated (point 1). Any other unknown table or key: keep as today.
+   - An older binary reading a config with `[report]` ignores it, so no `shipcraft_min` raise is needed: keep.
+   - The standing effects the spec-review brief lists: keep.
+5. **Touches.**
+   - **Must keep passing unchanged:**
+     - every `v1-76.*` case, `v1-76.invalid-config` included (point 2's default reading);
+     - every `v1-79.*` case, `v1-79.unobserved-config` included;
+     - every `v1-38.*` case;
+     - `v1-75.*`;
+     - the config refusal cases of items 31 and 45, and E1's legacy-key cases;
+     - item 10's run-log check.
+   - **Assertions that change, and nothing else in them:** item 83's byte snapshots `v1-83.json-local`, `json-release`, `json-github`, `json-metrics` and `json-fraction`, and their fixed points in `acceptance/pontos/83.md`. Each gains `"release_tags":null` in the `git` object, between `reason` and `releases`. The RED lists every other case that compares the whole `git` object byte for byte.
+   - **The version:** 2.49.0 in §11, `v1-87.version` and the version cases item 69 lists.
+   - **New cases**, at most 40, in item 76's fixture style (real repositories, annotated and lightweight tags, battery-written run logs):
+     - `deploy-*` releases giving `deploys`, `lead_time` and `rework_rate` with `missing` 0;
+     - a prefixed line (`draken-platform-v*`) beside plain `v1.0.0` tags, which the pattern excludes;
+     - a matching tag off the default branch, and one on a blob, both skipped;
+     - two matching tags in the same second, ordered by name;
+     - a pattern that matches a `/` name;
+     - `--since` matching and a release, matching but not a release (exit 2), and not matching (usage, exit 2);
+     - each invalid value refused `config-invalid` by the hook: empty, only `*`, `?`, `[`, `\`, a space, a non-string, and an unknown `[report]` key;
+     - `report` with each invalid `[report]`: DORA `null` with point 2's exact reason, exit 0;
+     - `report` with a config that is not TOML: item 76's default reading, exit 0;
+     - `[report]` with only the typo `release_tag = "deploy-*"`: `unknown key release_tag`, not the default reading;
+     - `release_tags` in the JSON `git` object and in the coverage line, with and without the key;
+     - under `deploy-*`, a shipped `fix` lock counted in `change_failure_rate.missing`; under `v*`, a fix naming a release counted as a failure.
+6. **Measure and revert.**
+   - **Metric:** on Hands-off, `report` with `release_tags = "deploy-*"` gives `deploys` and `lead_time` with `missing` 0 once a deploy tag ships a lock. On draken-platform, `release_tags = "draken-platform-v*"` counts its 1 release. Read on the first release that carries this item, in each repo that sets the key.
+   - **Revert:** a release where `report` ignores `[report]` again and the config reader stops validating it. A project that set the key then gets item 76's `vX.Y.Z` reading back, with no refusal.
+7. **Known limits.**
+   - One pattern per project. A monorepo with one release line per package reads them all as one line.
+   - `fixes_release` still takes only `vX.Y.Z`. Under a pattern that `vX.Y.Z` names cannot match (`deploy-*`), `change_failure_rate` is `null` while a shipped `fix` lock exists. Lifting that changes the lock grammar and is a separate item.
+   - A tag's time is when it was tagged, as in item 76. A project whose tag is written after the deploy finishes gets the deploy time.
+
 ### Fix data in the lock (item 75)
 
 DORA's change failure rate and time to recover need two facts per item: whether it fixes behavior a release already shipped, when the defect was first reported, and which release shipped it. Our private `metrics/item-times.tsv` holds them as hand-typed `kind` and `reported_at` columns, which an adopter does not have and which are often approximate. Victor's decision (2026-10-31): record them where the cycle starts, in the lock, for every RED, so no data is lost from here on. Item 76's `report` reads them. The release that introduced a defect is given by the RED, from the spec's wrong-verdict note (`--fixes-release`). Finding it by running the tests against earlier tags is a separate, parked item (77): its spec review (2026-10-31) showed it needs decisions this item does not take, such as which locked files are tests, how a tag's dependencies are prepared, and which release series counts.
@@ -1722,6 +1815,7 @@ Item 89's `status` says to run `shipcraft init` when the `AGENTS.md` block is ol
 | `[review] timeout` | Review time limit, in seconds. | `1200` |
 | `[review] retry_wait` | Seconds between review attempts after a `Please retry` failure (item 87); `0` turns the retry off. | `120` |
 | `[review] after` | When `shipcraft pr` starts the review with `ci = "github"`: `ci` (after GitHub CI passed) or `push` (at once, beside GitHub CI; item 96). | `ci` |
+| `[report] release_tags` | The tags `report` reads as releases: a pattern where `*` matches any run of characters (item 99). | `v<X>.<Y>.<Z>` tags |
 | `[machine] slots` | Concurrent local CI and review runs on this machine. | `1` |
 | `[pr] warn_lines` | Product lines above which the PR summary suggests a split. | `500` |
 | `[pr] shape_lines` | Fixes the file-size threshold of the shape warning (an integer above 0). | p90 of the project |
@@ -2172,4 +2266,4 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.48.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.49.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.

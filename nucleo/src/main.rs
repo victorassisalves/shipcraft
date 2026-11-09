@@ -208,6 +208,8 @@ fn run(args: &[&str]) -> Result<()> {
         // Item 38: reads the run log; item 76: and git, read-only; item 79: and
         // GitHub through `gh` with `--github` only. Syntax first (exit 2, before
         // any git or `gh` call): `--json`, `--since <tag>` and `--github` once each.
+        // Item 99: `--since`'s grammar is the release selection's, read from
+        // `[report]` without git.
         ["report", rest @ ..] => {
             let (mut as_json, mut since, mut github) = (false, None, false);
             let mut rest = rest.iter();
@@ -215,13 +217,15 @@ fn run(args: &[&str]) -> Result<()> {
                 match *arg {
                     "--json" if !as_json => as_json = true,
                     "--github" if !github => github = true,
-                    "--since" if since.is_none() => {
-                        since = Some(*rest.next().filter(|v| lock::valid_tag(v)).ok_or_else(|| invalid(args))?)
-                    }
+                    "--since" if since.is_none() => since = Some(*rest.next().ok_or_else(|| invalid(args))?),
                     _ => return Err(invalid(args)),
                 }
             }
-            relatorio::run(as_json, since, github)
+            let prepared = relatorio::Prepared::read();
+            if since.is_some_and(|tag| !prepared.since_grammar(tag)) {
+                return Err(invalid(args));
+            }
+            relatorio::run(prepared, as_json, since, github)
         }
         // Item 23: records no row, as `init`.
         // Item 21.1: any folder, no repository nor .shipcraft.toml needed.
