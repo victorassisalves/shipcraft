@@ -1737,6 +1737,7 @@ Found on Hands-off on 2026-11-09 (POC-044, finding 4). The project keeps its hoo
 
    Every other case keeps today's route and text: unset, `.git/hooks`, husky, pre-commit or lefthook.
 2. **What `status` prints then.** It reads the two hook files git runs, `git rev-parse --git-path hooks/commit-msg` and `hooks/post-commit` (`Repo::hook_path`, which honours `core.hooksPath` and worktrees), following symlinks.
+   - **Reading a hook.** The file is read as bytes and split on `\n`. A trailing `\r` is stripped from each line. Bytes that are not UTF-8 are compared as bytes, so a Latin-1 comment does not hide a call line. A file that exists but cannot be read (permission, I/O) counts as `missing or not executable`.
    - A hook **calls shipcraft** when it is a readable, executable regular file holding a *call line*. A call line, after leading spaces and tabs and an optional `exec` followed by spaces or tabs, starts with a command word and is followed by spaces or tabs and the arguments:
      - `check --commit-msg` in `commit-msg`;
      - `close` in `post-commit`.
@@ -1755,7 +1756,7 @@ Found on Hands-off on 2026-11-09 (POC-044, finding 4). The project keeps its hoo
      - `<dir>/post-commit does not call shipcraft close`.
 
      For each hook, only one of its two problems is listed: the first that applies.
-   - A git call that fails while checking: today's `missing hook ... run shipcraft init` line is replaced by `shipcraft: missing hook: could not read the hooks under core.hooksPath <dir>`. `status` still exits as today.
+   - **Git failures.** If `git config core.hooksPath` fails (an exit other than 0 or 1), point 1 does not apply and today's route and line stay. Once point 1 applies, a failing `git rev-parse --git-path` for either hook prints `shipcraft: missing hook: could not read the hooks under core.hooksPath <dir>` instead of the problems list. `status` still exits as today.
 3. **Current behavior** (rule 14):
    - The `status` hook line with `core.hooksPath` outside `.git/hooks` and no husky, pre-commit or lefthook: change, as points 1 and 2 say.
    - Every other `status` line, its order, exit codes, and the husky, lefthook, pre-commit and own-hook routes: keep.
@@ -1767,7 +1768,8 @@ Found on Hands-off on 2026-11-09 (POC-044, finding 4). The project keeps its hoo
      - item 25's husky and pre-commit status cases;
      - item 20.3's lefthook status cases;
      - item 58's status cases;
-     - item 89's AGENTS.md status line.
+     - item 89's AGENTS.md status line;
+     - item 70's status cases `v1-70.status-config`, `status-folder`, `status-format` and `status-malformed`: exit codes, line order, unchanged files, no project command run and no run-log write.
 
      The RED searches `acceptance/` for `status` cases whose fixture sets `core.hooksPath` to another directory and lists any whose hook line changes.
    - **The version:** 2.51.0 in §11, and `v1-87.version` with the version cases item 69 lists.
