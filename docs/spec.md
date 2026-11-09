@@ -864,10 +864,11 @@ On all three, every DORA metric reads `n 0`. The project, not Shipcraft, knows w
        - it is not a regular file or cannot be read;
        - it is not UTF-8;
        - it does not parse as TOML;
-       - it has no `[report]` table, or the table has no `release_tags`.
+       - it has no `[report]` table;
+       - it has a `[report]` table with no keys at all.
 
        Nothing here is reported, so `v1-76.invalid-config` keeps its successful git evidence. The hook and the other commands refuse such a file anyway.
-     - A file that parses but whose `[report]` is invalid makes every git-derived value `null`, with the reason `[report] in .shipcraft.toml is invalid: <problem>`. The run-log part prints as usual and the exit is 0, as with item 76's git failures. `<problem>` is exactly one of these, the first that applies in this order:
+     - A file that parses and has a `[report]` that is not a table, holds a key other than `release_tags`, or holds an invalid `release_tags` makes every git-derived value `null`, with the reason `[report] in .shipcraft.toml is invalid: <problem>`. The run-log part prints as usual and the exit is 0, as with item 76's git failures. `<problem>` is exactly one of these, the first that applies in this order:
        - `[report] is not a table`;
        - `unknown key <key>`, naming the first unknown key in byte order;
        - `release_tags is not a string`;
@@ -877,12 +878,19 @@ On all three, every DORA metric reads `n 0`. The project, not Shipcraft, knows w
        - `release_tags is only *`.
      - Every other key of the file (suites, `shipcraft_min`, `[execution]`) is not read by this reader.
    - **Release tags.** With the key set, a release is a tag whose name matches the pattern, whose `^{commit}` is a commit, and whose commit is on the default branch: item 76's reads, unchanged except the name filter. A matching tag on a blob or tree is skipped, as today. The time is item 76's (tagger date, else committer date).
-   - **Exact-name reads, in both modes.** A git tag name can hold `?`, `[` or `*`, which `git for-each-ref refs/tags/<name>` reads as a pattern. The tagger-date read must take the line for exactly `refs/tags/<name>` and nothing else, for example by listing with `%(refname)` and keeping the exact match. Two matching tags `deploy-a?` and `deploy-ab` each get their own time. Item 76's `rev-parse --verify -q refs/tags/<name>^{commit}` is already exact.
+   - **Tag names stay exact.** Git refuses `*`, `?` and `[` in ref names (`git check-ref-format`), and a tag `a` and a tag `a/b` cannot coexist. So item 76's per-tag reads (`rev-parse`, and `for-each-ref refs/tags/<name>` for the tagger date) select exactly one tag, under any pattern.
    - **Order.** Releases are ordered by time, ties by tag name in byte order. Item 76's version tie-break applies only without the key.
-   - **`--since <tag>`.** Before any git read, the grammar check is the pattern when the key is set. A name that does not match is the usage refusal, exit 2. A name that matches but is not a release is item 76's `not a release tag` refusal, exit 2. Without the key: item 76's `v<X>.<Y>.<Z>` check, unchanged. When the config cannot be read, `--since` is checked against nothing: the report prints with every DORA metric `null` and the `config-invalid` reason, exit 0.
-   - **`fixes_release` is unchanged:** item 75's lock field and `red --fixes-release` still take only `v<X>.<Y>.<Z>`. Item 76's `change_failure_rate` rule is kept as written: a shipped `fix` lock counts in `missing` when its `fixes_release` is `null` or names no release in the active selection. Example: with `release_tags = "v*"`, a fix naming `v1.0.0` that is a release is a measured failure. With `deploy-*`, a fix's `vX.Y.Z` names no release and counts as missing.
+   - **`--since <tag>`.**
+     - With a valid `release_tags`: before any git read, the grammar check is the pattern. A name that does not match is the usage refusal, exit 2. A name that matches but is not a release is item 76's `not a release tag` refusal, exit 2.
+     - With the default reading, whatever caused it (an absent, unreadable or unparseable file included): item 76's `v<X>.<Y>.<Z>` check and git evidence, unchanged.
+     - With an invalid `[report]`: `--since` is not checked against any grammar. The report prints with `since` kept and every DORA metric `null` with point 2's reason, exit 0, as item 76 does when git evidence is unavailable.
+   - **`fixes_release` is unchanged:** item 75's lock field and `red --fixes-release` still take only `v<X>.<Y>.<Z>`. Item 76's `change_failure_rate` code is kept as it is:
+     - a shipped `fix` lock counts in `missing` when its `fixes_release` is `null` or names no release of the repository, all releases under the active selection and not only the releases read;
+     - the numerator counts the releases read that are named.
+
+     So `v1-76.since`, `since-order` and `failure-scoped` are unchanged. Example: with `release_tags = "v*"`, a fix naming the release `v1.0.0` is a measured failure. With `deploy-*`, a fix's `vX.Y.Z` names no release and counts as missing.
 3. **What the report says.**
-   - The `git` object gains `"release_tags"`: the pattern string, or `null` without the key. The field is present on every `dora` line, also when git or the config made the rest `null`. When the config could not be read, it is `null` and the `reason` says why.
+   - The `git` object gains `"release_tags"`, placed after `"releases"` and before `"reason"`. Its value is the pattern string when `release_tags` is valid, else `null`: the default reading and an invalid `[report]` both give `null`, and in the latter case `reason` says why. The field is present on every `dora` line, also when git made the rest `null`.
    - The text block's second coverage line ends with `release tags: <pattern>` when the key is set, or `release tags: vX.Y.Z` without it.
 4. **Current behavior** on the paths this item touches (rule 14):
    - Every item 76 rule without the key: keep. Release reads, order, `--since`, every metric, coverage lines, partial and shallow clones, the environment scrubbing, exit codes.
@@ -899,6 +907,7 @@ On all three, every DORA metric reads `n 0`. The project, not Shipcraft, knows w
      - `v1-75.*`;
      - the config refusal cases of items 31 and 45, and E1's legacy-key cases;
      - item 10's run-log check.
+   - **Assertions that change, and nothing else in them:** item 83's byte snapshots `v1-83.json-local`, `json-release`, `json-github`, `json-metrics` and `json-fraction`, and their fixed points in `acceptance/pontos/83.md`. Each gains `"release_tags":null` in the `git` object, between `releases` and `reason`. The RED lists every other case that compares the whole `git` object byte for byte.
    - **The version:** 2.49.0 in §11, `v1-87.version` and the version cases item 69 lists.
    - **New cases**, at most 40, in item 76's fixture style (real repositories, annotated and lightweight tags, battery-written run logs):
      - `deploy-*` releases giving `deploys`, `lead_time` and `rework_rate` with `missing` 0;
@@ -910,7 +919,7 @@ On all three, every DORA metric reads `n 0`. The project, not Shipcraft, knows w
      - each invalid value refused `config-invalid` by the hook: empty, only `*`, `?`, `[`, `\`, a space, a non-string, and an unknown `[report]` key;
      - `report` with each invalid `[report]`: DORA `null` with point 2's exact reason, exit 0;
      - `report` with a config that is not TOML: item 76's default reading, exit 0;
-     - two matching tags `deploy-a?` and `deploy-ab` with different tagger dates, each with its own time;
+     - `[report]` with only the typo `release_tag = "deploy-*"`: `unknown key release_tag`, not the default reading;
      - `release_tags` in the JSON `git` object and in the coverage line, with and without the key;
      - under `deploy-*`, a shipped `fix` lock counted in `change_failure_rate.missing`; under `v*`, a fix naming a release counted as a failure.
 6. **Measure and revert.**
