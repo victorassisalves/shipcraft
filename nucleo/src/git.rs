@@ -285,8 +285,9 @@ impl Repo {
 
     /// Where git looks for a hook (honours core.hooksPath and worktrees).
     pub fn hook_path(&self, name: &str) -> Result<PathBuf> {
+        // Only the line end is git's: a core.hooksPath may start or end with spaces (item 101).
         let out = self.run(&["rev-parse", "--git-path", &format!("hooks/{name}")])?;
-        Ok(self.root.join(text(&out).trim()))
+        Ok(self.root.join(text(out.strip_suffix(b"\n").unwrap_or(&out))))
     }
 }
 
