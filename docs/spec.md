@@ -846,17 +846,17 @@ Found on Hands-off on 2026-11-09 (POC-044, item 1). The session ran `red` and co
    - A remote named `origin` exists: `git remote get-url origin` succeeds. Without it `pr` cannot run.
    - The config `red` already loaded has an effective `[execution] ci` or `[execution] review` other than `off`. Defaults count: a config with no `[execution]` table has both `local`. `red`'s existing config validation and refusals are unchanged.
 
-   The line is the **last line** of `red`'s stdout, after the `next:` line, so item 98's controls line stays right before `RED locked at`:
+   The line goes **right before the `next:` line**, which stays `red`'s last line (item 64). Item 98's controls line stays right before `RED locked at`:
    `shipcraft: warning: this lock is on <branch>, the default branch; shipcraft pr refuses to open a PR from it. Move the RED to its own branch before the GREEN (git switch -c item/<name>).`
    - It is a warning only: exit code, lock, run-log row and every other line are unchanged.
-   - The same applies to `red --redo` when it rewrites the lock: the line is again the last line. An unchanged redo prints nothing new.
+   - The same applies to `red --redo` when it rewrites the lock: the line again goes right before `next:`. An unchanged redo prints nothing new.
    - With both layers `off`, nothing is printed: such a project commits on its default branch and never runs `pr`.
    - On a detached HEAD (`symbolic-ref` exits non-zero), or with no `origin` remote (`get-url` exits non-zero), nothing is printed. The check never fails `red` and never changes its exit code.
 2. **`pr`'s detached-HEAD text in English.** `pr-not-on-branch` on a detached HEAD says `shipcraft pr needs a working branch, and HEAD is at nenhum branch`, a leftover from before the English rewrite (2026-10-26). That first line becomes exactly `shipcraft pr needs a working branch, and HEAD is detached (no branch)`. The text on a named branch, the `Why:` and `Next:` lines, the code `pr-not-on-branch` and the exit status are unchanged.
 3. **Current behavior** (rule 14):
    - `red` prints nothing about the branch: change, as point 1 says.
    - Everything else `red` and `red --redo` do: keep. That covers:
-     - the lock file, written atomically, including the lock directory's creation and the redo's replacement;
+     - the lock file as written today: `red` writes the lock path directly and creates the lock directory, and `red --redo` replaces it through a temporary file and a rename;
      - the run-log row, the run-log directory's creation, and the logging-failure behavior;
      - `[build]`, run before the suites, with its output;
      - the temporary selection and JUnit files and their cleanup, under the inherited `TMPDIR`;
@@ -865,10 +865,10 @@ Found on Hands-off on 2026-11-09 (POC-044, item 1). The session ran `red` and co
    - `pr`: its fetch, its run-log rows, its refusal on a named default branch, and everything after the branch check: keep. Only point 2's detached-HEAD text changes.
    - Hooks (`check`, `close`, post-commit) are untouched.
 4. **Touches.**
-   - **Must keep passing unchanged:** the cases of items 53, 55, 60 and 98 that check `red`'s lines, item 98's `notice()` adjacency included, since the warning is the last line. Most fixtures run `red` with no `origin`, so they print no warning. A fixture with an `origin` and HEAD on its default branch now gets the line at the end. The RED searches `acceptance/` for cases that assert `red`'s whole stdout, its line count, or that `next:` is the last line, and lists each one it adjusts.
+   - **Must keep passing unchanged:** the cases of items 53, 55, 60 and 98 that check `red`'s lines, item 98's `notice()` adjacency included, and item 64's last-line cases `v1-64.red-unset`, `red-set`, `redo-unset`, `redo-set` and `red-log-fails` (`next:` stays last). Most fixtures run `red` with no `origin`, so they print no warning. A fixture with an `origin` and HEAD on its default branch now gets the line at the end. The RED searches `acceptance/` for cases that assert `red`'s whole stdout, its line count, or the line right before `next:`, and lists each one it adjusts.
    - `pr-not-on-branch` has no acceptance case today, so point 2 adds one.
    - **The version:** 2.50.0 in §11, and `v1-87.version` with the version cases item 69 lists.
-   - **New cases**, about 10: each condition of point 1 alone (default branch with origin and ci local; review local with ci off; both off; a non-default branch; detached HEAD; no origin; `origin/HEAD` naming a branch other than `main`), redo rewrite and unchanged redo, the line last (after `next:`), item 98's controls line still right before `RED locked at`, exit code and lock unchanged, and point 2's detached-HEAD text.
+   - **New cases**, about 10: each condition of point 1 alone (default branch with origin and ci local; review local with ci off; both off; a non-default branch; detached HEAD; no origin; `origin/HEAD` naming a branch other than `main`), redo rewrite and unchanged redo, the line right before `next:` with `next:` still last, item 98's controls line still right before `RED locked at`, exit code and lock unchanged, and point 2's detached-HEAD text.
 5. **Measure and revert.** Metric: 0 `pr-not-on-branch` refusals after a `red` that passed, on adopters' run logs (Hands-off, Draken, draken-platform), over the next 20 locks. Revert: drop the line.
 
 ### `report` reads the project's release tags (item 99)
