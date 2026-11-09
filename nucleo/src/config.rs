@@ -355,6 +355,8 @@ impl Config {
         check_retry_wait(text)?;
         config.revisao.after_raw = None;
         config.revisao.after_push = check_review_after(text)?;
+        // Item 99: after every check that refused before it.
+        check_report(text)?;
         Ok(config)
     }
 
@@ -682,6 +684,50 @@ pub fn check_review_after(text: &str) -> Result<bool> {
         "older binaries ignore this key, so they would schedule the review differently",
         format!("set shipcraft_min = \"2.46\" (or above) in {CONFIG_FILE} and run again"),
     )
+}
+
+/// Item 99: `[report] release_tags`, the pattern `report` reads releases by.
+/// `Ok(None)` when there is no `[report]` table or it has no keys; `Err` names
+/// the first problem, in the spec's order.
+pub fn report_release_tags(table: &toml::Table) -> std::result::Result<Option<String>, String> {
+    let Some(report) = table.get("report") else { return Ok(None) };
+    let Some(report) = report.as_table() else { return Err("[report] is not a table".to_string()) };
+    let mut keys: Vec<&String> = report.keys().collect();
+    keys.sort();
+    if let Some(key) = keys.into_iter().find(|k| k.as_str() != "release_tags") {
+        return Err(format!("unknown key {key}"));
+    }
+    let Some(value) = report.get("release_tags") else { return Ok(None) };
+    let Some(pattern) = value.as_str() else { return Err("release_tags is not a string".to_string()) };
+    if pattern.is_empty() {
+        return Err("release_tags is empty".to_string());
+    }
+    if pattern.bytes().any(|b| !(0x21..=0x7e).contains(&b)) {
+        return Err("release_tags has a byte outside 0x21-0x7E".to_string());
+    }
+    if pattern.bytes().any(|b| matches!(b, b'?' | b'[' | b']' | b'\\')) {
+        return Err("release_tags has ?, [, ] or \\".to_string());
+    }
+    if pattern.bytes().all(|b| b == b'*') {
+        return Err("release_tags is only *".to_string());
+    }
+    Ok(Some(pattern.to_string()))
+}
+
+/// Item 99: an invalid `[report]` refuses wherever the config is validated,
+/// naming the key and what is wrong. An older binary ignores the table, so no
+/// `shipcraft_min` is needed.
+fn check_report(text: &str) -> Result<()> {
+    let Ok(table) = text.parse::<toml::Table>() else { return Ok(()) };
+    match report_release_tags(&table) {
+        Ok(_) => Ok(()),
+        Err(problem) => refuse(
+            "config-invalid",
+            format!("[report] in {CONFIG_FILE} is invalid: {problem}"),
+            "report reads its releases by this pattern, and shipcraft does not guess one it cannot read",
+            format!("set release_tags = \"<pattern>\" (printable ASCII, `*` the only wildcard, not only `*`) as the only key of [report] in {CONFIG_FILE}, or remove [report], and run again"),
+        ),
+    }
 }
 
 /// Item 64: the agents a role names.
@@ -1044,6 +1090,40 @@ globs = ["tests/**"]
         ] {
             let refused = Config::parse(bad);
             assert!(matches!(refused, Err(crate::refusal::Stop::Refused(r)) if r.code == "config-invalid"), "{bad}");
+        }
+    }
+
+    #[test]
+    fn report_release_tags_is_validated_in_order() {
+        assert!(Config::parse("[report]\nrelease_tags = \"deploy-*\"").is_ok());
+        assert!(Config::parse("[report]").is_ok());
+        assert!(Config::parse("[other]\nx = 1").is_ok());
+        let problem = |text: &str| super::report_release_tags(&text.parse::<toml::Table>().unwrap());
+        assert_eq!(problem("[report]\nrelease_tags = \"v*\""), Ok(Some("v*".to_string())));
+        assert_eq!(problem("[report]"), Ok(None));
+        assert_eq!(problem(""), Ok(None));
+        for (text, want) in [
+            ("report = 1", "[report] is not a table"),
+            ("[[report]]\nrelease_tags = \"v*\"", "[report] is not a table"),
+            ("[report]\nrelease_tag = \"deploy-*\"", "unknown key release_tag"),
+            ("[report]\nzz = 1\nb = 2\nrelease_tags = 3", "unknown key b"),
+            ("[report]\nrelease_tags = 3", "release_tags is not a string"),
+            ("[report]\nrelease_tags = \"\"", "release_tags is empty"),
+            ("[report]\nrelease_tags = \"a b?\"", "release_tags has a byte outside 0x21-0x7E"),
+            ("[report]\nrelease_tags = \"d\u{e9}*\"", "release_tags has a byte outside 0x21-0x7E"),
+            ("[report]\nrelease_tags = \"v?\"", "release_tags has ?, [, ] or \\"),
+            ("[report]\nrelease_tags = \"v[0]\"", "release_tags has ?, [, ] or \\"),
+            ("[report]\nrelease_tags = 'v\\*'", "release_tags has ?, [, ] or \\"),
+            ("[report]\nrelease_tags = \"**\"", "release_tags is only *"),
+        ] {
+            assert_eq!(problem(text), Err(want.to_string()), "{text}");
+            match Config::parse(text) {
+                Err(crate::refusal::Stop::Refused(r)) => {
+                    assert_eq!(r.code, "config-invalid", "{text}");
+                    assert!(r.what().contains(want), "{}", r.what());
+                }
+                _ => panic!("accepted: {text}"),
+            }
         }
     }
 
