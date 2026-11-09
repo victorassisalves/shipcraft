@@ -837,6 +837,28 @@ Victor's decision (2026-10-31): a local DORA readout in the product, from the ru
    - A negative tag or commit time is accepted as a decimal integer.
    - `extensions.partialclone` set with no value is not a partial clone.
    - The cleared environment variables are a fixed list (today's `git rev-parse --local-env-vars` plus `GIT_CEILING_DIRECTORIES`), not read at run time.
+### `red` warns when it locks on the default branch (item 100)
+
+Found on Hands-off on 2026-11-09 (POC-044, item 1). The session ran `red` and committed the RED on `main`, then the GREEN. At the end, `shipcraft pr` refused `pr-not-on-branch`. The work was finished but stuck, and moving it to a branch took a coordinator. `red` is the item's first step and already knows the branch, so the warning belongs there. Victor's decision (2026-11-09): "Ok", to applying this directly.
+
+1. **The warning.** After `red` writes a lock (not on a refusal), when HEAD is the default branch (`git symbolic-ref -q --short HEAD` equals the branch `pr` refuses on: the target of `refs/remotes/origin/HEAD` without `origin/`, else `main`), a remote named `origin` exists (`git remote get-url origin` succeeds; without it `pr` cannot run), and the working tree's config has `[execution] ci` or `[execution] review` other than `off`, `red` prints one line on stdout. It goes right before `RED locked at`, after item 98's controls line:
+   `shipcraft: warning: this lock is on <branch>, the default branch; shipcraft pr refuses to open a PR from it. Move the RED to its own branch before the GREEN (git switch -c item/<name>).`
+   - It is a warning only: exit code, lock, run-log row and every other line are unchanged.
+   - The same applies to `red --redo` when it rewrites the lock: the line goes before `RED redone at`. An unchanged redo prints nothing new.
+   - With both layers `off`, nothing is printed: such a project commits on its default branch and never runs `pr`.
+   - On a detached HEAD, or with no `origin` remote, nothing is printed. A failing git call while checking prints nothing and changes nothing.
+2. **`pr`'s detached-HEAD text in English.** `pr-not-on-branch` on a detached HEAD says `HEAD is at nenhum branch`, a leftover from before the English rewrite (2026-10-26). It becomes `HEAD is detached (no branch)`. The code and the other two lines are unchanged.
+3. **Current behavior** (rule 14):
+   - `red` prints nothing about the branch: change, as point 1 says.
+   - `pr`'s refusal on the default branch: keep, unchanged.
+   - Everything else `red` writes, prints or records: keep.
+4. **Touches.**
+   - **Must keep passing unchanged:** the cases of items 53, 55, 60 and 98 that check `red`'s lines. Most fixtures run `red` on a branch with no `origin`, so they print no warning. Any fixture with an `origin` and HEAD on its default branch now gets the line. The RED searches `acceptance/` for cases that assert `red`'s whole stdout, its line count or a line's position, and lists each one it adjusts.
+   - `pr-not-on-branch` has no acceptance case today, so point 2 adds one.
+   - **The version:** 2.50.0 in §11, and `v1-87.version` with the version cases item 69 lists.
+   - **New cases**, about 10: each condition of point 1 alone (default branch with origin and ci local; review local with ci off; both off; a non-default branch; detached HEAD; no origin; `origin/HEAD` naming a branch other than `main`), redo rewrite and unchanged redo, the line's position, exit code and lock unchanged, and point 2's detached-HEAD text.
+5. **Measure and revert.** Metric: 0 `pr-not-on-branch` refusals after a `red` that passed, on adopters' run logs (Hands-off, Draken, draken-platform), over the next 20 locks. Revert: drop the line.
+
 ### `report` reads the project's release tags (item 99)
 
 Item 76's DORA readout counts only `vX.Y.Z` tags as releases. Adopters measured on 2026-11-09:
@@ -2266,4 +2288,4 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.49.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.50.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
