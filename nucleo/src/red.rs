@@ -99,6 +99,7 @@ pub fn run(
     );
     println!("shipcraft: commit the lock with the tests; the hook checks the RED commit.");
     warn_absent_suites(repo, &config, &base, &lock);
+    warn_default_branch(repo, &config);
     next_green(&config);
     Ok((path, dropped.len(), left))
 }
@@ -182,8 +183,32 @@ pub fn redo(
     println!("shipcraft: cases newly failing at RED: {}", list(minus(&lock.failing_at_red, &old.failing_at_red)));
     println!("shipcraft: commit the lock with the repaired tests, and nothing else; the hook checks the redo commit.");
     warn_absent_suites(repo, &config, &base, &lock);
+    warn_default_branch(repo, &config);
     next_green(&config);
     Ok(())
+}
+
+/// Item 100: after a lock is written, right before `next:`, one stdout line
+/// when HEAD is on the default branch, `origin` exists and a layer is not
+/// `off` (defaults count). A warning only: a failed git call prints nothing.
+fn warn_default_branch(repo: &Repo, config: &Config) {
+    if !layers_on(config) {
+        return;
+    }
+    if let Some(branch) = repo.on_default_branch() {
+        println!("{}", default_branch_warning(&branch));
+    }
+}
+
+/// Item 100: the effective `[execution] ci` or `review` is not `off`.
+fn layers_on(config: &Config) -> bool {
+    config.execucao.ci != "off" || config.execucao.revisao != "off"
+}
+
+fn default_branch_warning(branch: &str) -> String {
+    format!(
+        "shipcraft: warning: this lock is on {branch}, the default branch; shipcraft pr refuses to open a PR from it. Move the RED to its own branch before the GREEN (git switch -c item/<name>)."
+    )
 }
 
 /// Item 64: after a lock is written, the last stdout line names the GREEN.
@@ -817,5 +842,23 @@ mod tests {
         let three = Lock { formato: 3, fix: None, controls: None, ..lock.clone() };
         let redone = three.redone(BTreeMap::new(), three.cases.clone(), three.failing_at_red.clone(), Vec::new());
         assert!(redone.controls.is_none(), "a format 3 redo prints no controls line");
+    }
+
+    #[test]
+    fn the_default_branch_warning_needs_a_layer_that_is_not_off() {
+        let config = |text: &str| Config::parse(text).unwrap();
+        assert!(layers_on(&config("")), "defaults: both layers local");
+        assert!(layers_on(&config("[execution]\nci = \"off\"")), "review local");
+        assert!(layers_on(&config("[execution]\nreview = \"off\"")), "ci local");
+        assert!(layers_on(&config("[execution]\nci = \"github\"\nreview = \"off\"")));
+        assert!(!layers_on(&config("[execution]\nci = \"off\"\nreview = \"off\"")));
+    }
+
+    #[test]
+    fn the_default_branch_warning_text() {
+        assert_eq!(
+            default_branch_warning("main"),
+            "shipcraft: warning: this lock is on main, the default branch; shipcraft pr refuses to open a PR from it. Move the RED to its own branch before the GREEN (git switch -c item/<name>)."
+        );
     }
 }
