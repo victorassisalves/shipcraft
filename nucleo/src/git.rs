@@ -37,6 +37,12 @@ pub struct Repo {
 }
 
 impl Repo {
+    /// A test's repository at `root`.
+    #[cfg(test)]
+    pub fn at_root(root: &Path) -> Repo {
+        Repo { root: root.to_path_buf() }
+    }
+
     /// The repository that holds the current directory.
     pub fn open() -> Result<Repo> {
         let cwd = std::env::current_dir().map_err(|e| failed(format!("current directory: {e}")))?;

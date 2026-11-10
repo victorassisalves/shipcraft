@@ -244,6 +244,9 @@ pub struct Revisao {
     /// Item 96: `[review] after = "push"`; `false` for `"ci"` and the absent key.
     #[serde(skip)]
     pub after_push: bool,
+    /// Item 102: `[review] guide`, normalized; None when absent.
+    #[serde(skip)]
+    pub guide: Option<String>,
 }
 
 /// Item 11, rule 3: above `aviso_linhas` product lines the summary suggests a
@@ -290,7 +293,7 @@ impl Default for Papeis {
 
 impl Default for Revisao {
     fn default() -> Self {
-        Revisao { spec: None, tempo_max: 1200, retry_wait: 120, after_raw: None, after_push: false }
+        Revisao { spec: None, tempo_max: 1200, retry_wait: 120, after_raw: None, after_push: false, guide: None }
     }
 }
 
@@ -336,6 +339,14 @@ impl Config {
     }
 
     pub fn parse(text: &str) -> Result<Config> {
+        let mut config = Config::parse_before_guide(text)?;
+        // Item 102: after every check that refused before it.
+        config.revisao.guide = crate::review_guide::check(text)?;
+        Ok(config)
+    }
+
+    /// Every check but item 102's, in their order.
+    fn parse_before_guide(text: &str) -> Result<Config> {
         check_legacy_keys(text)?;
         check_min(text)?;
         let mut config: Config = match toml::from_str(text) {
@@ -632,7 +643,7 @@ fn check_suite_checks(table: &toml::Table, execution: &toml::Value) -> Result<()
 }
 
 /// `shipcraft_min` is a well-formed version at `floor` or above.
-fn min_reaches(table: &toml::Table, floor: &str) -> bool {
+pub fn min_reaches(table: &toml::Table, floor: &str) -> bool {
     table.get("shipcraft_min").and_then(|v| v.as_str()).is_some_and(|m| {
         let runs: Vec<&str> = m.split('.').collect();
         (2..=3).contains(&runs.len())
@@ -684,6 +695,16 @@ pub fn check_review_after(text: &str) -> Result<bool> {
         "older binaries ignore this key, so they would schedule the review differently",
         format!("set shipcraft_min = \"2.46\" (or above) in {CONFIG_FILE} and run again"),
     )
+}
+
+/// Item 102: the hook's early check of a staged config, as item 96's
+/// `after`; it refuses for the guide only when no earlier check would, so
+/// item 99's order holds.
+pub fn check_review_guide(text: &str) -> Result<()> {
+    if Config::parse_before_guide(text).is_ok() {
+        crate::review_guide::check(text)?;
+    }
+    Ok(())
 }
 
 /// Item 99: `[report] release_tags`, the pattern `report` reads releases by.

@@ -37,6 +37,8 @@ pub fn run(repo: &Repo, commit_msg: bool) -> Result<()> {
         config::check_min(text)?;
         // Item 96: `[review] after` is validated wherever the config is read.
         config::check_review_after(text)?;
+        // Item 102: so is `[review] guide`, after every other check.
+        config::check_review_guide(text)?;
     }
     // A merge is judged against both parents, as CI judges it: `git merge` runs
     // the commit-msg hook, and a lock closed on the other branch is not an edit.
