@@ -156,7 +156,7 @@ if case in ('invalid-types','invalid-paths','invalid-display','min-absent','min-
  matrix=[]
  if case=='invalid-types':matrix=[('102','102'),('false','false'),('["docs/g"]','["docs/g"]'),('{file="docs/g"}','{ file = "docs/g" }')]
  elif case=='invalid-paths':matrix=[(json.dumps(v),json.dumps(v)) for v in ('','/docs/g','docs/../g','..','.','./','//')]
- elif case=='invalid-display':matrix=[('"a\\\"/../b"',"'a\"/../b'"),(json.dumps('a\n../b'),'"""\na\n../b"""')]
+ elif case=='invalid-display':matrix=[('"a\\\"/../b"',"'a\"/../b'"),(json.dumps('a\n/../b'),'"""\na\n/../b"""')]
  elif case=='min-absent':matrix=[('"docs/g"','"docs/g"')]
  elif case=='min-old':matrix=[('"docs/g"','"docs/g"')]
  elif case=='min-patch':matrix=[(json.dumps('docs/a"b'),"'docs/a\"b'"),(json.dumps('docs/multi\nline'),'"""\ndocs/multi\nline"""')]
@@ -174,6 +174,7 @@ if case in ('invalid-types','invalid-paths','invalid-display','min-absent','min-
   # merge is fixture history only; no implementation phase or project lock.
   sha=git('rev-parse','HEAD');(st/'sha').write_text(sha+'\n');git('push','-q','origin','HEAD')
   (st/'prs.json').write_text('{}')
+  (st/'next_pr').write_text('1')
   run(cb/'gh','pr','create','--title','Invalid102','--body','Invalid102','--head','feature/item102','--base','main')
   if case=='invalid-log':
    log=Path('.git/shipcraft/runs.jsonl')

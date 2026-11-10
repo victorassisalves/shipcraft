@@ -12,7 +12,7 @@
     "acceptance/lib/english.sh": "sha256:4bd5a1be2e717d23f9267632d3c95392afd6fed17a439377aa6794ffdaee6290",
     "acceptance/lib/item100.sh": "sha256:f0d170889cd62989ba784119f34d4b5edbc9a4fc39471f1fe95978445d5affb2",
     "acceptance/lib/item101.sh": "sha256:4139c4d624236a2bc3f0573c23f5066f135dac8d766ce5f341247ee9a5dd5905",
-    "acceptance/lib/item102.sh": "sha256:4ee97aad022faabbca05ffd1956760e927384c29261e10b0c4fd6a84c88b313e",
+    "acceptance/lib/item102.sh": "sha256:04991c6c70c29ca21db52687f69a9f96371a3f825f57f1c33fb5bde512bd4f71",
     "acceptance/lib/item16a.sh": "sha256:d83f4146699d5f19ce369613c49449b2c6b4de1bd96c66e17d7a4f2ce350e125",
     "acceptance/lib/item16b.sh": "sha256:9f0d6b228a19c89e070e28ec4e4c41fa67ff812474e71adf9220788a7ce15f2d",
     "acceptance/lib/item17.sh": "sha256:5efdcfc0c8b419625cbc0e96a6aaac226387a5a7dad57f8ac90d64cdedbee4c1",
@@ -90,7 +90,7 @@
     "acceptance/lib/v1.sh": "sha256:67eec4804df489390fb753dca260c03b62ac3e1fde49c944a9d46c93fbdc32b9",
     "acceptance/pontos/100.md": "sha256:6fca51f1b38aebab9c6dc927b2c26b3cca5d176ef6891ebdf6b2d3b22b73ceb3",
     "acceptance/pontos/101.md": "sha256:549f40904f3461a5906574c99d75718ca544e6a2483851d71c2798e9e1b496dc",
-    "acceptance/pontos/102.md": "sha256:eaa0d71d2b7cea2d3a9f0dfcac5559248cc4846a08be83d7ae52be24279a0557",
+    "acceptance/pontos/102.md": "sha256:497e8818ad3e79d0cd7c30cb4752b31055fe8da6de2d9d3510941bcd1f98076d",
     "acceptance/pontos/15a.md": "sha256:f1480266606c0a01f815315cb04ddea9544438df9dda618e06cf167ca9f971b2",
     "acceptance/pontos/15c.md": "sha256:81c2cc2c4613889e13e620e865cec3e6a8833e3f3c1f610d1d004eb6d7750e2a",
     "acceptance/pontos/16a.md": "sha256:862354f335d398149125128a4d520dff86d76c7eb10092b8a8fb3b3cc86e5e78",
@@ -287,5 +287,5 @@
   "kind": "feature",
   "reported_at": null,
   "fixes_release": null,
-  "seal": "bb40f0af065af11a90125b87c3c7bd8c08eebc257300afecb53dd89f2f757dd2"
+  "seal": "9819cdff2afb36180d868c63ce71edae2bd618a9e4da749ee252cd12ccbf1bb3"
 }
