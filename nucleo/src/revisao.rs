@@ -135,6 +135,10 @@ fn attempt(req: &Request) -> Result<Review> {
     if !req.text_sha256.is_empty() {
         row["text_sha256"] = json!(req.text_sha256);
     }
+    // Item 102: every fresh row, when the key is set.
+    if let Some(guide) = &req.config.revisao.guide {
+        row["guide"] = json!(guide);
+    }
     medicao::record(req.repo, row);
     Ok(review)
 }
@@ -346,21 +350,31 @@ fn brief(req: &Request, tree: &str, work: &str) -> Result<String> {
     } else {
         BRIEF
     };
-    Ok(template
-        .replace("{{WHAT}}", &what)
-        .replace("{{PROJECT}}", &repo.name())
-        .replace("{{TITLE}}", &req.title)
-        .replace("{{SHA}}", &req.sha)
-        .replace("{{SHORT}}", &short(&req.sha))
-        .replace("{{BASE_SHA}}", &req.base_sha)
-        .replace("{{TREE}}", tree)
-        .replace("{{WORK}}", work)
-        .replace("{{COMMANDS}}", &commands.join("\n"))
-        .replace("{{MINUTES}}", &(req.config.revisao.tempo_max / 60).max(1).to_string())
-        .replace("{{BODY}}", &body)
-        .replace("{{SPEC}}", &spec)
-        .replace("{{BATTERY}}", &battery(req)?)
-        .replace("{{DIFF}}", &cap(&diff, MAX_DIFF)))
+    let battery = battery(req)?;
+    let fill = |template: &str| {
+        template
+            .replace("{{WHAT}}", &what)
+            .replace("{{PROJECT}}", &repo.name())
+            .replace("{{TITLE}}", &req.title)
+            .replace("{{SHA}}", &req.sha)
+            .replace("{{SHORT}}", &short(&req.sha))
+            .replace("{{BASE_SHA}}", &req.base_sha)
+            .replace("{{TREE}}", tree)
+            .replace("{{WORK}}", work)
+            .replace("{{COMMANDS}}", &commands.join("\n"))
+            .replace("{{MINUTES}}", &(req.config.revisao.tempo_max / 60).max(1).to_string())
+            .replace("{{BODY}}", &body)
+            .replace("{{SPEC}}", &spec)
+            .replace("{{BATTERY}}", &battery)
+            .replace("{{DIFF}}", &cap(&diff, MAX_DIFF))
+    };
+    // Item 102: with the key absent, the brief is built as before.
+    Ok(match &req.config.revisao.guide {
+        Some(path) => {
+            crate::review_guide::insert(template, &crate::review_guide::section(repo, &req.base_sha, path), fill)
+        }
+        None => fill(template),
+    })
 }
 
 /// Item 96: item 63's brief after green CI with exactly four changes in the

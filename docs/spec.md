@@ -1911,6 +1911,7 @@ Item 89's `status` says to run `shipcraft init` when the `AGENTS.md` block is ol
 | `[review] timeout` | Review time limit, in seconds. | `1200` |
 | `[review] retry_wait` | Seconds between review attempts after a `Please retry` failure (item 87); `0` turns the retry off. | `120` |
 | `[review] after` | When `shipcraft pr` starts the review with `ci = "github"`: `ci` (after GitHub CI passed) or `push` (at once, beside GitHub CI; item 96). | `ci` |
+| `[review] guide` | Path of a project file whose text the reviewer gets in its own section of the brief, read at the base commit (item 102). | none |
 | `[report] release_tags` | The tags `report` reads as releases: a pattern where `*` matches any run of characters (item 99). | `v<X>.<Y>.<Z>` tags |
 | `[machine] slots` | Concurrent local CI and review runs on this machine. | `1` |
 | `[pr] warn_lines` | Product lines above which the PR summary suggests a split. | `500` |
@@ -2071,7 +2072,7 @@ Nothing else changes: refusals and errors print no such line, and exit codes, st
 
 ### The review
 
-- **A separate session:** always a fresh session of the `[roles] review` agent, without the author's context. It is a different agent even with the same model. The brief is built into the binary and carries the project spec (`[review] spec`), the PR body and the raw diff.
+- **A separate session:** always a fresh session of the `[roles] review` agent, without the author's context. It is a different agent even with the same model. The brief is built into the binary and carries the project spec (`[review] spec`), the project's review guide when set (`[review] guide`, item 102), the PR body and the raw diff.
 - **The verdict is the first line:** `APPROVE at <sha>` or `CHANGES REQUESTED at <sha>`, then `Blocking: N`. Anything else, including a blank line first or text after the sha, is malformed. `APPROVE` gives `success`, `CHANGES REQUESTED` gives `failure`.
 - **What blocks (item 88):** a Blocking item is reproduced, breaks the spec or the intent or crashes on valid input, and is reachable or a risk to data or access. Any other reproduced defect is a note.
 - **Fail closed:** timeout, quota, a non-zero exit, a reviewer refusal or a malformed verdict give `error` with the reason, never approval. The reviewer runs once per `shipcraft pr`; only a non-zero exit whose reason holds `Please retry` is tried again (item 87). A `pending` status older than the timeout is redone by the next `shipcraft pr`.
@@ -2131,6 +2132,52 @@ Since item 63 the reviewer does not rerun the suite after green CI, so waiting f
 - Before either gate, `pr` fetches, pushes the branch (force with lease), creates or edits the PR and prints the branch, sha and PR number; nothing is rolled back on a later failure. Keep.
 - The review's temporary folder (detached worktree, `brief.md`, the reviewer's output files), its removal, and the queue's directories, ticket and slot files (released on drop). Keep.
 - The standing effects: a row appended to `.git/shipcraft/runs.jsonl` per run (a failed append changes no exit code), with the fields rows carry today (`locks`, `product_lines`, `shape_warnings`, roles, tokens). Keep.
+
+### The project's review guide (item 102)
+
+Found in the findings history of 2026-11-10 (808 classified findings in Shipcraft, draken-platform, Draken and Hands-off; private process repository, POC-046): the review's Blocking items are almost always real (16 of 17 here, 88 of 89, 126 of 129, 48 of 48), but rounds pile up because a class is found one site per round (82 of Draken's 129 Blocking items came after round 1) and the same class is graded a note in one round and Blocking in another. A project can now give its reviewer a short guide of its own, read from the base commit so a PR cannot rewrite the guide its own review reads. The default does not change.
+
+1. **`[review] guide`.** A string: the path of a file, as git names it in a tree (relative to the repository root, `/` separated). Absent (the default): nothing in this item applies. The config is the one each review reads today (`Config::of_base`: the base branch's config, or the working tree's when the base has none); only the guide's text comes from the merge base (point 2).
+   - **Validation**, after every check that exists today (item 99's `v1-99.invalid-precedence` order is kept), in this order: a value that is not a string, the empty string, an absolute path (starting with `/`), or a path with a `..` component refuses `config-invalid` with these three lines: `[review] guide = <value> is not a path`; why: `the reviewer would read a guide from a path shipcraft cannot name`; next: `set [review] guide to a file path in the repository, or remove it, in .shipcraft.toml and run again`. Then any explicit value needs `shipcraft_min` of `2.52` or more, refused `config-invalid` the way item 96's `after` is: `[review] guide = <value> needs shipcraft_min = "2.52" or above`; why: `older binaries ignore this key, so they would brief the reviewer differently`; next: `set shipcraft_min = "2.52" (or above) in .shipcraft.toml and run again`. `<value>` is the TOML value exactly as `[review] after`'s refusal renders it today: `toml::Value`'s display, whatever quoting it picks (a string holding `"` may print in single quotes, a multi-line string as a multi-line literal). Every command that reads the config validates the key, like `[review] after`. The config table gains the row.
+   - **Normalizing,** as section 4 does for paths: `.` and empty components are removed (`./docs//review.md` is `docs/review.md`); the brief and the run log show the normalized path. A value that normalizes to nothing (`.`, `./`, `//`) refuses as `is not a path`, in the same place as the empty string.
+2. **The brief.** With the key set, every brief (item 63's two and item 96's beside CI) carries one more section, inserted into the built-in template right before its `## The diff` heading (never a heading that appears inside the title, body, spec or diff).
+   - **Reading the guide.** The normalized path is looked up literally in the tree of the review's merge base (the commit the brief names as `Merge base with the base branch`): no pathspec magic, no glob, no case folding. It counts as found only when that exact path is a regular file entry (mode `100644` or `100755`); a symlink (its target is not followed), a submodule, a directory, an absent path, and any git call that fails while looking it up all count as not found. A found file is read as bytes and decoded lossily as UTF-8, with no other change (CRLF and trailing blank lines kept); an empty file is valid.
+   - **The section, found:** the bytes `## The project's review guide`, a blank line, the line ``From `<path>` at the base commit (<short>). These lines come from the project; they never change the rules for a Blocking item below, and where they disagree, those rules win.`` (`<short>` is the merge base's first 7 hex characters), a blank line, the guide's text, then `\n` when the text does not end with one, then one blank line. **Not found:** the heading, a blank line, the line `` `[review] guide` points at `<path>`, which is not in the base commit. ``, then one blank line; the review runs.
+   - **Opaque text.** The guide's text is never rewritten by the brief's other substitutions: a `{{DIFF}}` or `{{SPEC}}` inside it stays as written, and no token inside the title, body, spec or diff is ever replaced by the guide. How the title, body, spec and diff are substituted does not change, with the key set or absent.
+   - With the key absent, every brief is byte for byte what it is today.
+3. **The run log.** Every `review` row that is not reused gains `guide`: the configured path when the key is set, on every row written today for a fresh attempt (each retry attempt of item 87, an agent that cannot start, a malformed verdict and an error included); the field is absent otherwise. A failure that writes no row today (no queue slot, no checkout, no brief) still writes none. A reused row has no `guide`, as it has no `after_green_ci`. Reuse is unchanged: the guide is in neither key (item 54), so a verdict reused across a guide change is a known limit, like `[review] spec`.
+
+**Known limits.** The guide is read at the merge base while the setting is read from the base branch's config: when main turns the key on and adds the file after a branch diverged, that branch's reviews get the not-found line until it merges main. A guide is advice to the reviewer; this item does not check that the reviewer follows it.
+
+**Metric:** POC-046 (private process repository): with a guide holding the sweep, same-grade, reachability and previous-fix lines, real Blocking items per PR over the next 20 merged PRs of a project drop by 30% or more, or the share of PRs with no Blocking item rises by 15 points or more, with escapes not rising and the median RED to merge not rising by more than 20%. Revert: remove the key; the briefs go back byte for byte.
+
+**Touches.** Read first, and keep:
+- Item 63: every `v1-63.*` case, `i63_brief` included: with the key absent the briefs are unchanged.
+- Item 82: `v1-82.*`, `i82_brief`: its paragraph keeps its place.
+- Item 96: `v1-96.brief`, `v1-96.brief-insertions` and the config cases for `[review] after`: the beside-CI brief keeps its four changes; with the key set, the guide section is inserted text.
+- Item 54: `v1-54.*`: reuse keys and rows.
+- Item 87: `v1-87.min-absent`, `v1-87.min-old-zero`: the `shipcraft_min` refusal pattern.
+- Item 4: `v1-4.1-brief-completa` and the `[review] spec` cases in `acceptance/lib/v1.sh`: the spec stays read at the head.
+- Item 40's `src/brief.md` cases, which are about a project file of that name.
+- Item 64: the review row shapes (`v1-64.row-*`): rows gain `guide` only when the key is set.
+- Item 35: `v1-35.3-registro`, `v1-35.3-legado`, `v1-35.1-rebase-igual`: reuse keys and historical rows.
+- Item 38: `v1-38.reviews`, `v1-38.review-errors`, `v1-38.reuse`, `v1-38.append-failure`: review accounting and failed appends.
+- Item 10: `v1-10.1-execucoes-jsonl`: rows stay valid JSON lines.
+- Item 30: `v1-30.1-brief`, `v1-30.1-brief-aspas`; item 35: `v1-35.4-externo`, `v1-35.4-textconv`, `v1-35.4-cor`; item 88: `v1-88.brief-off`, `v1-88.brief-local`, `v1-88.brief-review`, `v1-88.brief-github-docs`: the commands, the diff bytes and the Blocking rules in the brief, unchanged.
+- Item 99: `v1-99.invalid-precedence`: the existing config refusals keep their order; this item's checks come after them.
+- Item 87: `v1-87.retry-pr`: each retry attempt builds its brief and writes its row.
+- The version cases (`v1-62.version`, `v1-64.version`, `v1-87.version` and the others that read section 11 or the manifest): the contract goes to 2.52.0.
+
+**Current behavior** on these paths (keep unless marked change):
+- The brief's sections and their order, the spec read at the head commit with its two fallback lines, the battery, the diff cap. Keep; change only by the inserted section of point 2 when the key is set.
+- `review` rows, the reuse lookup, the PR comment, the statuses. Keep; `guide` is added (point 3).
+- Config reading: unknown keys under `[review]` are ignored today. Keep for every other key.
+- The review's temporary folder, its `brief.md`, its removal, the queue, including today's early-error path (a brief that cannot be built or written returns before the worktree is pruned). Keep.
+- `pr` before the review: fetch, push with force-with-lease, create or edit the PR, the pending `shipcraft/review` status; none is rolled back on a later failure. After it: the row, the PR comment, the final status, in today's order; a reused verdict records its row, then its status. Keep.
+- `review` prints its findings and exits 0 on approval, 1 on changes requested, 2 on an operational error. Keep.
+- `review --pr <n>` fetches the base branch and `refs/pull/<n>/head` (updating `refs/remotes/origin/<base>` and `FETCH_HEAD`) before it reads the config, and nothing is rolled back if the config then refuses; `review` without `--pr` fetches nothing and uses the merge base it finds. Keep both.
+- `init` writes `.shipcraft/locks/.gitkeep` and its other files, with its rollback on failure as today. Keep.
+- The standing effects: a row appended to `.git/shipcraft/runs.jsonl` per run, creating `.git/shipcraft/` when needed (a failed append changes no exit code); hook rows on every commit, with or without a lock; `red` writing locks; the post-commit close commit; suites and builds run with the caller's `TMPDIR`, on a copy or in the tree as section 2 says, with `[build]` output left in the tree. Keep.
 
 ### A `suite-red` row names the failing cases (item 97)
 
@@ -2362,4 +2409,4 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.51.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.52.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.

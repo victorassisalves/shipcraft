@@ -37,6 +37,7 @@ mod refusal;
 mod relatorio;
 mod relatorio_gh;
 mod revisao;
+mod review_guide;
 mod suite;
 mod tsbuild;
 
