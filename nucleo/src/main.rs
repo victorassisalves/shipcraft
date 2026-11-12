@@ -38,6 +38,7 @@ mod relatorio;
 mod relatorio_gh;
 mod revisao;
 mod review_guide;
+mod size_block;
 mod suite;
 mod tsbuild;
 
