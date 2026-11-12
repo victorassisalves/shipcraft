@@ -2072,44 +2072,48 @@ Nothing else changes: refusals and errors print no such line, and exit codes, st
 
 ### The size line in the PR body (item 103)
 
-Found in POC-040 (private process repository, 2026-11-10): in Hands-off, with a wrapper that showed the agent its product lines against 400 before `shipcraft pr`, PRs above 400 product lines went from 17 of 20 to 2 of 20, with review rounds per PR not rising (2.40 to 2.37). Until now the product showed the size only in the summary comment posted after the review, when the PR is already open and reviewed. Now the PR body carries it, so the agent reads it when it opens the PR and the reviewer reads it in the brief. It is a line, never a refusal.
+Found in POC-040 (private process repository, 2026-11-10): in Hands-off, with a wrapper that showed the agent its product lines against 400 before `shipcraft pr`, PRs above 400 product lines went from 17 of 20 to 2 of 20, with review rounds per PR not rising (2.40 to 2.37). Until now the product showed the size only in the summary comment posted after the review, when the PR is already open and reviewed. Now the PR body carries it, so the agent reads it when it opens the PR and the reviewer reads it in the brief. It is a line, never a refusal, and the review rules do not change: a missing reason for not splitting is never a Blocking item by this item.
 
-1. **The block.** Every `shipcraft pr` run that gets past opening or finding the PR writes the size block into the PR body. The block is these lines, each ending in `\n`:
+1. **The block.** The size block is these lines, each ending in `\n`:
    - `<!-- shipcraft:size -->`
-   - `Size: <N> product lines against a limit of <L> (+<A> / -<R>; tests, support files, lockfiles, binaries and Shipcraft's own files not counted).`
-   - only when `<N>` is above `<L>`: `Above the limit: if this change can ship in working slices, open the first slice as its own PR; otherwise say in this body why it cannot.`
+   - `Size: <N> product lines against a limit of <L> (+<A> / -<R>, counted as in the PR summary).`
+   - only when `<N>` is above `<L>`: `Above the limit: if this change can ship in working slices, the first slice can be its own PR; if it cannot, a line here saying why helps the reviewer.`
    - `<!-- /shipcraft:size -->`
 
-   `<A>` and `<R>` are the added and removed product lines of section 5's summary (item 11's rule 2 and item 50, unchanged), from the PR's merge base with `origin/<default branch>` to HEAD; `<N>` is `<A> + <R>`; `<L>` is `[pr] warn_lines` of the config `pr` reads today (`Config::of_base`). "Above" is `<N> > <L>`, the same test as the summary's split hint. The summary comment, its `Size:` line and its hint do not change.
-2. **Where it goes in the body.** The body `pr` starts from is the `--body` file's text when given, otherwise the open PR's current body (an absent or `null` body is empty), otherwise (a new PR without `--body`) the empty string. From it, every complete block is removed: a line that is exactly `<!-- shipcraft:size -->` (a trailing `\r` allowed) through the first later line that is exactly `<!-- /shipcraft:size -->` (same allowance), both included, with their line ends. A start line with no end line after it is not a block and stays as text. Then trailing spaces, tabs, `\r` and `\n` are trimmed from what is left. The new body is the new block alone when what is left is empty, otherwise what is left, `\n\n`, and the new block.
-   - A new PR is created with the new body (one `gh pr create`).
-   - An open PR: when `--title` or `--body` is given, today's single `gh pr edit` carries the new body (and the title); a failure stays the error it is today. Otherwise, when the new body differs byte for byte from the current one, one `gh pr edit` writes only the body; when it is equal, nothing is written. A failure of that body-only edit is a warning: `pr` prints `shipcraft: the size line could not be written to the PR body: <first line of the error>` and goes on with the current body; no exit code, status, verdict or row changes because of it.
-   - The body the review gets (its brief, and item 54's `text_sha256`) is the body as it now is on the PR: the new body when it was written or was already equal, the current body when the body-only edit failed.
-3. **stdout and the run log.** Right after `shipcraft: PR #<n>`, `pr` prints the block's `Size:` line and, when above, its `Above the limit:` line, each prefixed with `shipcraft: `. The `pr` row gains `warn_lines`: `<L>` as a number, on every `pr` row written after the PR is known (passed, refused or error), as `product_lines` is. Rows written before the PR is known, and every other layer's row, do not gain it.
+   `<A>` and `<R>` are the added and removed product lines of section 5's summary (item 11's rule 2, item 24 and item 50, unchanged: the same function, the same classification), from the PR's merge base with `origin/<default branch>` to HEAD; `<N>` is `<A> + <R>`; `<L>` is `[pr] warn_lines` of the config `pr` reads today (`Config::of_base`). "Above" is `<N> > <L>`, the same test as the summary's split hint. The summary comment, its `Size:` line and its hint do not change.
+2. **The body.** `pr` computes the product lines right after the push (only that count moves; the shape warning stays where it is). A failure there is an error, as a failure of that count is today, and nothing is created or edited.
+   - **Ownership.** Shipcraft owns only a trailing block: with the body's trailing spaces, tabs, `\r` and `\n` set aside, when its last line is exactly `<!-- /shipcraft:size -->` and some earlier line is exactly `<!-- shipcraft:size -->` (a trailing `\r` allowed on both), the trailing block runs from the last such start line to that end line. Markers anywhere else (inside the text, in a code fence, an unmatched start) are the author's text and are never removed or paired.
+   - **The base text.** It is the `--body` file's text when given; otherwise the open PR's current body as `gh` returns it (`body` absent or `null` is empty); otherwise, for a new PR, the empty string. The rest is the base text without its trailing block (when it has one), with trailing spaces, tabs, `\r` and `\n` trimmed. The new body is the block alone when the rest is empty, otherwise the rest, `\n\n`, and the block.
+   - **Unreadable body.** When the open PR's `body` is present and is not a JSON string, `pr` writes no block, prints `shipcraft: the size line was not written: the PR body could not be read` and goes on as today.
+   - **Writing.** A new PR is created with the new body (one `gh pr create`). For an open PR, when `--body` is given, today's single `gh pr edit` carries the new body (and the title when given); its failure stays the error it is today. Otherwise, when `--title` is given, today's title-only edit runs as today; then, when the new body differs byte for byte from the current one, one more `gh pr edit` writes only the body; when it is equal, nothing is written. A failure of that body-only edit is a warning: `pr` prints `shipcraft: the size line could not be written to the PR body: <first line of the error>` and goes on; no exit code, status, verdict or row changes because of it.
+   - **The body the review gets** (its brief) is the body `pr` submitted when the create or edit succeeded or the body was already equal, and the body it read otherwise. **Item 54's text key** is computed over that body with its trailing block removed and, only when a block was removed, its trailing spaces, tabs, `\r` and `\n` trimmed; a body with no trailing block keys as today. `review --pr <n>` keys the body it reads the same way. So a verdict for a body is reused after `pr` adds or updates its block.
+3. **stdout and the run log.** Right after `shipcraft: PR #<n>`, `pr` prints the block's `Size:` line and, when above, its `Above the limit:` line, each prefixed with `shipcraft: `. The `pr` row gains `product_lines` (`<N>`) and `warn_lines` (`<L>`), both numbers, on every `pr` row written today once the PR is known (passed, refused or error); a failure that writes no `pr` row today still writes none. Every other layer's row is unchanged.
 
-**Known limits.** A person's edits inside the block are overwritten on the next `pr`. A PR opened by an older binary gets the block on its first run with this one, so its body changes and item 54's text key differs: that run's review is not reused. `review --pr <n>` run alone reads the body as it is and writes no block.
+**Known limits.** Shipcraft writes raw text; a body that ends inside an unclosed code fence or HTML comment shows the block inside it on GitHub, though the reviewer reads the raw text. A person's edit inside the trailing block is overwritten on the next `pr`. Between `pr` reading the body and writing it, another edit on GitHub is lost (last write wins). A body that ended in whitespace keys differently once `pr` has trimmed it, so that first run's review is not reused.
 
 **Metric:** in the next 20 merged PRs of an adopter that runs this binary without POC-040's wrapper, the share above its limit stays at or below 25% (Hands-off's window: 10%; baseline 85%) and review rounds per PR do not rise above that adopter's last 20. Revert: drop the block in a release; the summary comment is unchanged, so nothing else depends on it. `init` writing the limit and `report` counting it are item 104.
 
 **Touches.** Read first, and keep:
 - Item 11: every `v1-11.*` case, `sz_size` included: the summary's `Size: +A / -R product lines` line and the hint above `warn_lines` (default 500) are unchanged.
-- Item 50: `acceptance/lib/item50.sh`: what counts as product, the shape warning.
+- Item 50: `acceptance/lib/item50.sh`: what counts as product, the shape warning and where it runs.
 - Item 24: renames and HEAD-path classification of product lines.
-- Item 54: `v1-54.*`: reuse keys; `text_sha256` is over the body as it now is on the PR.
-- Item 35: `v1-35.3-registro`, `v1-35.3-legado`, `v1-35.1-rebase-igual`: reuse across a rebase with the same diff (the block is the same, so the key is the same).
-- Item 38 and item 41: the `pr` row's fields, `locks`, `queue_secs`; `warn_lines` is added beside them.
+- Item 54: `v1-54.*`: reuse keys; the text key of a body with no trailing block is unchanged.
+- Item 96: `v1-96.reuse`, `v1-96.reuse-publish`: a verdict from `review --pr` is reused by the `pr` run that then adds the block (point 2's key), as long as the body did not end in whitespace; the RED checks the bodies these cases use.
+- Item 35: `v1-35.3-registro`, `v1-35.3-legado`, `v1-35.1-rebase-igual`: reuse across a rebase with the same diff.
+- Item 38 and item 41: the `pr` row's fields, `locks`, `queue_secs`; `product_lines` and `warn_lines` are added beside them.
 - Item 10: `v1-10.1-execucoes-jsonl`: rows stay valid JSON lines.
-- Item 63, item 96, item 102: the briefs; the body inside them now holds the block, and nothing else in them changes.
+- Item 63, item 96, item 102: the briefs; the body inside them now ends in the block, and nothing else in them changes.
 - Item 44: the line `ci` prints last inside `pr` stays the last line of the CI child's output.
-- `english.sh`'s `pr-warn-lines` key rename case: `warn_lines` and its old name `aviso_linhas` keep working.
-- The `pr` cases that read the PR body or title through the fake `gh` (every `pr create` and `pr edit` call): a new PR's body now ends in the block, and a run with neither `--title` nor `--body` may now call `gh pr edit --body-file`.
+- `english.sh`'s `e1-legacy-hook-pr-warn-lines` and `e1-legacy-ci-pr-warn-lines`: the old name `aviso_linhas` is still refused; only `warn_lines` is read.
+- The `pr` cases that read the PR body or title through the fake `gh` (every `pr create`, `pr list` and `pr edit` call): a new PR's body now ends in the block, and a run without `--body` may now call `gh pr edit --body-file`.
 - The version cases (`v1-62.version`, `v1-64.version`, `v1-87.version` and the others that read section 11 or the manifest): the contract goes to 2.53.0.
 
 **Current behavior** on these paths (keep unless marked change):
-- `pr` fetches, reads the config, refuses `pr-not-on-branch`, reads `--body`, pushes with force-with-lease, then lists the open PR for the branch. Keep.
+- `pr` fetches, reads the config, refuses `pr-not-on-branch`, reads `--body`, pushes with force-with-lease, then lists the open PR for the branch. Keep. Change: the product-line count runs right after the push.
 - A new PR is created with the `--body` text or an empty body, and the title given or the last commit's subject. Change: the body gains the block.
-- An open PR is edited only when `--title` or `--body` is given, and that edit's failure is an error. Change: the body also gains the block, and a body-only edit can now happen (point 2).
-- Product lines and the shape warning are computed after the PR is known and passed to the CI and review rows through the environment. Keep; the block uses the same counts.
+- An open PR is edited only when `--title` or `--body` is given, and that edit's failure is an error. Keep. Change: a body-only edit can follow (point 2), and its failure is a warning.
+- `gh::open_pr` reads `body` from `gh pr list`; a malformed response is an error. Keep.
+- Product lines reach the `ci` and `review` rows through the environment; the shape warning is computed after the PR is known. Keep both.
 - The review reads the body `pr` holds; the summary comment is posted at the end with the `Size:` line and the hint. Keep both.
 - Nothing `pr` writes to GitHub is rolled back on a later failure. Keep.
 
