@@ -103,12 +103,14 @@ elif case=='new-file':new=True;rest='File103\n\n';base=rest;args=['--body',cw/'i
 elif case=='above':Path('remove103.py').unlink();r=2
 elif case=='boundary':Path('product103.py').write_text('x103 = 1\n'*4);a=4
 elif case=='default':
- git('checkout','main');p=Path('.shipcraft.toml');p.write_text(re.sub(r'(?m)^warn_lines\s*=.*\n','',p.read_text()));snap('chore: default limit');git('push','-q','origin','main');git('checkout','feature/item103');limit=500
+ Path('product103.py').unlink() # Keep the pending feature addition out of main's config commit.
+ git('checkout','main');p=Path('.shipcraft.toml');p.write_text(re.sub(r'(?m)^warn_lines\s*=.*\n','',p.read_text()));snap('chore: default limit');git('push','-q','origin','main');git('checkout','feature/item103');Path('product103.py').write_text('x103 = 1\n'*3);limit=500
 elif case=='zero':Path('product103.py').unlink();Path('tests/test_zero103.py').write_text('def test_zero103():\n assert True\n');a=0
 elif case=='base':
- policy('warn_lines','999');git('checkout','main');policy('warn_lines','2');snap('chore: moved base policy');git('push','-q','origin','main');git('checkout','feature/item103');policy('warn_lines','999');limit=2
+ Path('product103.py').unlink() # The shared feature snapshot below commits the product addition.
+ policy('warn_lines','999');git('checkout','main');policy('warn_lines','2');snap('chore: moved base policy');git('push','-q','origin','main');git('checkout','feature/item103');Path('product103.py').write_text('x103 = 1\n'*3);policy('warn_lines','999');limit=2
 elif case=='classification':
- Path('tests/helper103.py').write_text('# excluded\n'*20);Path('Cargo.lock').write_text('excluded\n'*20);Path('binary103').write_bytes(b'\0x\n'*20);Path('.shipcraft/cache').mkdir(exist_ok=True);Path('.shipcraft/cache/meta').write_text('excluded\n'*20);Path('Gemfile.lock').write_text('counts\n'*2);a=5
+ Path('tests/test_helper103.py').write_text('# excluded\n'*20);Path('Cargo.lock').write_text('excluded\n'*20);Path('binary103').write_bytes(b'\0x\n'*20);Path('.shipcraft/cache').mkdir(exist_ok=True);Path('.shipcraft/cache/meta').write_text('excluded\n'*20);Path('Gemfile.lock').write_text('counts\n'*2);a=5
 elif case=='replace':base=rest+'\n'+old.rstrip('\n')
 elif case=='crlf':rest='\ufeffIntent103\r\n';base=rest+'\n'+old.replace('\n','\r\n')
 elif case=='last-start':rest='Intent103\n'+old+'Retained103\n';base=rest+'\n'+old
@@ -130,7 +132,7 @@ elif case=='idempotent':pass
 elif case=='title':args=['--title','Changed title103']
 elif case=='body-edit-fail':fault('body')
 elif case=='body-file-fail':fault('body');args=['--body',cw/'input103']
-elif case=='create-fail':fault('create');new=True
+elif case=='create-fail':fault('create');new=True;rest='';base=''
 elif case=='title-fail':fault('title');args=['--title','Changed title103']
 elif case=='count-fail':(st/'count-fault103').touch();args=['--body',cw/'input103']
 elif case=='reuse':pass
