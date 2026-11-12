@@ -12,6 +12,7 @@ use crate::medicao;
 use crate::processo::{self, End};
 use crate::refusal::{failed, refuse, Result};
 use crate::revisao::{self, Request, Review, Verdict};
+use crate::size_block;
 use serde_json::json;
 use std::fs;
 use std::process::Command;
@@ -53,24 +54,70 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>) -> Result<(
 
     repo.run(&["push", "-q", "--force-with-lease", "origin", &format!("{branch}:refs/heads/{branch}")])?;
     println!("shipcraft: {branch} published to origin ({})", short(&head));
-    let (number, body) = match gh::open_pr(repo, &branch)? {
-        Some((n, existing)) => {
-            if title.is_some() || body_given.is_some() {
-                gh::edit_pr(repo, n, title, body_given.as_deref())?;
-            }
-            (n, body_given.or(existing))
+    let open = gh::open_pr(repo, &branch)?;
+    // Item 103: the product lines are counted after the open PR is looked up
+    // and before anything is created or edited; a failure writes no `pr` row.
+    let base_sha = repo.text(&["merge-base", &format!("origin/{base}"), "HEAD"])?;
+    let size = medicao::product_lines(repo, &config, &base_sha, &head)?;
+    let limit = config.pr.aviso_linhas;
+    // Item 103: the warnings about the size line, printed after it.
+    let mut warnings: Vec<String> = Vec::new();
+    // `body` is the body the review gets: the one submitted when the create or
+    // edit succeeded (or it was already equal), else the one read.
+    let (number, body) = match open {
+        Some((n, current)) => {
+            let body = match (body_given, current) {
+                (Some(given), _) => {
+                    let new = size_block::new_body(&given, size, limit);
+                    gh::edit_pr(repo, n, title, Some(&new))?;
+                    Some(new)
+                }
+                (None, gh::PrBody::NotString) => {
+                    if title.is_some() {
+                        gh::edit_pr(repo, n, title, None)?;
+                    }
+                    warnings.push("shipcraft: the size line was not written: the PR body could not be read".into());
+                    None
+                }
+                (None, current) => {
+                    if title.is_some() {
+                        gh::edit_pr(repo, n, title, None)?;
+                    }
+                    let new = size_block::new_body(current.text().unwrap_or_default(), size, limit);
+                    if current.text() == Some(new.as_str()) {
+                        Some(new)
+                    } else {
+                        match gh::edit_body(repo, n, &new) {
+                            Ok(()) => Some(new),
+                            Err(e) => {
+                                warnings.push(format!(
+                                    "shipcraft: the size line could not be written to the PR body: {}",
+                                    e.lines().next().unwrap_or_default()
+                                ));
+                                current.text().map(str::to_string)
+                            }
+                        }
+                    }
+                }
+            };
+            (n, body)
         }
         None => {
             let title = match title {
                 Some(t) => t.to_string(),
                 None => repo.text(&["log", "-1", "--format=%s"])?,
             };
-            let body = body_given.unwrap_or_default();
+            let body = size_block::new_body(&body_given.unwrap_or_default(), size, limit);
             (gh::create_pr(repo, &branch, &base, &title, &body)?, Some(body))
         }
     };
     println!("shipcraft: PR #{number}");
-    let base_sha = repo.text(&["merge-base", &format!("origin/{base}"), "HEAD"])?;
+    for line in size_block::lines(size, limit) {
+        println!("shipcraft: {line}");
+    }
+    for warning in &warnings {
+        println!("{warning}");
+    }
     // Item 38: the ci, review and pr rows of this PR carry its locks.
     let locks = medicao::locks_changed(repo, &base_sha, &head);
     medicao::set_pr_locks(&locks);
@@ -80,7 +127,6 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>) -> Result<(
     // records how the command ended (passed, refused, or error), whichever
     // later step stops it.
     let result = (|| -> Result<()> {
-        let size = medicao::product_lines(repo, &config, &base_sha, &head)?;
         std::env::set_var(medicao::LINHAS_ENV, (size.0 + size.1).to_string());
         let forma = forma::forma(repo, &config, &base_sha, &head);
         std::env::set_var(forma::AVISOS_ENV, forma.avisos.map_or("null".to_string(), |n| n.to_string()));
@@ -93,7 +139,8 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>) -> Result<(
                 repo,
                 config: &config,
                 diff_sha256: diff_sha256(repo, &base_sha, &head),
-                text_sha256: text_sha256(title.as_deref(), body.as_deref()),
+                // Item 103: the text key is over the body's rest (without Shipcraft's block).
+                text_sha256: text_sha256(title.as_deref(), body.as_deref().map(size_block::rest)),
                 sha: head.clone(),
                 base_sha: base_sha.clone(),
                 title: title.unwrap_or_default(),
@@ -152,6 +199,9 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>) -> Result<(
     row["pr"] = json!(number);
     row["base"] = json!(base);
     row["queue_secs"] = json!(queue_secs);
+    // Item 103: the size the PR body's block showed, and the limit it used.
+    row["product_lines"] = json!(size.0 + size.1);
+    row["warn_lines"] = json!(limit);
     // Item 96: the `[review] after` this run read.
     row["review_after"] = json!(if config.revisao.after_push { "push" } else { "ci" });
     medicao::record(repo, row);
@@ -511,7 +561,8 @@ pub fn of_pr(repo: &Repo, number: &str) -> Result<()> {
         config: &config,
         diff_sha256: diff_sha256(repo, &base_sha, &sha),
         // Item 54: no text key when gh's title or body is missing, null or not a string.
-        text_sha256: text_sha256(pr["title"].as_str(), pr["body"].as_str()),
+        // Item 103: the body is keyed by its rest, without a trailing size block.
+        text_sha256: text_sha256(pr["title"].as_str(), pr["body"].as_str().map(size_block::rest)),
         sha,
         base_sha,
         title: field("title"),

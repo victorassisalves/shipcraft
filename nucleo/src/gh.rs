@@ -89,14 +89,39 @@ pub fn comment(repo: &Repo, pr: u64, text: &str) -> Result<()> {
     must(repo, &["pr", "comment", &pr.to_string(), "--body-file", &file]).map(drop)
 }
 
+/// The body of an open PR as `gh pr list` returned it (item 103).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PrBody {
+    /// A JSON string.
+    Text(String),
+    /// The field is missing or `null`.
+    Missing,
+    /// Present and of another JSON type: the body could not be read.
+    NotString,
+}
+
+impl PrBody {
+    /// Item 54: the body as a string, `None` when it is missing, null or not a string.
+    pub fn text(&self) -> Option<&str> {
+        match self {
+            PrBody::Text(s) => Some(s),
+            _ => None,
+        }
+    }
+}
+
+fn pr_body(field: Option<&Value>) -> PrBody {
+    match field {
+        None | Some(Value::Null) => PrBody::Missing,
+        Some(Value::String(s)) => PrBody::Text(s.clone()),
+        Some(_) => PrBody::NotString,
+    }
+}
+
 /// The open PR of a branch: (number, body).
-/// Item 54: the body is `None` when gh's field is missing, null or not a string.
-pub fn open_pr(repo: &Repo, branch: &str) -> Result<Option<(u64, Option<String>)>> {
+pub fn open_pr(repo: &Repo, branch: &str) -> Result<Option<(u64, PrBody)>> {
     let list = json(repo, &["pr", "list", "--head", branch, "--state", "open", "--json", "number,body"])?;
-    Ok(list
-        .as_array()
-        .and_then(|l| l.first())
-        .map(|pr| (pr["number"].as_u64().unwrap_or(0), pr["body"].as_str().map(str::to_string))))
+    Ok(list.as_array().and_then(|l| l.first()).map(|pr| (pr["number"].as_u64().unwrap_or(0), pr_body(pr.get("body")))))
 }
 
 pub fn create_pr(repo: &Repo, branch: &str, base: &str, title: &str, body: &str) -> Result<u64> {
@@ -122,6 +147,15 @@ pub fn edit_pr(repo: &Repo, pr: u64, title: Option<&str>, body: Option<&str>) ->
         args.extend(["--body-file", &file]);
     }
     must(repo, &args).map(drop)
+}
+
+/// Item 103: `gh pr edit <n> --body-file`, the body only; the error is gh's text.
+pub fn edit_body(repo: &Repo, pr: u64, body: &str) -> std::result::Result<(), String> {
+    let (_dir, file) = body_file(body).map_err(|e| match e {
+        crate::refusal::Stop::Failed(m) => m,
+        crate::refusal::Stop::Refused(r) => r.to_string(),
+    })?;
+    run(repo, &["pr", "edit", &pr.to_string(), "--body-file", &file]).map(drop)
 }
 
 /// Item 62: how one named check stands at a commit, from its check runs and
@@ -215,6 +249,22 @@ pub(crate) fn percent_encode(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::{pr_body, PrBody};
+    use serde_json::json;
+
+    #[test]
+    fn a_body_is_text_missing_or_not_a_string() {
+        assert_eq!(pr_body(Some(&json!("x\n"))), PrBody::Text("x\n".into()));
+        assert_eq!(pr_body(Some(&json!(""))), PrBody::Text(String::new()));
+        assert_eq!(pr_body(None), PrBody::Missing);
+        assert_eq!(pr_body(Some(&json!(null))), PrBody::Missing);
+        for other in [json!(1), json!(true), json!([]), json!({})] {
+            assert_eq!(pr_body(Some(&other)), PrBody::NotString);
+        }
+        assert_eq!(PrBody::NotString.text(), None);
+        assert_eq!(PrBody::Missing.text(), None);
+    }
+
     #[test]
     fn names_are_percent_encoded_byte_by_byte() {
         assert_eq!(super::percent_encode("zeta suite"), "zeta%20suite");
