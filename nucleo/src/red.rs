@@ -104,6 +104,19 @@ pub fn run(
     Ok((path, dropped.len(), left))
 }
 
+/// Item 105: the selection check of `red --fix --fixes-release <tag>`, run
+/// right after the arguments parse: a tag name that is not a release name of
+/// the working tree's `[report]` selection (item 99) exits 2 with three lines
+/// on stderr, before `red` loads the config, logs a row or writes anything.
+pub fn exit_unless_release_name(tag: &str) {
+    if let Some(pattern) = crate::relatorio::not_a_release_name(tag) {
+        eprintln!("shipcraft: --fixes-release {tag} is not a release tag of this project (release tags: {pattern})");
+        eprintln!("Why: report counts a fix only against a release it reads, so this lock would name a release report never counts.");
+        eprintln!("Next: pass the tag of the release that shipped the defect, or set [report] release_tags in .shipcraft.toml, then run red again.");
+        std::process::exit(2);
+    }
+}
+
 /// Item 46: `red --redo` rewrites the open lock HEAD holds, in place, as the
 /// lock `red` would write for this tree; it keeps every case of the old one.
 /// `path` is HEAD's lock as soon as it is known, for the run log row;
@@ -154,6 +167,7 @@ pub fn redo(
     let files = locked_files(repo, &config)?;
     // Item 75: format 4 keeps its fix fields; a format 2 or 3 lock becomes format 3.
     // Item 98: a format 4 or 5 lock becomes format 5, with its controls.
+    // Item 105: a format 6 lock stays format 6.
     let lock = old.redone(files, run, failing, controls);
 
     let full_path = repo.path(&lock_path);
@@ -573,7 +587,7 @@ fn kept_controls(old: &Lock, cases: &[String], report: &Report) -> Vec<String> {
 }
 
 /// Item 98: the line right before `RED locked at` / `RED redone at`, when the
-/// lock written is format 5.
+/// lock written is format 5 or 6.
 fn print_controls(lock: &Lock) {
     if lock.controls.is_some() {
         println!(

@@ -735,6 +735,13 @@ pub fn report_release_tags(table: &toml::Table) -> std::result::Result<Option<St
     Ok(Some(pattern.to_string()))
 }
 
+/// Item 99: the reason an invalid `[report]` gives, the one text the
+/// `config-invalid` refusal, `report`'s git reason and `red`'s
+/// `--fixes-release` refusal (item 105) all print.
+pub fn report_invalid(problem: &str) -> String {
+    format!("[report] in {CONFIG_FILE} is invalid: {problem}")
+}
+
 /// Item 99: an invalid `[report]` refuses wherever the config is validated,
 /// naming the key and what is wrong. An older binary ignores the table, so no
 /// `shipcraft_min` is needed.
@@ -744,7 +751,7 @@ fn check_report(text: &str) -> Result<()> {
         Ok(_) => Ok(()),
         Err(problem) => refuse(
             "config-invalid",
-            format!("[report] in {CONFIG_FILE} is invalid: {problem}"),
+            report_invalid(&problem),
             "report reads its releases by this pattern, and shipcraft does not guess one it cannot read",
             format!("set release_tags = \"<pattern>\" (printable ASCII, `*` the only wildcard, not only `*`) as the only key of [report] in {CONFIG_FILE}, or remove [report], and run again"),
         ),

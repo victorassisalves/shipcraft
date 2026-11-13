@@ -99,7 +99,11 @@ if invalid:
  # Invalid arguments must win even over invalid config and an existing log.
  write('.shipcraft.toml','invalid TOML [\n');before=rows();files=snapshot()
  p=run(binary,'red',*args,ok=False)
- assert p.returncode==2 and 'shipcraft: error: invalid arguments:' in p.stderr and 'usage:' in p.stderr,(p.stdout,p.stderr)
+ if mode in ('invalid-tag-prefix','invalid-tag-missing-part','invalid-tag-extra-part','invalid-tag-leading-major','invalid-tag-leading-minor','invalid-tag-leading-patch','invalid-tag-negative','invalid-tag-prerelease','invalid-tag-build'):
+  tag=args[-1]
+  assert p.returncode==2 and p.stdout=='' and p.stderr.splitlines()==[f'shipcraft: --fixes-release {tag} is not a release tag of this project (release tags: vX.Y.Z)','Why: report counts a fix only against a release it reads, so this lock would name a release report never counts.','Next: pass the tag of the release that shipped the defect, or set [report] release_tags in .shipcraft.toml, then run red again.'],(p.stdout,p.stderr)
+ else:
+  assert p.returncode==2 and 'shipcraft: error: invalid arguments:' in p.stderr and 'usage:' in p.stderr,(p.stdout,p.stderr)
  assert rows()==before and snapshot()==files,'invalid arguments wrote a file/row'
  assert not Path('built75').exists() and not Path('checked75').exists(),'invalid arguments ran a command'
  sys.exit()
@@ -118,7 +122,7 @@ if reader:
   d['format']=int(mode[6]);[d.pop(k) for k in ('kind','reported_at','fixes_release')]
   if d['format']==2:d['files']={k:v.removeprefix('sha256:') for k,v in d['files'].items()}
  save(d)
- if mode.startswith('future-'):d['format']=6;save(d)
+ if mode.startswith('future-'):d['format']=7;save(d)
  if mode.startswith('read-') and mode not in ('read-status','read-init'):
   defect=mode[5:].rsplit('-',1)[0]
   mutations={'kind-null':('kind',None),'kind-number':('kind',7),'kind-other':('kind','bug'),'time-number':('reported_at',7),'time-invalid':('reported_at','1900-02-29T00:00Z'),'release-number':('fixes_release',7),'release-invalid':('fixes_release','v02.0.0'),'extra-key':('extra',None)}
@@ -142,7 +146,7 @@ if reader:
   else:
    if command=='init':write('lefthook.yml','pre-commit:\n  commands:\n    shipcraft:\n      run: shipcraft check\n      priority: 9\ncommit-msg:\n  commands:\n    shipcraft:\n      run: shipcraft check --commit-msg {1}\npost-commit:\n  commands:\n    shipcraft:\n      run: shipcraft close\n')
    p=run(binary,command,ok=False);lines=(p.stdout+p.stderr).strip().splitlines()[-3:];assert p.returncode==1,(p.returncode,lines)
-  assert lines==[f'shipcraft refused: lock {lock} needs a newer shipcraft (format 6; this one knows formats 2 to 5)','Why: a lock written by a newer shipcraft cannot be judged by an older one','Next: upgrade shipcraft to the version the project pins (package.json, or shipcraft_min), then run the command again'],lines
+  assert lines==[f'shipcraft refused: lock {lock} needs a newer shipcraft (format 7; this one knows formats 2 to 6)','Why: a lock written by a newer shipcraft cannot be judged by an older one','Next: upgrade shipcraft to the version the project pins (package.json, or shipcraft_min), then run the command again'],lines
   assert lock.read_bytes()==original
  elif (mode.startswith('read-') and mode not in ('read-status','read-init')) or (legacy and not mode.endswith(('redo','unchanged'))):
   layer=mode.rsplit('-',1)[1]
