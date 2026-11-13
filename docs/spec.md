@@ -1037,6 +1037,43 @@ DORA's change failure rate and time to recover need two facts per item: whether 
    - Locks written before this item carry no fix data; item 76 counts them as missing data, never as features.
    - Only the `red --redo` command keeps the fix fields. The hook and CI do not check that a redo commit's lock keeps them: a hand-generated lock that drops or changes them is judged by item 46's rules alone.
 
+### `fixes_release` names the project's own release tags (item 105)
+
+Found in the field (Hands-off, 2026-11-12, binary 2.53.0): Hands-off releases are tags like `deploy-20261112-200036`, read through `[report] release_tags = "deploy-*"` (item 99). `shipcraft red --fix --fixes-release deploy-20261112-200036` refuses with `invalid arguments` and no reason, so its fix locks carry `fixes_release: null` and `report`'s change failure rate stays `null` there. This is item 99's known limit ("`fixes_release` still takes only `vX.Y.Z` ... a separate item"), not a defect of a release: item 99 shipped it on purpose (v2.50.0). This item lifts it. Item 75's grammar for `vX.Y.Z` projects does not change.
+
+1. **The tag name grammar.** A *tag name* is a string that git accepts as the name of a tag: 1 to 255 bytes, every byte in `0x21`-`0x7E`, none of `~`, `^`, `:`, `?`, `*`, `[`, `\`; it does not start with `-`, is not `@`, holds no `..` and no `@{`, does not start or end with `/` and holds no `//`, ends in neither `.` nor `.lock`, and no `/`-separated component starts with `.` or ends in `.lock`. Item 75's tag syntax (`v` and `X.Y.Z`, no leading zeros) is a subset.
+2. **`red --fix --fixes-release <tag>`.**
+   - A `<tag>` that is not a tag name takes item 75's invalid-arguments path, as today: before anything runs, is written or is logged.
+   - Then `red` reads the release selection exactly as `report` does (item 99's reader of `.shipcraft.toml` in the working tree, and its three outcomes). The tag must be a release name of that selection: under a valid `release_tags`, it matches the pattern (item 99's matcher); under the default reading, it is of item 75's tag syntax; under an invalid `[report]`, no tag is accepted. A tag name that fails this refuses, exit 2, before anything runs, is written or is logged (no row), with these three lines on stderr:
+     - `shipcraft: --fixes-release <tag> is not a release tag of this project (release tags: <pattern>)`, where `<pattern>` is the pattern, or `vX.Y.Z` under the default reading, or `invalid: <item 99's reason>` under an invalid `[report]`;
+     - `Why: report counts a fix only against a release it reads, so this lock would name a release report never counts.`;
+     - `Next: pass the tag of the release that shipped the defect, or set [report] release_tags in .shipcraft.toml, then run red again.`
+   - Existence is still not checked (item 75): a matching name that is not yet a tag is recorded as given.
+   - `--redo` is unchanged: it takes no fix option and keeps the lock's own fields.
+3. **Lock format 6, written only when needed.**
+   - `red` (and `red --redo` of such a lock) writes **format 6** exactly when the lock's `fixes_release` is a string outside item 75's tag syntax. Format 6 is format 5's fields, order and rules, with one difference: `fixes_release` is `null` or a tag name (point 1). Every other lock is written as today (format 5), byte for byte.
+   - This binary reads formats 2 to 6, each by its own `format`. In format 6, a `fixes_release` that is `null` or of item 75's syntax makes the lock not valid (the writer never produces it), handled as a hand-edited lock today (`lock-edited` from the hook and CI). Format 5 keeps item 75's syntax.
+   - A binary that knows formats only up to 5 refuses a format 6 lock with item 75's `lock-format` text (`... needs a newer shipcraft (format 6; this one knows formats 2 to 5)`). The refusal text of this binary for a format above 6 reads `formats 2 to 6`.
+   - `report` reads a format 6 lock's fix fields like format 5's, and the run log's `red` rows: a row's `fixes_release` is read when it is `null` or a tag name. Item 76's `change_failure_rate` code is unchanged: a shipped `fix` lock whose `fixes_release` names a release under the active selection counts. So with `release_tags = "deploy-*"`, a fix naming `deploy-20261112-200036` is a measured failure when that tag is a release, and item 99's known limit on `fixes_release` is removed.
+
+**Known limits.** The tag is checked against the selection in the working tree when `red` runs; a project that later changes `release_tags` keeps the names its locks already hold, and `report` reads them under the new selection (a name that no longer matches counts as `missing`, as item 76 does for a name that names no release). Formats 2 to 5 readers are unchanged; a team that writes a format 6 lock needs every machine and CI that judges it on 2.54 or newer, and the release notes say so.
+
+**Metric:** on Hands-off, the next fix locks carry `fixes_release` with a `deploy-*` tag, and `report`'s `change_failure_rate` is not `null` once one ships. Revert: a release where `red` takes only item 75's syntax again; format 6 locks then refuse `lock-format` on that binary, so the revert also keeps reading format 6.
+
+**Touches.** Read first, and keep:
+- Item 75: every `v1-75.*` case: the option grammar for `vX.Y.Z`, the invalid-arguments path, format 4 writing and reading, `--redo` keeping fix fields, the run-log fields, the block line.
+- Item 98 (format 5, `controls`): every format 5 case; locks without a non-`vX.Y.Z` `fixes_release` stay format 5 byte for byte.
+- Item 43 and item 46: format refusals and redo upgrades; the `lock-format` wording for unknown formats now names `2 to 6`.
+- Item 76: `v1-76.*`, `change_failure_rate`, `missing`, `since`.
+- Item 99: `v1-99.*`; its section's known limit on `fixes_release` and its sentence "`fixes_release` is unchanged" are superseded by this item; `v1-99.invalid-precedence` and the reader's reasons are kept.
+- Item 10: `v1-10.1-execucoes-jsonl`; the version cases (`v1-62.version`, `v1-64.version`, `v1-87.version` and others): the contract goes to 2.54.0.
+
+**Current behavior** on these paths (keep unless marked change):
+- `red` parses its arguments before reading anything; an invalid one exits 2 with the usage and writes nothing. Keep. Change: a valid tag name that is not a release of the selection refuses with point 2's lines, after reading `.shipcraft.toml` and before anything else.
+- `red` writes format 5 locks; `--redo` of format 4 or 5 writes format 5. Keep, except for point 3's format 6.
+- The hook, `ci`, `close`, `check`, `status`, `init` and `merge` read locks through one reader. Keep; that reader gains format 6.
+- `report` reads `[report] release_tags` from `.shipcraft.toml` with item 99's reasons; red rows' and locks' `fixes_release` are read with item 75's syntax. Change: also tag names (point 3).
+
 ### The release publishes the binaries CI tested (item 78)
 
 POC-023 ran `release-shadow.yml` beside `release/publish.sh` on two releases. On 2.25.0 the CI path was ready 12.6 min earlier, and on 2.30.0 20.0 min earlier. The battery verdicts were identical (2488/2488 and 2694/2694), with the same version line and the same smoke run. Its automatic rule says keep (2026-10-31). Today `publish.sh` builds both targets on the releaser's Mac and runs the whole battery there (item 21's release cases, `v1-21.release-*`). This item makes it publish the binaries the shadow workflow built and tested at the tagged commit. The local path stays as an explicit fallback.
@@ -2458,4 +2495,4 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.53.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.54.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
