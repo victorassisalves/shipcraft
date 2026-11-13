@@ -81,7 +81,7 @@ elif case=='grammar-invalid':
 elif case in ('selection-default','selection-pattern','selection-invalid','fallback','precedence-config','precedence-suite','precedence-open','precedence-install'):
  variants=[(base,tag,'vX.Y.Z')]
  if case=='selection-pattern':variants=[(base+pattern,'v1.2.3','deploy-*'),(base+pattern,'Xdeploy-a','deploy-*'),(base+'[report]\nrelease_tags="deploy-*-end"\n','deploy-a-endX','deploy-*-end')]
- if case=='selection-invalid':variants=[(base+b,'v1.2.3','invalid: [report] in .shipcraft.toml is invalid: '+r) for b,r in (('[report]\nrelease_tags=""\n','release_tags is empty'),('[report]\nrelease_tags="***"\n','release_tags is only *'),('[report]\nrelease_tags=7\n','release_tags is not a string'),('report=7\n','[report] is not a table'),('[report]\nz_typo=1\na_typo=2\nrelease_tags="? "\n','unknown key a_typo'))]
+ if case=='selection-invalid':variants=[(b+base if b.startswith('report=') else base+b,'v1.2.3','invalid: [report] in .shipcraft.toml is invalid: '+r) for b,r in (('[report]\nrelease_tags=""\n','release_tags is empty'),('[report]\nrelease_tags="***"\n','release_tags is only *'),('[report]\nrelease_tags=7\n','release_tags is not a string'),('report=7\n','[report] is not a table'),('[report]\nz_typo=1\na_typo=2\nrelease_tags="? "\n','unknown key a_typo'))]
  if case=='fallback':variants=[(s,tag,'vX.Y.Z') for s in (None,b'\xff','broken [\n','DIRECTORY')]
  if case=='precedence-config':variants=[(base.replace('0.0','99999.0')+pattern,'v1.2.3','deploy-*')]
  if case=='precedence-suite':variants=[(base+'[[suite]]\nname="broken"\nroot="absent105"\ncommand="false"\nglobs=["tests/**"]\n'+pattern,'v1.2.3','deploy-*')]
