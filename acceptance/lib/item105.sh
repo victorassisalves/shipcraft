@@ -29,7 +29,10 @@ def commit():
 def rows():
  p=Path('.git/shipcraft/runs.jsonl');return [json.loads(s) for s in p.read_text().splitlines()] if p.is_file() else []
 def locks():return sorted(Path('.shipcraft/locks').glob('*.json'))
-def snapshot():return {str(p):p.read_bytes() for p in Path('.').rglob('*') if p.is_file() and '__pycache__' not in p.parts and '.pytest_cache' not in p.parts}
+# git's own files under .git (index refreshes, detached auto gc on slow runners) are not the binary's
+# effects; .git/shipcraft (the run log) is.
+def gitown(p):return p.parts[:1]==('.git',) and p.parts[1:2]!=('shipcraft',)
+def snapshot():return {str(p):p.read_bytes() for p in Path('.').rglob('*') if p.is_file() and not gitown(p) and '__pycache__' not in p.parts and '.pytest_cache' not in p.parts}
 def seal(d):
  c={k:d[k] for k in ('format','state','files','cases','failing_at_red')};c['files']=dict(sorted(c['files'].items()))
  if d['format'] in (5,6):c['controls']=d['controls']
@@ -97,7 +100,7 @@ elif case in ('selection-default','selection-pattern','selection-invalid','fallb
   else:write(config,body)
   before=snapshot();p=run(binary,'red','--fix','--fixes-release',t)
   assert p.returncode==2 and p.stdout=='' and p.stderr.splitlines()==[f'shipcraft: --fixes-release {t} is not a release tag of this project (release tags: {selection})','Why: report counts a fix only against a release it reads, so this lock would name a release report never counts.','Next: pass the tag of the release that shipped the defect, or set [report] release_tags in .shipcraft.toml, then run red again.'],(selection,p.stdout,p.stderr)
-  assert snapshot()==before,('selection refusal wrote state',t)
+  after=snapshot();assert after==before,('selection refusal wrote state',t,sorted(k for k in set(before)|set(after) if before.get(k)!=after.get(k)))
   assert not Path('observed105').exists() or case=='precedence-open','selection ran suite'
 elif case in ('red-log-fails','red-write-fails','red-suite-fails'):
  write('.shipcraft.toml',base+pattern)
