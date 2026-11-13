@@ -62,7 +62,7 @@ elif case in ('deploy','wildcard','literal','grammar-valid','selection-readers')
  if case=='selection-readers':variants=[(s,tag) for s in ('report = { release_tags = "deploy-*" } # inline\n',"report.release_tags = 'deploy-*' # literal\r\n",'["report"]\r\n"release_tags"="depl\\u006fy-*" # escaped\r\n')]
  for i,(body,t) in enumerate(variants):
   if i:fresh(i)
-  write('.shipcraft.toml',base+body)
+  write('.shipcraft.toml',body+base if case=='selection-readers' and i<2 else base+body)
   p=run(binary,'red','--fixes-release',t,'--reported-at',time,'--fix');assert p.returncode==0,('valid project release refused',t,p.stdout,p.stderr)
   lock=locks()[0];d=json.loads(lock.read_text())
   assert list(d)==['format','state','files','cases','failing_at_red','controls','kind','reported_at','fixes_release','seal'] and d['format']==6,d
@@ -200,7 +200,7 @@ else:
   elif case=='report-row':assert r['fixes_release']=='deploy-old' and r['change_kind']=='fix',r
   else:
    assert r['fixes_release']=='deploy-old' and metric['change_failure_rate']['value']==0.5 and metric['change_failure_rate']['missing']==0,(r,metric)
-   p=run(binary,'report','--json','--since','deploy-new');m=next(json.loads(s) for s in p.stdout.splitlines() if json.loads(s)['kind']=='dora');assert m['change_failure_rate']['value']==1 and m['change_failure_rate']['n']==1,m
+   p=run(binary,'report','--json','--since','deploy-new');m=next(json.loads(s) for s in p.stdout.splitlines() if json.loads(s)['kind']=='dora');assert m['change_failure_rate']['value']==0 and m['change_failure_rate']['n']==1 and m['change_failure_rate']['missing']==0,m
  else:raise AssertionError('unrouted case '+case)
 PY105
   pass
