@@ -56,6 +56,16 @@ impl Selection {
         }
     }
 
+    /// Item 105: None when `tag` is a release name of this selection, else
+    /// the selection as `red`'s refusal names it.
+    fn release_name_problem(&self, tag: &str) -> Option<String> {
+        match self {
+            Selection::Invalid(problem) => Some(format!("invalid: {}", config::report_invalid(problem))),
+            Selection::Pattern(pattern) => (!self.names(tag)).then(|| pattern.clone()),
+            Selection::Default => (!self.names(tag)).then(|| "vX.Y.Z".to_string()),
+        }
+    }
+
     fn pattern(&self) -> Option<&str> {
         match self {
             Selection::Pattern(pattern) => Some(pattern),
@@ -85,6 +95,18 @@ fn matches(pattern: &[u8], name: &[u8]) -> bool {
         }
     }
     pattern[p..].iter().all(|b| *b == b'*')
+}
+
+/// Item 105: `red --fixes-release <tag>`'s selection check, with item 99's
+/// reader of the working tree's `[report]` (the root found as `report` finds
+/// it; none found is the default reading) and its matcher. None when the tag
+/// names a release of the selection; else the `<pattern>` the refusal shows:
+/// the pattern, `vX.Y.Z` under the default reading, or `invalid: <reason>`
+/// (item 99's full reason, as `report` prints it) under an invalid
+/// `[report]`, where no tag is accepted.
+pub fn not_a_release_name(tag: &str) -> Option<String> {
+    let selection = discover().map_or(Selection::Default, |(root, _)| Selection::read(&root));
+    selection.release_name_problem(tag)
 }
 
 /// What `report` reads before any git call: the repository and run log, and
@@ -126,7 +148,7 @@ pub fn run(prepared: Prepared, as_json: bool, since: Option<&str>, github: bool)
     let evidence = match (&found, &selection) {
         (None, _) => Err("no git repository found".to_string()),
         // Item 99: an invalid `[report]` reads no git, as a git failure.
-        (Some(_), Selection::Invalid(problem)) => Err(format!("[report] in {CONFIG_FILE} is invalid: {problem}")),
+        (Some(_), Selection::Invalid(problem)) => Err(config::report_invalid(problem)),
         (Some(_), selection) => Evidence::read(&git, &ids, selection),
     };
     if let (Some(tag), Ok(ev)) = (since, &evidence) {
@@ -563,14 +585,15 @@ impl Facts {
     }
 }
 
-/// The fix data a `red` row carries, each field in its grammar.
+/// The fix data a `red` row carries, each field in its grammar; item 105:
+/// `fixes_release` is a tag name (item 75's syntax included).
 fn fix_of_row(row: &Row) -> FixData {
     let kind = row.get("kind").and_then(Value::as_str).filter(|k| *k == "feature" || *k == "fix");
     let field = |key: &str, valid: fn(&str) -> bool| row.get(key).and_then(Value::as_str).filter(|v| valid(v));
     FixData {
         kind: kind.map(str::to_string),
         reported_at: field("reported_at", lock::valid_time).map(str::to_string),
-        fixes_release: field("fixes_release", lock::valid_tag).map(str::to_string),
+        fixes_release: field("fixes_release", lock::tag_name).map(str::to_string),
     }
 }
 
@@ -1256,6 +1279,47 @@ mod tests {
         fs::create_dir_all(dir.join(CONFIG_FILE)).unwrap();
         assert!(matches!(Selection::read(&dir), Selection::Default));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fixes_release_must_be_a_release_name_of_the_selection() {
+        let default = Selection::Default;
+        assert_eq!(default.release_name_problem("v2.25.0"), None);
+        assert_eq!(default.release_name_problem("2.25.0").as_deref(), Some("vX.Y.Z"));
+        assert_eq!(default.release_name_problem("deploy-1").as_deref(), Some("vX.Y.Z"));
+        let deploy = Selection::Pattern("deploy-*".into());
+        assert_eq!(deploy.release_name_problem("deploy-20261112-200036"), None);
+        assert_eq!(deploy.release_name_problem("v1.0.0").as_deref(), Some("deploy-*"));
+        assert_eq!(deploy.release_name_problem("deployed/prod").as_deref(), Some("deploy-*"));
+        let v = Selection::Pattern("v*".into());
+        assert_eq!(v.release_name_problem("v1.0.0"), None);
+        assert_eq!(v.release_name_problem("v2"), None);
+        let invalid = Selection::Invalid("unknown key release_tag".into());
+        for tag in ["v1.0.0", "deploy-1"] {
+            assert_eq!(
+                invalid.release_name_problem(tag).as_deref(),
+                Some("invalid: [report] in .shipcraft.toml is invalid: unknown key release_tag")
+            );
+        }
+    }
+
+    #[test]
+    fn a_red_row_fixes_release_is_read_when_a_tag_name() {
+        let row = |release: Value| -> Row {
+            json!({"kind": "fix", "reported_at": null, "fixes_release": release}).as_object().unwrap().clone()
+        };
+        for (value, read) in [
+            (json!(null), None),
+            (json!("v1.0.0"), Some("v1.0.0")),
+            (json!("deploy-20261112-200036"), Some("deploy-20261112-200036")),
+            (json!("packages/api/v1.0.0"), Some("packages/api/v1.0.0")),
+            (json!("a..b"), None),
+            (json!("a b"), None),
+            (json!(""), None),
+            (json!(1), None),
+        ] {
+            assert_eq!(fix_of_row(&row(value.clone())).fixes_release.as_deref(), read, "{value}");
+        }
     }
 
     #[test]

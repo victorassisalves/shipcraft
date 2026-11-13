@@ -10,9 +10,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub const LOCK_DIR: &str = ".shipcraft/locks";
 /// The lock format this shipcraft writes (item 9, rule 2; item 43: format 3;
 /// item 75: format 4, with the fix fields; item 98: format 5, with `controls`).
+/// Item 105: a fix whose `fixes_release` is outside item 75's tag syntax is
+/// written in `FORMAT_TAG_NAME` instead; every other new lock stays format 5.
 pub const FORMAT: u64 = 5;
+/// Item 105: format 6, format 5 with a `fixes_release` that is a tag name
+/// outside item 75's syntax; the highest format this shipcraft knows.
+pub const FORMAT_TAG_NAME: u64 = 6;
 /// The lock formats this shipcraft reads, each lock by its own `format`.
-pub const FORMATS: [u64; 4] = [2, 3, 4, FORMAT];
+pub const FORMATS: [u64; 5] = [2, 3, 4, FORMAT, FORMAT_TAG_NAME];
 /// Item 43: in format 3 (and 4 and 5) each `files` value carries this prefix.
 const PREFIX: &str = "sha256:";
 /// Item 75: the keys format 4 adds, in order, after `failing_at_red`.
@@ -58,9 +63,11 @@ pub struct Fix {
 }
 
 impl Fix {
-    /// The fix fields of a format 4 lock's object; None when one is missing or
-    /// outside its syntax.
-    fn read(object: &serde_json::Map<String, serde_json::Value>) -> Option<Fix> {
+    /// The fix fields of a format 4, 5 or 6 lock's object; None when one is
+    /// missing or outside its syntax. Item 105: in formats 4 and 5,
+    /// `fixes_release` is item 75's tag syntax; in format 6, `kind` is `fix`
+    /// and `fixes_release` a tag name outside item 75's syntax, never null.
+    fn read(format: u64, object: &serde_json::Map<String, serde_json::Value>) -> Option<Fix> {
         use serde_json::Value;
         let optional = |key: &str, valid: fn(&str) -> bool| match object.get(key)? {
             Value::Null => Some(None),
@@ -73,11 +80,23 @@ impl Fix {
             _ => return None,
         };
         let reported_at = optional("reported_at", valid_time)?;
-        let fixes_release = optional("fixes_release", valid_tag)?;
+        let release: fn(&str) -> bool = if format == FORMAT_TAG_NAME { beyond_tag_syntax } else { valid_tag };
+        let fixes_release = optional("fixes_release", release)?;
         if kind == Kind::Feature && (reported_at.is_some() || fixes_release.is_some()) {
             return None;
         }
+        if format == FORMAT_TAG_NAME && (kind != Kind::Fix || fixes_release.is_none()) {
+            return None;
+        }
         Some(Fix { kind, reported_at, fixes_release })
+    }
+
+    /// Item 105: the format a new lock with these fix fields is written in.
+    fn format(&self) -> u64 {
+        match &self.fixes_release {
+            Some(tag) if !valid_tag(tag) => FORMAT_TAG_NAME,
+            _ => FORMAT,
+        }
     }
 }
 
@@ -139,7 +158,8 @@ impl Serialize for Lock {
 }
 
 impl Lock {
-    /// A new open lock in the current format; `files` values come from `new_digest`.
+    /// A new open lock in format 5, or format 6 when its `fixes_release` is
+    /// outside item 75's tag syntax (item 105); `files` values come from `new_digest`.
     pub fn open(
         files: BTreeMap<String, String>,
         cases: Vec<String>,
@@ -148,7 +168,7 @@ impl Lock {
         fix: Fix,
     ) -> Lock {
         Lock {
-            formato: FORMAT,
+            formato: fix.format(),
             state: State::Open,
             files,
             cases,
@@ -163,6 +183,7 @@ impl Lock {
     /// Item 75: the lock `red --redo` writes over `self`: a format 4 or 5 lock
     /// becomes format 5 (item 98) with the same fix fields and `controls`; a
     /// format 2 or 3 lock becomes format 3, with no fix field and no controls.
+    /// Item 105: a format 6 lock stays format 6.
     pub fn redone(
         &self,
         files: BTreeMap<String, String>,
@@ -171,6 +192,7 @@ impl Lock {
         controls: Vec<String>,
     ) -> Lock {
         let (formato, fix, controls) = match &self.fix {
+            Some(fix) if self.formato == FORMAT_TAG_NAME => (FORMAT_TAG_NAME, Some(fix.clone()), Some(controls)),
             Some(fix) => (FORMAT, Some(fix.clone()), Some(controls)),
             None => (3, None, None),
         };
@@ -201,14 +223,15 @@ impl Lock {
     /// item 75: in format 4, a fix field missing or outside its syntax, or a key
     /// format 4 does not name; in formats 2 and 3, any fix key. Item 98: in
     /// format 5, also `controls` missing or not valid (`read_controls`); in
-    /// formats 2 to 4, a `controls` key.
+    /// formats 2 to 4, a `controls` key. Item 105: format 6 has format 5's
+    /// keys and rules, with its own `kind` and `fixes_release` (`Fix::read`).
     pub fn parse(bytes: &[u8]) -> Option<Lock> {
         let base: Base = serde_json::from_slice(bytes).ok()?;
         let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
         let object = value.as_object()?;
         let keys: &[&str] = match base.formato {
             4 => &FORMAT_4_KEYS,
-            5 => &FORMAT_5_KEYS,
+            5 | FORMAT_TAG_NAME => &FORMAT_5_KEYS,
             _ => &[],
         };
         let (fix, controls) = if keys.is_empty() {
@@ -221,10 +244,10 @@ impl Lock {
                 return None;
             }
             let controls = match base.formato {
-                5 => Some(read_controls(object.get(CONTROLS)?, &base.cases, &base.failing_at_red)?),
+                5 | FORMAT_TAG_NAME => Some(read_controls(object.get(CONTROLS)?, &base.cases, &base.failing_at_red)?),
                 _ => None,
             };
-            (Some(Fix::read(object)?), controls)
+            (Some(Fix::read(base.formato, object)?), controls)
         };
         let lock = Lock {
             formato: base.formato,
@@ -239,12 +262,12 @@ impl Lock {
         (lock.files.values().all(|value| lock.valid_value(value)) && lock.seal == lock.compute_seal()).then_some(lock)
     }
 
-    /// Formats 3 to 5: exactly `sha256:` and 64 lowercase hex; format 2: exactly
+    /// Formats 3 to 6: exactly `sha256:` and 64 lowercase hex; format 2: exactly
     /// 64 lowercase hex. No trimming, no case folding.
     fn valid_value(&self, value: &str) -> bool {
         let hex = match self.formato {
             2 => Some(value),
-            3..=5 => value.strip_prefix(PREFIX),
+            3..=FORMAT_TAG_NAME => value.strip_prefix(PREFIX),
             _ => None,
         };
         hex.is_some_and(|hex| hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
@@ -321,6 +344,35 @@ pub fn valid_time(text: &str) -> bool {
     zone_ok && (1..=days).contains(&day) && hour <= 23 && minute <= 59
 }
 
+/// Item 105: a tag name, Shipcraft's own lexical grammar, on the string alone
+/// (git is never consulted): at least 1 byte, every byte in 0x21-0x7E, none
+/// of `~ ^ : ? * [ \`; not starting with `-`, not `@`, no `..` and no `@{`,
+/// not starting or ending with `/` and no `//`, not ending with `.`, and no
+/// `/`-separated component starting with `.` or ending in `.lock`. No length
+/// limit. Every string of item 75's tag syntax is a tag name.
+pub fn tag_name(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    !bytes.is_empty()
+        && bytes
+            .iter()
+            .all(|b| (0x21..=0x7e).contains(b) && !matches!(b, b'~' | b'^' | b':' | b'?' | b'*' | b'[' | b'\\'))
+        && !text.starts_with('-')
+        && text != "@"
+        && !text.contains("..")
+        && !text.contains("@{")
+        && !text.starts_with('/')
+        && !text.ends_with('/')
+        && !text.contains("//")
+        && !text.ends_with('.')
+        && text.split('/').all(|component| !component.starts_with('.') && !component.ends_with(".lock"))
+}
+
+/// Item 105: a tag name outside item 75's tag syntax, the `fixes_release` of
+/// a format 6 lock.
+pub fn beyond_tag_syntax(text: &str) -> bool {
+    tag_name(text) && !valid_tag(text)
+}
+
 /// Item 75: `v` then `X.Y.Z`, each a decimal number without leading zeros.
 pub fn valid_tag(text: &str) -> bool {
     let Some(version) = text.strip_prefix('v') else { return false };
@@ -350,14 +402,15 @@ pub fn lock_files(repo: &Repo, snapshot: &Snapshot) -> Result<LockFiles> {
 
 /// Refuses a lock written in a format this shipcraft does not know. A lock that is
 /// not JSON, or has no format, is left to the seal check (edited by hand).
-/// Item 75: a format above the highest known one asks for a newer shipcraft.
+/// Item 75: a format above the highest known one asks for a newer shipcraft
+/// (item 105: the highest is format 6).
 pub(crate) fn check_format(path: &str, bytes: &[u8]) -> Result<()> {
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) else { return Ok(()) };
     let legacy = value.get("formato").is_some();
     match value.get("format").or_else(|| value.get("formato")) {
-        Some(f) if !legacy && f.as_u64().is_some_and(|f| f > FORMAT) => refuse(
+        Some(f) if !legacy && f.as_u64().is_some_and(|f| f > FORMAT_TAG_NAME) => refuse(
             "lock-format",
-            format!("lock {path} needs a newer shipcraft (format {f}; this one knows formats 2 to {FORMAT})"),
+            format!("lock {path} needs a newer shipcraft (format {f}; this one knows formats 2 to {FORMAT_TAG_NAME})"),
             "a lock written by a newer shipcraft cannot be judged by an older one",
             "upgrade shipcraft to the version the project pins (package.json, or shipcraft_min), then run the command again",
         ),
@@ -384,7 +437,7 @@ pub fn new_digest(bytes: &[u8]) -> String {
 }
 
 /// The `files` value of these bytes in a lock of `format`: `sha256:<hex>` in
-/// formats 3 to 5, the bare hex in format 2.
+/// formats 3 to 6, the bare hex in format 2.
 fn digest(format: u64, bytes: &[u8]) -> String {
     let hex = sha256_hex(bytes);
     if format == 2 {
@@ -536,11 +589,248 @@ mod tests {
     }
 
     #[test]
-    fn format_6_is_the_future_format() {
+    fn format_7_is_the_future_format() {
         assert!(check_format("l.json", br#"{"format":5}"#).is_ok());
-        let Err(crate::refusal::Stop::Refused(refusal)) = check_format("l.json", br#"{"format":6}"#) else {
-            panic!("format 6 must refuse")
+        assert!(check_format("l.json", br#"{"format":6}"#).is_ok());
+        let Err(crate::refusal::Stop::Refused(refusal)) = check_format("l.json", br#"{"format":7}"#) else {
+            panic!("format 7 must refuse")
         };
-        assert!(refusal.what().contains("format 6; this one knows formats 2 to 5"), "{}", refusal.what());
+        assert_eq!(refusal.what(), "lock l.json needs a newer shipcraft (format 7; this one knows formats 2 to 6)");
+    }
+
+    // Item 105: the tag name grammar.
+
+    #[test]
+    fn tag_names_accept_project_release_tags() {
+        for name in [
+            "deploy-20261112-200036",
+            "draken-platform-v0.1.0",
+            "packages/api/v1.0.0",
+            "a",
+            "2.25.0",
+            "v2.25",
+            "v02.25.0",
+            "v2.25.0-rc1",
+            "v2.25.0+build",
+            "v-1.0.0",
+            "a.b",
+            "a@b",
+            "@a",
+            "a@",
+            "a{b}",
+            "a-",
+            "a.lockx",
+            "lock",
+            "x/lock",
+            "a.lock.b",
+            "!\"#$%&'()+,;<=>]_`{|}",
+        ] {
+            assert!(tag_name(name), "{name}");
+        }
+        // No length limit.
+        assert!(tag_name(&"x".repeat(100_000)));
+    }
+
+    #[test]
+    fn tag_names_refuse_each_forbidden_byte() {
+        assert!(!tag_name(""));
+        for byte in ['~', '^', ':', '?', '*', '[', '\\', ' ', '\t', '\n', '\u{7f}', '\u{0}', '\u{1f}'] {
+            assert!(!tag_name(&format!("a{byte}b")), "{byte:?} inside");
+            assert!(!tag_name(&format!("{byte}")), "{byte:?} alone");
+        }
+        // Every byte outside 0x21-0x7E, non-ASCII included.
+        for b in (0u8..=0x20).chain(0x7f..=0x7f) {
+            assert!(!tag_name(&format!("a{}b", b as char)), "{b:#x}");
+        }
+        for name in ["déploy", "v1.0.0é", "日本", "a\u{a0}b"] {
+            assert!(!tag_name(name), "{name}");
+        }
+        // Every other printable ASCII byte is allowed somewhere inside a name.
+        for b in 0x21u8..=0x7e {
+            let name = format!("a{}b", b as char);
+            let forbidden = matches!(b, b'~' | b'^' | b':' | b'?' | b'*' | b'[' | b'\\');
+            assert_eq!(tag_name(&name), !forbidden, "{name}");
+        }
+    }
+
+    #[test]
+    fn tag_names_refuse_each_forbidden_sequence() {
+        for name in [
+            "-a",       // starts with -
+            "-",        // starts with -
+            "@",        // is @
+            "a..b",     // ..
+            "..",       // ..
+            "v1..0",    // ..
+            "a@{b",     // @{
+            "@{",       // @{
+            "/a",       // starts with /
+            "a/",       // ends with /
+            "/",        // starts and ends with /
+            "a//b",     // //
+            "a.",       // ends with .
+            ".",        // ends with . / component starts with .
+            "v1.0.0.",  // ends with .
+            ".a",       // component starts with .
+            "a/.b",     // component starts with .
+            "a/.b/c",   // component starts with .
+            "a.lock",   // component ends in .lock
+            "a.lock/b", // component ends in .lock
+            "b/a.lock", // component ends in .lock
+            ".lock",    // starts with .
+        ] {
+            assert!(!tag_name(name), "{name}");
+        }
+        // Allowed neighbours of those rules.
+        for name in ["a-", "a-b", "@@", "a@", "a.b.c", "a/b", "a/b.c", "a.lockb", "alock", "a/b-.c"] {
+            assert!(tag_name(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn every_item_75_tag_is_a_tag_name() {
+        let long = "9".repeat(5000);
+        for tag in [
+            "v0.0.0".to_string(),
+            "v2.25.0".to_string(),
+            "v10.200.3000".to_string(),
+            format!("v{long}.{long}.{long}"),
+            format!("v1{long}.0.0"),
+        ] {
+            assert!(valid_tag(&tag), "{tag}");
+            assert!(tag_name(&tag), "{tag}");
+            assert!(!beyond_tag_syntax(&tag), "{tag}");
+        }
+        // A sweep of short strings over a small alphabet: item 75's syntax
+        // always implies a tag name.
+        let alphabet = ['v', '0', '1', '.', '-'];
+        let mut words = vec![String::new()];
+        for _ in 0..7 {
+            words = words.iter().flat_map(|w| alphabet.iter().map(move |c| format!("{w}{c}"))).collect();
+            for word in &words {
+                assert!(!valid_tag(word) || tag_name(word), "{word}");
+            }
+        }
+        assert!(beyond_tag_syntax("deploy-1") && !beyond_tag_syntax("a b"));
+    }
+
+    // Item 105: lock format 6 and the writer matrix.
+
+    fn fix(release: Option<&str>) -> Fix {
+        Fix { kind: Kind::Fix, reported_at: None, fixes_release: release.map(str::to_string) }
+    }
+
+    fn opened(fix: Fix) -> Lock {
+        Lock::open(files(), strings(&["a::f", "a::p"]), strings(&["a::f"]), strings(&["a::p"]), fix)
+    }
+
+    #[test]
+    fn a_new_red_writes_format_6_only_for_a_tag_beyond_item_75() {
+        for (fix, format) in [
+            (feature(), 5),
+            (fix(None), 5),
+            (fix(Some("v2.25.0")), 5),
+            (fix(Some("deploy-20261112-200036")), 6),
+            (fix(Some("v2.25")), 6),
+            (fix(Some("packages/api/v1.0.0")), 6),
+        ] {
+            let lock = opened(fix.clone());
+            assert_eq!(lock.formato, format, "{fix:?}");
+            assert_eq!(Lock::parse(lock.to_json().as_bytes()).as_ref(), Some(&lock), "{fix:?}");
+            let closed = lock.closed();
+            assert_eq!(closed.formato, format);
+            assert_eq!(Lock::parse(closed.to_json().as_bytes()), Some(closed));
+        }
+        // Format 5 stays byte for byte what it was: same keys and order.
+        let six = opened(fix(Some("deploy-1")));
+        let five = opened(fix(Some("v1.0.0")));
+        let strip = |lock: &Lock| {
+            let mut value = serde_json::to_value(lock).unwrap();
+            value.as_object_mut().unwrap().remove("format");
+            value.as_object_mut().unwrap().remove("seal");
+            value.as_object_mut().unwrap().remove("fixes_release");
+            value
+        };
+        assert_eq!(strip(&six), strip(&five));
+        assert!(six.to_json().starts_with("{\n  \"format\": 6,"), "{}", six.to_json());
+    }
+
+    #[test]
+    fn redo_keeps_6_promotes_4_and_5_to_5_and_keeps_legacy_at_3() {
+        let redo =
+            |lock: &Lock| lock.redone(files(), lock.cases.clone(), lock.failing_at_red.clone(), strings(&["a::p"]));
+        let six = opened(fix(Some("deploy-1")));
+        let redone = redo(&six);
+        assert_eq!((redone.formato, redone.fix.clone()), (6, six.fix.clone()));
+        assert_eq!(redone, six, "an unchanged redo of format 6 reads the same");
+        assert!(Lock::parse(redone.to_json().as_bytes()).is_some());
+        let changed = six.redone(files(), six.cases.clone(), six.failing_at_red.clone(), Vec::new());
+        assert_eq!(changed.formato, 6);
+        assert_ne!(changed, six);
+        let five = opened(fix(Some("v1.0.0")));
+        assert_eq!(redo(&five).formato, 5);
+        let four = Lock { formato: 4, controls: None, ..five.clone() }.sealed();
+        assert_eq!(redo(&four).formato, 5);
+        for legacy in [2, 3] {
+            let old = Lock { formato: legacy, controls: None, fix: None, ..five.clone() }.sealed();
+            let redone = redo(&old);
+            assert_eq!((redone.formato, redone.fix.clone(), redone.controls.clone()), (3, None, None));
+        }
+    }
+
+    #[test]
+    fn format_6_needs_a_fix_with_a_tag_beyond_item_75() {
+        let six = opened(fix(Some("deploy-1")));
+        let set = |edit: &dyn Fn(&mut serde_json::Map<String, serde_json::Value>)| resealed(&six, |o| edit(o));
+        assert!(Lock::parse(&set(&|_| {})).is_some(), "a hand reseal of a valid format 6 lock reads");
+        let reported = set(&|o| drop(o.insert("reported_at".into(), "2026-11-12T20:00Z".into())));
+        assert!(Lock::parse(&reported).is_some());
+        for (what, bad) in [
+            ("null fixes_release", set(&|o| drop(o.insert("fixes_release".into(), serde_json::Value::Null)))),
+            ("vX.Y.Z fixes_release", set(&|o| drop(o.insert("fixes_release".into(), "v1.0.0".into())))),
+            ("not a tag name", set(&|o| drop(o.insert("fixes_release".into(), "a..b".into())))),
+            ("non-ASCII", set(&|o| drop(o.insert("fixes_release".into(), "déploy".into())))),
+            ("a number", set(&|o| drop(o.insert("fixes_release".into(), 1.into())))),
+            ("kind feature", set(&|o| drop(o.insert("kind".into(), "feature".into())))),
+            (
+                "kind feature, null fields",
+                set(&|o| {
+                    o.insert("kind".into(), "feature".into());
+                    o.insert("fixes_release".into(), serde_json::Value::Null);
+                }),
+            ),
+            ("no controls", set(&|o| drop(o.remove("controls")))),
+            ("no fixes_release", set(&|o| drop(o.remove("fixes_release")))),
+            ("an extra key", set(&|o| drop(o.insert("extra".into(), 1.into())))),
+            (
+                "bare digests",
+                set(&|o| {
+                    let files: serde_json::Map<String, serde_json::Value> = o["files"]
+                        .as_object()
+                        .unwrap()
+                        .iter()
+                        .map(|(k, v)| (k.clone(), v.as_str().unwrap().trim_start_matches(PREFIX).into()))
+                        .collect();
+                    o.insert("files".into(), files.into());
+                }),
+            ),
+        ] {
+            assert_eq!(Lock::parse(&bad), None, "{what}");
+        }
+    }
+
+    #[test]
+    fn format_5_still_takes_only_item_75_syntax() {
+        let five = opened(fix(Some("v1.0.0")));
+        for release in ["deploy-1", "v2.25", "2.25.0", "packages/api/v1.0.0"] {
+            let bad = resealed(&five, |o| drop(o.insert("fixes_release".into(), release.into())));
+            assert_eq!(Lock::parse(&bad), None, "{release}");
+        }
+        let four = Lock { formato: 4, controls: None, ..five.clone() }.sealed();
+        let bad = resealed(&four, |o| drop(o.insert("fixes_release".into(), "deploy-1".into())));
+        assert_eq!(Lock::parse(&bad), None);
+        // A format 5 lock relabelled 6 with an item 75 tag is not valid either.
+        let relabelled = resealed(&five, |o| drop(o.insert("format".into(), 6.into())));
+        assert_eq!(Lock::parse(&relabelled), None);
     }
 }

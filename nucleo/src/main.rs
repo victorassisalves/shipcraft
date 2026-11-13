@@ -101,7 +101,7 @@ fn run(args: &[&str]) -> Result<()> {
         ["red", rest @ ..] => {
             // Item 55: each option once, in any order; item 60: `--redo` takes the others too.
             // Item 75: `--fix`, and `--reported-at` and `--fixes-release` only with it,
-            // never with `--redo`; each value in its grammar.
+            // never with `--redo`; each value in its grammar (item 105: a tag name).
             let (mut redo, mut all, mut base) = (false, false, None);
             let (mut fix, mut reported_at, mut fixes_release) = (false, None, None);
             let mut rest = rest.iter();
@@ -115,7 +115,7 @@ fn run(args: &[&str]) -> Result<()> {
                         reported_at = Some(rest.next().filter(|v| lock::valid_time(v)).ok_or_else(|| invalid(args))?)
                     }
                     "--fixes-release" if fixes_release.is_none() => {
-                        fixes_release = Some(rest.next().filter(|v| lock::valid_tag(v)).ok_or_else(|| invalid(args))?)
+                        fixes_release = Some(rest.next().filter(|v| lock::tag_name(v)).ok_or_else(|| invalid(args))?)
                     }
                     _ => return Err(invalid(args)),
                 }
@@ -124,6 +124,12 @@ fn run(args: &[&str]) -> Result<()> {
                 || (!fix && (reported_at.is_some() || fixes_release.is_some()))
             {
                 return Err(invalid(args));
+            }
+            // Item 105: the selection check, right after the arguments parse and
+            // before anything else `red` does: no row, nothing read but the
+            // `[report]` table, nothing written.
+            if let Some(tag) = fixes_release {
+                red::exit_unless_release_name(tag);
             }
             let fix = lock::Fix {
                 kind: if fix { lock::Kind::Fix } else { lock::Kind::Feature },
