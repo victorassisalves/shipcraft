@@ -15,7 +15,10 @@
 #
 # --local-build is the fallback (item 21's path): from a fresh checkout of the commit it
 # builds both macOS targets, runs the whole battery against this machine's target (with
-# acceptance/reuso.sh's per-tree reuse) and packages those.
+# acceptance/reuso.sh's per-tree reuse) and packages those. Item 106: when that local reuse
+# misses and SHIPCRAFT_ACCEPTANCE_REUSE is not 0, a green acceptance.yml run of the pinned
+# commit on main (5 macOS shards preferred, else every Linux shard) replaces the local
+# battery, and the notes name that run and its platform.
 #
 # Either way it packages one archive per target, writes SHA256SUMS and creates the release
 # with gh. It does not publish to brew, crates.io or npm.
@@ -137,9 +140,107 @@ if [ "$LOCAL" = 1 ]; then
     . "$SRC/acceptance/reuso.sh"
     BATTERY=$(acceptance_cached_result "$SRC" HEAD) || BATTERY=""
   fi
+  # -------------------------------------------------------------- --local-build: GitHub's battery
+  # Item 106: on a local cache miss, and unless SHIPCRAFT_ACCEPTANCE_REUSE is 0, a green
+  # acceptance run of the pinned commit itself on main (push, schedule or workflow_dispatch)
+  # stands for the local battery: the first run whose jobs prove macOS (macos 1/5 to 5/5),
+  # else the first that proves Linux (linux 1/<n> to <n>/<n>). gh's answers go to files and
+  # are read with Python's json, never as shell code. A lookup that takes nothing is never a
+  # refusal: it says why and the local battery runs as before.
+  ACC_RUN=""; ACC_PLATFORM=""
+  if [ -z "$BATTERY" ] && [ "${SHIPCRAFT_ACCEPTANCE_REUSE:-1}" != 0 ]; then
+    # The candidates, newest first, one databaseId per line (at most 20); exit 2: unreadable.
+    cat >"$WORK/acceptance-runs.py" <<'PY'
+import json, sys
+if hasattr(sys, 'set_int_max_str_digits'):
+    sys.set_int_max_str_digits(0)
+try:
+    with open(sys.argv[1], 'rb') as f:
+        runs = json.loads(f.read())
+except Exception:
+    sys.exit(2)
+if type(runs) is not list:
+    sys.exit(2)
+found = 0
+for r in runs:
+    if type(r) is not dict:
+        continue
+    i = r.get('databaseId')
+    if type(i) is not int or i <= 0:
+        continue
+    if not all(type(r.get(k)) is str for k in ('headSha', 'event', 'status', 'conclusion')):
+        continue
+    if r['headSha'] != sys.argv[2] or r['status'] != 'completed' or r['conclusion'] != 'success':
+        continue
+    if r['event'] not in ('push', 'schedule', 'workflow_dispatch'):
+        continue
+    print(i)
+    found += 1
+    if found == 20:
+        break
+PY
+    # Prints macos (a macOS proof), linux <n> (a Linux proof only) or none; exit 2: not an
+    # object whose jobs is an array, which removes only that candidate.
+    cat >"$WORK/acceptance-jobs.py" <<'PY'
+import json, re, sys
+if hasattr(sys, 'set_int_max_str_digits'):
+    sys.set_int_max_str_digits(0)
+try:
+    with open(sys.argv[1], 'rb') as f:
+        run = json.loads(f.read())
+except Exception:
+    sys.exit(2)
+if type(run) is not dict or type(run.get('jobs')) is not list:
+    sys.exit(2)
+shards = {'macos': [], 'linux': []}
+for j in run['jobs']:
+    if type(j) is not dict or type(j.get('name')) is not str or type(j.get('conclusion')) is not str:
+        print('none')  # an unreadable job voids both proofs
+        sys.exit(0)
+    m = re.fullmatch(r'(macos|linux) ([1-9][0-9]*)/([1-9][0-9]*)', j['name'])
+    if m:
+        shards[m.group(1)].append((int(m.group(2)), int(m.group(3)), j['conclusion']))
+def proof(s, n):
+    # the whole set, never after dropping members: 1/n to n/n, each once, all success
+    return (len(s) == n and all(sn == n and c == 'success' for _, sn, c in s)
+            and sorted(k for k, _, _ in s) == list(range(1, n + 1)))
+if proof(shards['macos'], 5):
+    print('macos')
+elif shards['linux'] and proof(shards['linux'], shards['linux'][0][1]):
+    print('linux %d' % shards['linux'][0][1])
+else:
+    print('none')
+PY
+    ACC_REASON="no green run of this commit"
+    if ! gh run list -R "$REPO" --workflow acceptance.yml --branch main --commit "$SHA" \
+      --json databaseId,headSha,event,status,conclusion --limit 20 >"$WORK/acceptance-runs.json" 2>/dev/null; then
+      ACC_REASON="gh run list failed"
+    elif ! ACC_CANDIDATES=$(python3 -I "$WORK/acceptance-runs.py" "$WORK/acceptance-runs.json" "$SHA" 2>/dev/null); then
+      ACC_REASON="unreadable run list"
+    else
+      ACC_LINUX_RUN=""; ACC_LINUX_PLATFORM=""
+      for id in $ACC_CANDIDATES; do
+        rm -f "$WORK/acceptance-jobs.json"
+        gh run view "$id" -R "$REPO" --json jobs >"$WORK/acceptance-jobs.json" 2>/dev/null || continue
+        ACC_PROOF=$(python3 -I "$WORK/acceptance-jobs.py" "$WORK/acceptance-jobs.json" 2>/dev/null) || continue
+        case "$ACC_PROOF" in
+          macos) ACC_RUN="$id"; ACC_PLATFORM="5 macOS shards"; break ;;
+          "linux "*) [ -n "$ACC_LINUX_RUN" ] \
+            || { ACC_LINUX_RUN="$id"; ACC_LINUX_PLATFORM="${ACC_PROOF#linux } Linux shards"; } ;;
+        esac
+      done
+      [ -n "$ACC_RUN" ] || { ACC_RUN="$ACC_LINUX_RUN"; ACC_PLATFORM="$ACC_LINUX_PLATFORM"; }
+    fi
+    if [ -n "$ACC_RUN" ]; then
+      echo "publish.sh: battery reused from GitHub: acceptance run $ACC_RUN at $SHA, $ACC_PLATFORM"
+    else
+      echo "publish.sh: no GitHub battery to reuse ($ACC_REASON); running it here"
+    fi
+  fi
+
   if [ -n "$BATTERY" ]; then
     echo "publish.sh: battery reused for this tree: $BATTERY"
-  else
+  elif [ -z "$ACC_RUN" ]; then
     (cd "$SRC" && nice -n 10 bash acceptance/run.sh "$BIN" all) || refuse \
       "the whole battery is red against $PLATFORM" \
       "a release only comes from a commit with a green battery" \
@@ -147,8 +248,15 @@ if [ "$LOCAL" = 1 ]; then
     BATTERY="green in this run"
   fi
   BINDIR="$CARGO_TARGET_DIR"; BINSUFFIX=release/shipcraft
-  NOTES="The whole battery (acceptance/run.sh all) ran against $PLATFORM: $BATTERY.
+  if [ -n "$ACC_RUN" ]; then
+    NOTES="The whole battery (acceptance/run.sh all) ran green in GitHub acceptance run $ACC_RUN at this commit, on $ACC_PLATFORM, against a binary built there.
+Both macOS targets were built here; the battery did not run against them."
+    [ "$ACC_PLATFORM" = "5 macOS shards" ] || NOTES="$NOTES
+No macOS battery ran for this commit."
+  else
+    NOTES="The whole battery (acceptance/run.sh all) ran against $PLATFORM: $BATTERY.
 $OTHER was only built: the battery did not run against it (an accepted limit, item 21.2)."
+  fi
 
 else
   # -------------------------------------------------------------- the release-shadow run
