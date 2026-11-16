@@ -156,7 +156,7 @@ if hasattr(sys, 'set_int_max_str_digits'):
     sys.set_int_max_str_digits(0)
 try:
     with open(sys.argv[1], 'rb') as f:
-        runs = json.loads(f.read())
+        runs = json.loads(f.read().decode('utf-8', 'strict'))
 except Exception:
     sys.exit(2)
 if type(runs) is not list:
@@ -187,7 +187,7 @@ if hasattr(sys, 'set_int_max_str_digits'):
     sys.set_int_max_str_digits(0)
 try:
     with open(sys.argv[1], 'rb') as f:
-        run = json.loads(f.read())
+        run = json.loads(f.read().decode('utf-8', 'strict'))
 except Exception:
     sys.exit(2)
 if type(run) is not dict or type(run.get('jobs')) is not list:
