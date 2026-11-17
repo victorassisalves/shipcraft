@@ -165,7 +165,7 @@ if not bad:assert 'invalid arguments:' not in stderr,('valid PR arguments reject
 assert rc==want,('wrong exit',case,want,rc,stderr)
 trace=records(st/'trace110');gates=[x for x in trace if x['kind']=='gate'];merges=[x for x in trace if x['argv'][:2]==['pr','merge']]
 rs=rows();prs=[r for r in rs[len(before):] if r['layer']=='pr'];mrs=[r for r in rs[len(before):] if r['layer']=='merge']
-pr_keys=set('at base branch code commit layer lock locks pr product_lines queue_secs result review_after secs warn_lines'.split())
+pr_keys=set('at base branch code commit layer lock locks pr product_lines queue_secs result review_after secs warn_lines new_dependencies dependency_warnings dependencies_not_checked'.split())
 merge_keys=set('at base branch code commit default_branch layer lock locks method pr reason result secs'.split())
 assert all(set(r)==pr_keys | ({'reason'} if r['result']=='refused' else set()) for r in prs),prs
 assert all(set(r)==merge_keys for r in mrs),mrs

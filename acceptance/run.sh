@@ -903,12 +903,12 @@ _oldifs="$IFS"; IFS=:
 for _d in $PATH; do
   [ -d "$_d" ] || continue
   _hit=0
-  for _n in gh codex claude gemini; do [ -e "$_d/$_n" ] && _hit=1; done
+  for _n in gh codex claude gemini curl; do [ -e "$_d/$_n" ] && _hit=1; done
   if [ "$_hit" = 1 ]; then
     _i=$((_i + 1)); mkdir -p "$WORK/shadow/$_i"
     for _f in "$_d"/*; do
       _b="${_f##*/}"
-      case "$_b" in gh|codex|claude|gemini) continue ;; esac
+      case "$_b" in gh|codex|claude|gemini|curl) continue ;; esac
       ln -s "$_f" "$WORK/shadow/$_i/$_b" 2>/dev/null
     done
     _d="$WORK/shadow/$_i"
