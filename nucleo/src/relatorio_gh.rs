@@ -131,12 +131,7 @@ impl<'a> Asker<'a> {
                 percent_encode(name)
             );
             runs = self.call(&["api", "--paginate", "--slurp", &path])?;
-            let runs = pages(&runs, "check_runs", |e| {
-                e.get("name").is_some_and(Value::is_string)
-                    && e.get("status").is_some_and(Value::is_string)
-                    && e.get("conclusion").is_some_and(|c| c.is_string() || c.is_null())
-            })
-            .ok_or(UNREADABLE)?;
+            let runs = pages(&runs, "check_runs", check_run).ok_or(UNREADABLE)?;
             matches.extend(runs.iter().filter(|e| e["name"] == name).map(|e| {
                 (
                     e["status"] == "completed" && e["conclusion"] == "success",
@@ -164,12 +159,46 @@ impl<'a> Asker<'a> {
         Asker { root: PathBuf::new(), git: None, calls, timed_out, config: None }
     }
 
+    /// Tests: an asker whose config is already read, as these `suite_checks`
+    /// (None: unreadable).
+    #[cfg(test)]
+    pub fn configured(mut self, checks: Option<&[&str]>) -> Asker<'a> {
+        let checks = checks.map(|c| ("github".to_string(), c.iter().map(|n| n.to_string()).collect()));
+        self.config = Some(checks);
+        self
+    }
+
     /// Item 113: the Blocking count of the latest `shipcraft/review` status
     /// with a count at a reviewed commit (40 lowercase hex), or the reason.
     pub fn blocking(&mut self, commit: &str) -> Result<u64, String> {
         let path = format!("repos/{{owner}}/{{repo}}/commits/{commit}/statuses?per_page=100");
         let answer = self.call(&["api", "--paginate", "--slurp", &path])?;
         latest_count(&answer).map_err(str::to_string)
+    }
+
+    /// Item 114: the config's `suite_checks`, through the once-per-run reader;
+    /// None when the config is unreadable or names no check.
+    pub fn suite_checks(&mut self) -> Option<Vec<String>> {
+        self.config().map(|(_, checks)| checks).filter(|checks| !checks.is_empty())
+    }
+
+    /// Item 114: one reviewed PR's runs of each name (in `names` order), read
+    /// in full from its commits' check runs, or the one reason it is not read.
+    pub fn pr_checks(&mut self, pr: u64, names: &[String]) -> Result<Vec<Tally>, String> {
+        // After a timeout, no PR is finished, even one whose answers are in hand.
+        if self.timed_out {
+            return Err(TIMED_OUT.to_string());
+        }
+        let path = format!("repos/{{owner}}/{{repo}}/pulls/{pr}/commits?per_page=100");
+        let answer = self.call(&["api", "--paginate", "--slurp", &path])?;
+        let commits = pr_commits(&answer).ok_or(UNREADABLE)?;
+        let mut runs = Vec::new();
+        for sha in &commits {
+            let path = format!("repos/{{owner}}/{{repo}}/commits/{sha}/check-runs?filter=all&per_page=100");
+            let answer = self.call(&["api", "--paginate", "--slurp", &path])?;
+            runs.push(suite_runs(&answer, names).ok_or(UNREADABLE)?);
+        }
+        Ok(tally(&runs, names.len()))
     }
 
     /// `<root>/.shipcraft.toml` read once, directly, by `Config::parse`.
@@ -258,6 +287,97 @@ fn pages<'v>(
         }
     }
     (entries.len() as u64 == total?).then_some(entries)
+}
+
+/// Item 79's check-run entry: a string `name`, a string `status` and a
+/// `conclusion` that is a string or null.
+fn check_run(e: &Map<String, Value>) -> bool {
+    e.get("name").is_some_and(Value::is_string)
+        && e.get("status").is_some_and(Value::is_string)
+        && e.get("conclusion").is_some_and(|c| c.is_string() || c.is_null())
+}
+
+/// Item 114: a name's counts in one PR: runs, red, green again, fixed by a
+/// new commit, still red.
+pub type Tally = [u64; 5];
+
+#[derive(Clone, Copy, PartialEq)]
+enum Verdict {
+    Red,
+    Green,
+    Other,
+}
+
+/// A completed run of a `suite_checks` name: the name's index, its verdict
+/// and its completion time.
+struct Run {
+    name: usize,
+    verdict: Verdict,
+    at: i64,
+}
+
+/// Item 114: a slurped PR commits list (a non-empty array of array pages,
+/// every entry an object with a 40-lowercase-hex `sha`): the distinct shas,
+/// each at its first position.
+fn pr_commits(answer: &Value) -> Option<Vec<String>> {
+    let mut commits: Vec<String> = Vec::new();
+    for page in answer.as_array().filter(|p| !p.is_empty())? {
+        for entry in page.as_array()? {
+            let sha = entry.as_object()?.get("sha")?.as_str().filter(|s| oid(s))?;
+            if !commits.iter().any(|c| c == sha) {
+                commits.push(sha.to_string());
+            }
+        }
+    }
+    Some(commits)
+}
+
+/// Item 114: a commit's `filter=all` check runs (item 79's reader): the
+/// completed runs of the `names`, each with a time `completed_at`.
+fn suite_runs(answer: &Value, names: &[String]) -> Option<Vec<Run>> {
+    let mut runs = Vec::new();
+    for e in pages(answer, "check_runs", check_run)? {
+        let Some(name) = names.iter().position(|n| e["name"] == n.as_str()) else { continue };
+        if e["status"] != "completed" {
+            continue;
+        }
+        let at = e.get("completed_at").and_then(Value::as_str).and_then(time)?;
+        let verdict = match e["conclusion"].as_str() {
+            Some("failure" | "timed_out") => Verdict::Red,
+            Some("success") => Verdict::Green,
+            _ => Verdict::Other,
+        };
+        runs.push(Run { name, verdict, at });
+    }
+    Some(runs)
+}
+
+/// Item 114: each red run judged on its own: green again (a later green run
+/// of its name at its commit), else fixed by a new commit (a later green run
+/// of its name at a later commit of the PR), else still red.
+fn tally(commits: &[Vec<Run>], names: usize) -> Vec<Tally> {
+    let mut counts = vec![[0u64; 5]; names];
+    for (i, runs) in commits.iter().enumerate() {
+        for red in runs {
+            let count = &mut counts[red.name];
+            count[0] += 1;
+            if red.verdict != Verdict::Red {
+                continue;
+            }
+            count[1] += 1;
+            let green_after = |runs: &Vec<Run>| {
+                runs.iter().any(|g| g.name == red.name && g.verdict == Verdict::Green && g.at > red.at)
+            };
+            if green_after(runs) {
+                count[2] += 1;
+            } else if commits[i + 1..].iter().any(green_after) {
+                count[3] += 1;
+            } else {
+                count[4] += 1;
+            }
+        }
+    }
+    counts
 }
 
 /// Item 113: a slurped statuses list (a non-empty array of array pages, every
@@ -405,8 +525,111 @@ fn run(root: &Path, args: &[&str]) -> Ran {
 
 #[cfg(test)]
 mod tests {
-    use super::{blocking_count, latest_count, time};
+    use super::{blocking_count, latest_count, pr_commits, suite_runs, tally, time, Asker};
     use serde_json::{json, Value};
+
+    fn sha(c: char) -> String {
+        c.to_string().repeat(40)
+    }
+
+    #[test]
+    fn pr_commits_are_distinct_shas_in_answer_order() {
+        let entry = |c: char| json!({"sha": sha(c), "commit": {}});
+        let answer = json!([[entry('b'), entry('a')], [], [entry('b'), entry('c')]]);
+        assert_eq!(pr_commits(&answer), Some(vec![sha('b'), sha('a'), sha('c')]));
+        assert_eq!(pr_commits(&json!([[]])), Some(vec![]));
+        for bad in [
+            json!([]),
+            json!({}),
+            json!([{}]),
+            json!([[1]]),
+            json!([[{}]]),
+            json!([[{"sha": 1}]]),
+            json!([[{"sha": "abc"}]]),
+            json!([[{"sha": sha('A')}]]),
+            json!([[{"sha": sha('g')}]]),
+            json!([[entry('a')], [{"sha": null}]]),
+        ] {
+            assert_eq!(pr_commits(&bad), None, "{bad}");
+        }
+    }
+
+    fn run(name: &str, status: &str, conclusion: Value, at: &str) -> Value {
+        json!({"name": name, "status": status, "conclusion": conclusion, "completed_at": at})
+    }
+
+    fn page(total: usize, runs: Vec<Value>) -> Value {
+        json!({"total_count": total, "check_runs": runs})
+    }
+
+    #[test]
+    fn suite_runs_read_completed_runs_of_the_names() {
+        let names = vec!["a b".to_string(), "c/β".to_string()];
+        let t = "2026-01-01T00:00:00Z";
+        let answer = json!([
+            page(
+                5,
+                vec![
+                    run("a b", "completed", json!("failure"), t),
+                    run("other", "completed", json!("success"), "not a time"),
+                    run("c/β", "in_progress", Value::Null, "x"),
+                ]
+            ),
+            page(5, vec![run("c/β", "completed", json!("cancelled"), t), run("A B", "completed", json!("success"), t)]),
+        ]);
+        let runs = suite_runs(&answer, &names).unwrap();
+        assert_eq!(runs.iter().map(|r| r.name).collect::<Vec<_>>(), [0, 1]);
+        for bad in [
+            json!([]),
+            json!([page(2, vec![run("a b", "completed", json!("success"), t)])]),
+            json!([page(1, vec![run("a b", "completed", json!("success"), "2026-01-01 00:00:00")])]),
+            json!([page(1, vec![json!({"name": "a b", "status": "completed", "conclusion": "success"})])]),
+            json!([page(1, vec![json!({"name": "other", "status": "completed"})])]),
+            json!([page(1, vec![json!({"name": "other", "status": 1, "conclusion": null})])]),
+            json!([page(1, vec![run("a b", "completed", Value::Null, t)]), page(0, vec![])]),
+        ] {
+            assert!(suite_runs(&bad, &names).is_none(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn each_red_run_is_green_again_fixed_by_a_new_commit_or_still_red() {
+        let names = vec!["n".to_string(), "m".to_string()];
+        let at = |s: u32| format!("2026-01-01T00:00:{s:02}Z");
+        let at_commit = |runs: Vec<Value>| suite_runs(&json!([page(runs.len(), runs)]), &names).unwrap();
+        let r = |name: &str, c: &str, s: u32| run(name, "completed", json!(c), &at(s));
+        let commits = vec![
+            // Two reds before one green: both green again; an equal-time green is not later.
+            at_commit(vec![r("n", "failure", 1), r("n", "timed_out", 2), r("n", "success", 3), r("m", "failure", 5)]),
+            at_commit(vec![r("m", "success", 5), r("n", "failure", 6), r("m", "skipped", 1)]),
+            // Fixed by a later commit, whatever its later runs say; an earlier commit fixes nothing.
+            at_commit(vec![r("n", "success", 7), r("n", "failure", 8), r("m", "failure", 9)]),
+            at_commit(vec![r("m", "neutral", 10)]),
+        ];
+        assert_eq!(tally(&commits, 2), vec![[6, 4, 2, 1, 1], [5, 2, 0, 0, 2]]);
+        assert_eq!(tally(&[], 2), vec![[0; 5]; 2]);
+    }
+
+    #[test]
+    fn a_pr_is_read_in_full_or_gives_its_one_reason() {
+        let names = vec!["n".to_string()];
+        let commits = "repos/{owner}/{repo}/pulls/5/commits?per_page=100";
+        let runs = |c: char| format!("repos/{{owner}}/{{repo}}/commits/{}/check-runs?filter=all&per_page=100", sha(c));
+        let (ra, rb) = (runs('a'), runs('b'));
+        let list = json!([[{"sha": sha('a')}, {"sha": sha('b')}, {"sha": sha('a')}]]);
+        let red = json!([page(1, vec![run("n", "completed", json!("failure"), "2026-01-01T00:00:00Z")])]);
+        let green = json!([page(1, vec![run("n", "completed", json!("success"), "2026-01-01T00:00:01Z")])]);
+        fn ask<'p>(p: &'p str, o: Result<Value, &'static str>) -> (Vec<&'p str>, Result<Value, &'static str>) {
+            (vec!["api", "--paginate", "--slurp", p], o)
+        }
+        let answered = |b: Result<Value, &'static str>, timed_out| {
+            Asker::answered(vec![ask(commits, Ok(list.clone())), ask(&ra, Ok(red.clone())), ask(&rb, b)], timed_out)
+        };
+        assert_eq!(answered(Ok(green.clone()), false).pr_checks(5, &names), Ok(vec![[2, 1, 0, 1, 0]]));
+        assert_eq!(answered(Err("gh failed"), false).pr_checks(5, &names), Err("gh failed".to_string()));
+        assert_eq!(answered(Ok(json!([[]])), false).pr_checks(5, &names), Err("unreadable answer from gh".to_string()));
+        assert_eq!(answered(Ok(green), true).pr_checks(5, &names), Err("gh timed out".to_string()));
+    }
 
     #[test]
     fn blocking_counts_follow_the_grammar() {

@@ -170,6 +170,11 @@ pub fn run(prepared: Prepared, as_json: bool, since: Option<&str>, github: bool)
     if let (Some(asker), Some(line)) = (asker.as_mut(), review_line.as_mut()) {
         blocking(asker, &rows, line);
     }
+    // Item 114: after item 113's calls, through the same asker.
+    let checks_line = match (asker.as_mut(), &review_line) {
+        (Some(asker), Some(_)) => checks(asker, &rows),
+        _ => None,
+    };
     let gaps: Vec<Value> =
         gaps.into_iter().map(|(line, reason)| json!({"kind": "gap", "line": line, "reason": reason})).collect();
     let lines: Vec<Value> = [report.meta.clone()]
@@ -179,6 +184,7 @@ pub fn run(prepared: Prepared, as_json: bool, since: Option<&str>, github: bool)
         .chain(size(&rows))
         .chain(reds(&rows))
         .chain(review_line)
+        .chain(checks_line)
         .chain([dora])
         .chain(summary)
         .chain(gaps)
@@ -1113,6 +1119,53 @@ fn blocking(asker: &mut Asker, rows: &[Row], line: &mut Value) {
     object.insert("blocking_most".into(), json!(most));
 }
 
+/// Item 114: item 112's reviewed PRs, in the order of their first round row.
+fn reviewed_prs(rows: &[Row]) -> Vec<u64> {
+    let mut prs: Vec<u64> = Vec::new();
+    for (pr, _) in reviewed_commits(rows) {
+        if !prs.contains(&pr) {
+            prs.push(pr);
+        }
+    }
+    prs
+}
+
+/// Item 114: with `--github`, the red runs of each `suite_checks` name at the
+/// commits of the reviewed PRs read in full; None with no reviewed PR or no
+/// name in a readable config.
+fn checks(asker: &mut Asker, rows: &[Row]) -> Option<Value> {
+    let prs = reviewed_prs(rows);
+    if prs.is_empty() {
+        return None;
+    }
+    let names = asker.suite_checks()?;
+    let mut totals = vec![[0u64; 5]; names.len()];
+    let mut missing: BTreeMap<String, u64> = BTreeMap::new();
+    let mut read = 0u64;
+    for pr in &prs {
+        match asker.pr_checks(*pr, &names) {
+            Ok(counts) => {
+                read += 1;
+                for (total, count) in totals.iter_mut().zip(counts) {
+                    for (t, c) in total.iter_mut().zip(count) {
+                        *t += c;
+                    }
+                }
+            }
+            Err(reason) => *missing.entry(reason).or_default() += 1,
+        }
+    }
+    let names: Vec<Value> = names
+        .iter()
+        .zip(totals)
+        .map(|(name, [runs, red, green_again, new_commit, still_red])| {
+            json!({"name": name, "runs": runs, "red": red, "green_again": green_again,
+                "new_commit": new_commit, "still_red": still_red})
+        })
+        .collect();
+    Some(json!({"kind": "checks", "prs": prs.len(), "prs_read": read, "missing": missing, "names": names}))
+}
+
 /// The locks a row is about: its `lock` and its `locks`.
 fn locks_of(row: &Row) -> Vec<String> {
     let mut ids: Vec<String> = Vec::new();
@@ -1363,6 +1416,26 @@ fn text(lines: &[Value]) -> String {
                         let reasons = m.iter().map(|(reason, n)| format!("{reason} {n}")).collect::<Vec<_>>();
                         out += &format!("; not read: {}", reasons.join(", "));
                     }
+                }
+                out += "\n";
+            }
+            // Item 114: only with `--github`.
+            "checks" => {
+                out += &format!("checks: {} of {} reviewed PR(s) read", line["prs_read"], line["prs"]);
+                for name in line["names"].as_array().into_iter().flatten() {
+                    out += &format!(
+                        "; {}: {} red in {} run(s), {} green again on the same commit, {} fixed by a new commit, {} still red",
+                        Value::String(name["name"].as_str().unwrap_or_default().to_string()),
+                        name["red"],
+                        name["runs"],
+                        name["green_again"],
+                        name["new_commit"],
+                        name["still_red"]
+                    );
+                }
+                if let Some(m) = line["missing"].as_object().filter(|m| !m.is_empty()) {
+                    let reasons = m.iter().map(|(reason, n)| format!("{reason} {n}")).collect::<Vec<_>>();
+                    out += &format!("; not read: {}", reasons.join(", "));
                 }
                 out += "\n";
             }
@@ -1946,6 +2019,83 @@ mod tests {
         assert_eq!(line["blocking_missing"], json!({"gh timed out": 1, "no commit in the run log": 1}));
         assert_eq!(line["blocking"], 0);
         assert_eq!(line["blocking_most"], json!([]));
+    }
+
+    #[test]
+    fn checks_read_each_reviewed_pr_in_full_and_sum_per_name() {
+        let names: &[&str] = &["acceptance", "a;b: c"];
+        let sha = |c: char| c.to_string().repeat(40);
+        let commits = |pr: u64| format!("repos/{{owner}}/{{repo}}/pulls/{pr}/commits?per_page=100");
+        let runs = |c: char| format!("repos/{{owner}}/{{repo}}/commits/{}/check-runs?filter=all&per_page=100", sha(c));
+        let round = |pr: u64| format!("{{\"layer\":\"review\",\"pr\":{pr},\"result\":\"refused\"}}\n");
+        let run = |name: &str, conclusion: &str, s: u32| {
+            json!({"name": name, "status": "completed", "conclusion": conclusion,
+                "completed_at": format!("2026-01-01T00:00:{s:02}Z")})
+        };
+        let at = |runs: Vec<Value>| json!([{"total_count": runs.len(), "check_runs": runs}]);
+        let list = |cs: &[char]| json!([cs.iter().map(|c| json!({"sha": sha(*c)})).collect::<Vec<_>>()]);
+        fn ask<'p>(
+            p: &'p str,
+            outcome: std::result::Result<Value, &'static str>,
+        ) -> (Vec<&'p str>, std::result::Result<Value, &'static str>) {
+            (vec!["api", "--paginate", "--slurp", p], outcome)
+        }
+        let (c3, c9, c4, c8) = (commits(3), commits(9), commits(4), commits(8));
+        let (ra, rb, rc) = (runs('a'), runs('b'), runs('c'));
+        // PR 9 shares commit b with PR 3; PR 4 fails; PR 8 is unreadable; PR 3 again is one PR.
+        let rows = read((round(9) + &round(3) + &round(9) + &round(4) + &round(8)).as_bytes()).0;
+        let answers = || {
+            vec![
+                ask(&c9, Ok(list(&['a', 'b']))),
+                ask(&c3, Ok(list(&['b', 'c']))),
+                ask(&c4, Err("gh failed")),
+                ask(&c8, Ok(json!([]))),
+                ask(&ra, Ok(at(vec![run("acceptance", "failure", 1), run("acceptance", "success", 2)]))),
+                ask(&rb, Ok(at(vec![run("a;b: c", "failure", 3), run("acceptance", "success", 3)]))),
+                ask(&rc, Ok(at(vec![run("a;b: c", "success", 4)]))),
+            ]
+        };
+        let mut asker = Asker::answered(answers(), false).configured(Some(names));
+        let line = checks(&mut asker, &rows).unwrap();
+        assert_eq!(
+            line,
+            json!({"kind": "checks", "prs": 4, "prs_read": 2,
+                "missing": {"gh failed": 1, "unreadable answer from gh": 1},
+                "names": [
+                    {"name": "acceptance", "runs": 4, "red": 1, "green_again": 1, "new_commit": 0, "still_red": 0},
+                    {"name": "a;b: c", "runs": 3, "red": 2, "green_again": 0, "new_commit": 1, "still_red": 1}]})
+        );
+        assert_eq!(
+            text(&[line]),
+            "checks: 2 of 4 reviewed PR(s) read; \"acceptance\": 1 red in 4 run(s), 1 green again on the same commit, \
+             0 fixed by a new commit, 0 still red; \"a;b: c\": 2 red in 3 run(s), 0 green again on the same commit, \
+             1 fixed by a new commit, 1 still red; not read: gh failed 1, unreadable answer from gh 1\n"
+        );
+        // A timeout: every PR counts as timed out, also one whose answers are in hand.
+        let mut asker = Asker::answered(answers(), true).configured(Some(names));
+        let line = checks(&mut asker, &rows).unwrap();
+        assert_eq!(line["missing"], json!({"gh timed out": 4}));
+        assert_eq!(
+            line["names"][1],
+            json!({"name": "a;b: c", "runs": 0, "red": 0, "green_again": 0, "new_commit": 0, "still_red": 0})
+        );
+        // Every PR read: no `not read`.
+        let rows9 = read(round(9).as_bytes()).0;
+        let mut asker = Asker::answered(answers(), false).configured(Some(&["acceptance"]));
+        assert_eq!(
+            text(&[checks(&mut asker, &rows9).unwrap()]),
+            "checks: 1 of 1 reviewed PR(s) read; \"acceptance\": 1 red in 3 run(s), 1 green again on the same commit, \
+             0 fixed by a new commit, 0 still red\n"
+        );
+        // No reviewed PR, no readable config, or no name: no object and no call.
+        for (rows, config) in [
+            (read(b"{\"layer\":\"review\",\"result\":\"passed\"}").0, Some(names)),
+            (rows9.clone(), None),
+            (rows9, Some(&[][..])),
+        ] {
+            let mut asker = Asker::answered(vec![], false).configured(config);
+            assert_eq!(checks(&mut asker, &rows), None);
+        }
     }
 
     #[test]
