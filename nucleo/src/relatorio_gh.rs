@@ -157,6 +157,21 @@ impl<'a> Asker<'a> {
         Ok(latest.expect("a match"))
     }
 
+    /// Tests: an asker whose calls are answered in hand, or timed out.
+    #[cfg(test)]
+    pub fn answered(answers: Vec<(Vec<&str>, Outcome)>, timed_out: bool) -> Asker<'a> {
+        let calls = answers.into_iter().map(|(k, v)| (k.into_iter().map(str::to_string).collect(), v)).collect();
+        Asker { root: PathBuf::new(), git: None, calls, timed_out, config: None }
+    }
+
+    /// Item 113: the Blocking count of the latest `shipcraft/review` status
+    /// with a count at a reviewed commit (40 lowercase hex), or the reason.
+    pub fn blocking(&mut self, commit: &str) -> Result<u64, String> {
+        let path = format!("repos/{{owner}}/{{repo}}/commits/{commit}/statuses?per_page=100");
+        let answer = self.call(&["api", "--paginate", "--slurp", &path])?;
+        latest_count(&answer).map_err(str::to_string)
+    }
+
     /// `<root>/.shipcraft.toml` read once, directly, by `Config::parse`.
     fn config(&mut self) -> Option<(String, Vec<String>)> {
         if self.config.is_none() {
@@ -245,8 +260,51 @@ fn pages<'v>(
     (entries.len() as u64 == total?).then_some(entries)
 }
 
+/// Item 113: a slurped statuses list (a non-empty array of array pages, every
+/// entry an object with a string `context`; a `shipcraft/review` entry also a
+/// string or null `description` and a time `created_at`). The count of the
+/// review status with a count whose `created_at` is latest, the first in
+/// answer order on equal times.
+fn latest_count(answer: &Value) -> Result<u64, &'static str> {
+    let pages = answer.as_array().filter(|p| !p.is_empty()).ok_or(UNREADABLE)?;
+    let mut latest: Option<(i64, u64)> = None;
+    for page in pages {
+        for entry in page.as_array().ok_or(UNREADABLE)? {
+            let entry = entry.as_object().ok_or(UNREADABLE)?;
+            if entry.get("context").and_then(Value::as_str).ok_or(UNREADABLE)? != "shipcraft/review" {
+                continue;
+            }
+            let description = match entry.get("description") {
+                Some(Value::Null) => None,
+                Some(Value::String(d)) => Some(d.as_str()),
+                _ => return Err(UNREADABLE),
+            };
+            let at = entry.get("created_at").and_then(Value::as_str).and_then(time).ok_or(UNREADABLE)?;
+            if let Some(count) = description.and_then(blocking_count) {
+                if latest.is_none_or(|(t, _)| at > t) {
+                    latest = Some((at, count));
+                }
+            }
+        }
+    }
+    latest.map(|(_, count)| count).ok_or("no blocking count at commit")
+}
+
+/// Item 113: a review description's count: one of the two verdict prefixes,
+/// then 1 to 9 ASCII digits, then the end or a space.
+fn blocking_count(description: &str) -> Option<u64> {
+    let rest = ["on this machine: APPROVE, Blocking ", "on this machine: CHANGES REQUESTED, Blocking "]
+        .iter()
+        .find_map(|prefix| description.strip_prefix(prefix))?;
+    let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+    if !(1..=9).contains(&digits) || !matches!(rest.as_bytes().get(digits), None | Some(b' ')) {
+        return None;
+    }
+    rest[..digits].parse().ok()
+}
+
 /// 40 lowercase hex characters.
-fn oid(text: &str) -> bool {
+pub fn oid(text: &str) -> bool {
     text.len() == 40 && text.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
@@ -347,7 +405,70 @@ fn run(root: &Path, args: &[&str]) -> Ran {
 
 #[cfg(test)]
 mod tests {
-    use super::time;
+    use super::{blocking_count, latest_count, time};
+    use serde_json::{json, Value};
+
+    #[test]
+    fn blocking_counts_follow_the_grammar() {
+        for (description, count) in [
+            ("on this machine: APPROVE, Blocking 0 (claude)", Some(0)),
+            ("on this machine: CHANGES REQUESTED, Blocking 3 (claude)", Some(3)),
+            ("on this machine: CHANGES REQUESTED, Blocking 007", Some(7)),
+            ("on this machine: APPROVE, Blocking 999999999 x", Some(999_999_999)),
+            ("on this machine: APPROVE, Blocking 1234567890", None),
+            ("on this machine: APPROVE, Blocking ", None),
+            ("on this machine: APPROVE, Blocking -1", None),
+            ("on this machine: APPROVE, Blocking 1x", None),
+            ("on this machine: APPROVE, Blocking 1(claude)", None),
+            ("on this machine: APPROVE, Blocking 1\t", None),
+            ("on this machine: APPROVE, Blocking ٣", None),
+            ("on this machine: APPROVE, blocking 1", None),
+            ("on this machine: approve, Blocking 1", None),
+            (" on this machine: APPROVE, Blocking 1", None),
+            ("on this machine: review in progress (claude)", None),
+            ("verdict from abc reused (same file versions)", None),
+            ("off in .shipcraft.toml", None),
+        ] {
+            assert_eq!(blocking_count(description), count, "{description}");
+        }
+    }
+
+    #[test]
+    fn the_latest_count_wins_ties_to_the_first() {
+        let status = |d: Value, at: &str| json!({"context": "shipcraft/review", "description": d, "created_at": at});
+        let approve = |n: u32| json!(format!("on this machine: APPROVE, Blocking {n} (a)"));
+        // Newest by time, whatever the order; a later status without a count is skipped.
+        let answer = json!([
+            [status(approve(1), "2026-01-01T00:00:00Z"), status(approve(4), "2026-01-03T00:00:00Z")],
+            [],
+            [status(json!("review error"), "2026-01-09T00:00:00Z"), status(Value::Null, "2026-01-09T00:00:00Z")],
+            [{"context": "other", "description": 5}, status(approve(2), "2026-01-02T00:00:00Z")]
+        ]);
+        assert_eq!(latest_count(&answer), Ok(4));
+        // Equal times: the first in answer order.
+        let answer =
+            json!([[status(approve(6), "2026-01-01T00:00:00Z")], [status(approve(9), "2026-01-01T00:00:00Z")]]);
+        assert_eq!(latest_count(&answer), Ok(6));
+        for none in [json!([[]]), json!([[{"context": "x"}], [status(json!("review error"), "2026-01-01T00:00:00Z")]])]
+        {
+            assert_eq!(latest_count(&none), Err("no blocking count at commit"), "{none}");
+        }
+        for bad in [
+            json!([]),
+            json!({}),
+            json!([{}]),
+            json!([[1]]),
+            json!([[{"context": 1}]]),
+            json!([[{"state": "success"}]]),
+            json!([[status(approve(1), "2026-01-01T00:00:00Z")], [{"context": null}]]),
+            json!([[{"context": "shipcraft/review", "created_at": "2026-01-01T00:00:00Z"}]]),
+            json!([[status(json!(1), "2026-01-01T00:00:00Z")]]),
+            json!([[status(approve(1), "2026-01-01 00:00:00")]]),
+            json!([[{"context": "shipcraft/review", "description": null}]]),
+        ] {
+            assert_eq!(latest_count(&bad), Err("unreadable answer from gh"), "{bad}");
+        }
+    }
 
     #[test]
     fn times_are_github_utc_real_dates() {
