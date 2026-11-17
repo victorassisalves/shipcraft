@@ -2284,6 +2284,51 @@ Found in the field (Hands-off and draken-platform, POC-040, private process repo
 - Before it counts, `pr` fetches, pushes the branch with `--force-with-lease` and prints the published-head line; a later failure never undoes the push or a GitHub write. A failed `gh pr create`, title edit or `--body` file read ends `pr` before the `pr` row is written; a failed body-only edit is item 103's warning and the run goes on. `gh` gets its body and input through temporary files under the caller's `TMPDIR`. Keep all of it: this item adds no GitHub call, no file and no rollback.
 - The standing effects the spec-review brief lists. A row is appended to `.git/shipcraft/runs.jsonl` per measured run, best effort (a failed append changes no exit code); the hook appends its row on every fixture commit. `red` writes a lock under `.shipcraft/locks/` and a GREEN commit that closes it is followed by the automatic closing commit, so HEAD moves once more. `init` writes `.shipcraft/locks/.gitkeep`. Local CI through `pr` runs the suite in a temporary copy under the caller's `TMPDIR`, and a `[build]` step can leave its output in the tree. Keep each.
 
+### `report` counts the `suite-red` runs that went green on the same commit (item 109)
+
+POC-037 (private process repository, `poc/037-flake-or-real-red`, 2026-11-08) read the 45 `suite-red` rows of the two Draken repositories by hand: 17 were followed by a green CI on the same commit with no new commit, 104 min of CI spent on reds that were not the code's. That ground truth was counted by a private script, and since item 97 (2.47.0) each `suite-red` row names its failing cases, but nothing reads them. Now `report` prints the count and the cases those reds named. It is a reading of the run log only: nothing is rerun, nothing is refused, and no exit code, status or verdict changes. Calling a red flaky, and rerunning failed cases in `ci`, stay POC-037's open question.
+
+1. **Which rows count.** The count reads the `ci` rows of the run log `report` already reads, through the same reader, and adds no git read and no network call; the rest of `report` runs as today.
+   - **A red row** is a row whose `layer` is `"ci"`, whose `result` is `"refused"`, whose `code` is `"suite-red"`, and whose `commit` is a non-empty JSON string. Any other row is not a red row and adds no gap: a `ci` row with another code (`no-report`, `lock-not-closed`, `case-broke`, a build or `check` refusal), an `error` row (`timed-out` included), a red row with a missing, empty or non-string `commit`. Only a line the reader already reads as a JSON object reaches this test; a line it cannot parse is the `gap` it is today and is not looked at again; rows with `escape: true` are ignored, as today.
+   - **A green row** is a row whose `layer` is `"ci"`, whose `result` is `"passed"`, and whose `commit` is a non-empty JSON string.
+   - **Green again.** A red row is *green again* when some green row comes after it in the file's order (the log is append-only; `at` is not read) and has a `commit` equal to the red row's, byte for byte. Its `branch`, `lock`, `locks` and `docs_only` play no part. Each red row is judged on its own: two red rows on one commit followed by one green row on it are two red rows, both green again; a green row before the red row, or only on another commit, leaves it not green again. A red row that is not green again is only counted, never called real: a later fix may have come as a new commit, or the green ran elsewhere.
+   - **Its CI time** is the red row's `secs` when it is a JSON number of 0 or more (an integer or a fraction, as `medicao` writes it); otherwise it adds 0 and is not a gap.
+   - **Its cases** are the strings of the red row's `failed` when `failed` is a JSON array; an element that is not a string is skipped, and an id the same array holds twice is taken once for that row. A red row whose `failed` is missing or not an array (rows from before 2.47.0) names no case. `failed_count` is not read.
+2. **The line.** When at least one red row exists, `--json` prints one more object, after the `size` object when there is one (item 107), otherwise after the last `day` line, and always before the `dora` line, with exactly these keys:
+   - `kind`: `"reds"`;
+   - `suite_red`: the number of red rows;
+   - `green_again`: the number of those that are green again;
+   - `green_again_share`: `green_again / suite_red`, printed as the `day` row's share is (a whole value as an integer: `0`, `1`; otherwise the fraction);
+   - `green_again_secs`: the sum of the CI time of the green-again rows, printed as `num` prints the lock rows' durations (a whole value as an integer, otherwise the fraction), `0` when none;
+   - `named`: the number of green-again rows whose `failed` is a JSON array, even an empty one;
+   - `cases`: an array of at most 5 objects `{"id": <string>, "rows": <integer>}`, one per distinct case id named by at least one green-again row, where `rows` is the number of green-again rows that name it; ordered by `rows` from most to fewest, ties by `id` in byte order; the first 5 of that order; `[]` when no green-again row names a case. Ids of red rows that are not green again are never listed.
+
+   Counts are JSON integers. The text output prints, at the same position, one line:
+   `reds: <suite_red> suite-red, <green_again> green again on the same commit (<share>), <time> of CI; cases named in <named>: <cases>`
+   with `<share>` as item 83's whole percent (`25%`, `0%`, `100%`), `<time>` as the lock line prints a duration (`0 s`, `45 s`, `2 min 5 s`, `1 h 0 min 3 s`), and `<cases>` as each case written `<id> (<rows>)`, joined by `, `, in the JSON order, or `none` when the array is empty.
+   - **No red row:** no `reds` object and no `reds:` line. A run log without red rows (none yet, only other `ci` rows, or no log at all) reports byte for byte as today, in both forms.
+   - `--since` and `--github` do not change the line: it always covers the whole run log, and nothing in it is filled from GitHub.
+
+**Known limits.** The count covers what ran on this machine, as the report's first line says: a CI that ran on GitHub or in another clone writes no row here, so a red fixed only by a GitHub rerun stays not green again. Green again is not proof of a flaky test: a red caused by the machine (a database down, a full disk) that passes once it is fixed is green again too, and that is the class POC-037 counted. A red row only names up to 50 cases (item 97), so a case past the cut is never listed. Case ids are compared byte for byte, so the same test under two suite prefixes is two ids. Commits are not checked against the repository: a run log copied from another repository counts its rows.
+
+**Metric:** on draken-platform's run log, `report`'s `reds` line equals the green-on-the-same-commit count POC-037's `out/ground_truth.py` gives for the same rows (checked once, after its next 10 `suite-red` rows), and POC-037's ground truth is then read from this line. Revert: a later release that drops the `reds` line; the run log is unchanged by this item, so nothing written meanwhile needs undoing.
+
+**Touches.** Read first:
+- **The version:** the contract goes to 2.58.0 (`v1-62.version`, `v1-64.version`, `v1-87.version`, `v1-103.version` and the others that read section 11 or the manifest).
+- **Must keep passing unchanged:**
+  - every `report` case of items 38, 46, 75, 76, 79, 83, 99, 105 and 107 (`acceptance/lib/item38.sh`, `item46.sh`, `item75.sh`, `item76.sh`, `item79.sh`, `item83.sh`, `item99.sh`, `item105.sh`, `item107.sh`), text and `--json`: their run logs hold no `suite-red` row, so their output is unchanged; item 107's `size` line keeps its place between the `day` lines and `dora`;
+  - item 97 (`v1-97.*`): the `suite-red` row's `failed` and `failed_count` are written as today; this item only reads them;
+  - item 43's, item 81's and item 33's `suite-red` cases: the refusal, its printed lines and its row;
+  - item 10's `v1-10.1-execucoes-jsonl`: no row gains or loses a field.
+- **New cases** go in `acceptance/lib/item109.sh`, write the run log by hand after the fixture's last commit, as item 38's, item 83's and item 107's do, and run `report` and `report --json`. One control case reaches a real `suite-red` row through `shipcraft ci` (item 97's fixture style) and a green `ci` on the same commit, then reads `report`. Estimate: 18 for point 1, 16 for point 2. Cap: 40.
+
+**Current behavior** on these paths (keep unless marked change):
+- `report` reads the run log's bytes; a file it cannot read (missing, a directory, no permission) is an empty log; the bytes are decoded as UTF-8 with each invalid sequence replaced by U+FFFD, never refused. It parses with `serde_json`, one object per line; a field of the wrong type is read as empty, never a gap; rows with `escape: true` and blank lines are ignored; a BOM and a trailing CR are stripped. Keep, and the `reds` line reads through the same reader.
+- `report` prints `meta` (whose `ci` totals already count every `ci` row and its refusals by code), the `lock` lines, the `day` lines, `size` when a PR is measured, `dora`, `github` (with `--github`) and the `gap` lines, in that order, exits 0, writes nothing and appends no row. Keep. Change: the `reds` line after `size` (or after the `day` lines) and before `dora`, only when a red row exists.
+- `report`'s git reads (item 76), `--since`'s refusal, `--github`'s calls, `[report]`'s config refusal path and the usage refusal: keep.
+- `ci` writes a `suite-red` row with `failed` (at most 50 ids, byte order) and `failed_count` (item 97), and a passing `ci` row with no such field; both carry `commit` (HEAD's sha, or empty when there is none) and `secs`. Keep: this item adds no row and no field.
+- The standing effects the spec-review brief lists: the new `report` cases run no hook after writing their log; a control case that runs `ci` appends its rows and the hook's as today. Keep.
+
 ### The review
 
 - **A separate session:** always a fresh session of the `[roles] review` agent, without the author's context. It is a different agent even with the same model. The brief is built into the binary and carries the project spec (`[review] spec`), the project's review guide when set (`[review] guide`, item 102), the PR body and the raw diff.
@@ -2576,6 +2621,8 @@ Besides the refusal codes, `code` can hold run outcomes that are not refusals: `
 
 `shipcraft report` also counts, from the `pr` rows, the PRs above their size limit (item 107, section 5).
 
+`shipcraft report` also counts, from the `ci` rows, the `suite-red` runs that went green on the same commit and the cases they named (item 109, section 5).
+
 ### Measuring the flow (item 38)
 
 Time to main is Shipcraft's main number. It must come from what Shipcraft recorded, not from agents or prose, and not from git history: squash, rebase, fast-forward, deleted or reused branches and two locks on one branch each break a reconstruction from history.
@@ -2625,4 +2672,4 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.57.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.58.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
