@@ -259,11 +259,50 @@ pub struct Pr {
     pub aviso_linhas: u64,
     #[serde(rename = "shape_lines")]
     pub forma_linhas: Option<std::num::NonZeroU64>,
+    /// Item 115: `"warn"` (the default) or `"off"`; any other value or type
+    /// is refused by serde, as an invalid `shape_lines` is.
+    pub new_dependencies: NewDependencies,
+    /// Item 115: a new dependency first published fewer days ago than this is young.
+    pub new_dependency_days: DependencyDays,
 }
 
 impl Default for Pr {
     fn default() -> Self {
-        Pr { aviso_linhas: 500, forma_linhas: None }
+        Pr {
+            aviso_linhas: 500,
+            forma_linhas: None,
+            new_dependencies: NewDependencies::Warn,
+            new_dependency_days: DependencyDays::default(),
+        }
+    }
+}
+
+/// Item 115: `[pr] new_dependencies`.
+#[derive(Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum NewDependencies {
+    #[default]
+    Warn,
+    Off,
+}
+
+/// Item 115: `[pr] new_dependency_days`, an integer from 1 to 36500 (default 30).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct DependencyDays(pub u64);
+
+impl Default for DependencyDays {
+    fn default() -> Self {
+        DependencyDays(30)
+    }
+}
+
+impl<'de> Deserialize<'de> for DependencyDays {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let days = u64::deserialize(d)?;
+        if !(1..=36500).contains(&days) {
+            return Err(serde::de::Error::custom(format!("new_dependency_days must be from 1 to 36500, not {days}")));
+        }
+        Ok(DependencyDays(days))
     }
 }
 
@@ -1035,6 +1074,40 @@ globs = ["tests/**"]
         }
         let refused = Config::parse("[execution]\nci = \"foo\"\nci_timeout = \"bad\"");
         assert!(matches!(refused, Err(crate::refusal::Stop::Refused(r)) if r.code == "config-invalid"));
+    }
+
+    #[test]
+    fn new_dependencies_and_their_days_are_checked() {
+        let config = Config::parse("").unwrap();
+        assert_eq!(config.pr.new_dependencies, super::NewDependencies::Warn);
+        assert_eq!(config.pr.new_dependency_days.0, 30);
+        let config = Config::parse("[pr]\nnew_dependencies = \"off\"\nnew_dependency_days = 36500\n").unwrap();
+        assert_eq!(config.pr.new_dependencies, super::NewDependencies::Off);
+        assert_eq!(config.pr.new_dependency_days.0, 36500);
+        assert_eq!(Config::parse("[pr]\nnew_dependency_days = 1").unwrap().pr.new_dependency_days.0, 1);
+        assert_eq!(
+            Config::parse("[pr]\nnew_dependencies = \"warn\"").unwrap().pr.new_dependencies,
+            super::NewDependencies::Warn
+        );
+        for bad in [
+            "new_dependencies = \"Warn\"",
+            "new_dependencies = \"no\"",
+            "new_dependencies = true",
+            "new_dependencies = 1",
+            "new_dependency_days = 0",
+            "new_dependency_days = 36501",
+            "new_dependency_days = -1",
+            "new_dependency_days = 30.0",
+            "new_dependency_days = \"30\"",
+        ] {
+            match Config::parse(&format!("[pr]\nwarn_lines = 9\n{bad}\n")) {
+                Err(crate::refusal::Stop::Refused(r)) => {
+                    assert_eq!(r.code, "config-invalid", "{bad}");
+                    assert!(r.what().contains(&format!("(line 3: `{bad}`)")), "{bad}: {}", r.what());
+                }
+                _ => panic!("{bad}"),
+            }
+        }
     }
 
     #[test]

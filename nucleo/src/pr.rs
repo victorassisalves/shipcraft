@@ -2,6 +2,7 @@
 //! review without (or for another) PR.
 
 use crate::config::{Camada, Config, Papel};
+use crate::deps;
 use crate::docs;
 use crate::fila;
 use crate::forma;
@@ -61,6 +62,10 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>, merge: bool
     // Item 108: `not_left_out` is why the generated files stayed in the count.
     let (size, not_left_out) = medicao::product_lines(repo, &config, &base_sha, &head)?;
     let limit = config.pr.aviso_linhas;
+    // Item 115: right after the count, before anything is created or edited;
+    // its lines go after the block's `Size:` lines. Never an error.
+    let dependencies = deps::check(repo, &config, &base_sha, &head);
+    let extra = &dependencies.lines;
     // Item 103: the warnings about the size line, printed after it.
     let mut warnings: Vec<String> = Vec::new();
     // `body` is the body the review gets: the one submitted when the create or
@@ -69,7 +74,7 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>, merge: bool
         Some((n, current)) => {
             let body = match (body_given, current) {
                 (Some(given), _) => {
-                    let new = size_block::new_body(&given, size, limit);
+                    let new = size_block::new_body(&given, size, limit, extra);
                     gh::edit_pr(repo, n, title, Some(&new))?;
                     Some(new)
                 }
@@ -84,7 +89,7 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>, merge: bool
                     if title.is_some() {
                         gh::edit_pr(repo, n, title, None)?;
                     }
-                    let new = size_block::new_body(current.text().unwrap_or_default(), size, limit);
+                    let new = size_block::new_body(current.text().unwrap_or_default(), size, limit, extra);
                     if current.text() == Some(new.as_str()) {
                         Some(new)
                     } else {
@@ -108,12 +113,12 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>, merge: bool
                 Some(t) => t.to_string(),
                 None => repo.text(&["log", "-1", "--format=%s"])?,
             };
-            let body = size_block::new_body(&body_given.unwrap_or_default(), size, limit);
+            let body = size_block::new_body(&body_given.unwrap_or_default(), size, limit, extra);
             (gh::create_pr(repo, &branch, &base, &title, &body)?, Some(body))
         }
     };
     println!("shipcraft: PR #{number}");
-    for line in size_block::lines(size, limit) {
+    for line in size_block::lines(size, limit).iter().chain(extra) {
         println!("shipcraft: {line}");
     }
     // Item 108: right after the block's lines, only once they are printed.
@@ -207,6 +212,11 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>, merge: bool
     // Item 103: the size the PR body's block showed, and the limit it used.
     row["product_lines"] = json!(size.0 + size.1);
     row["warn_lines"] = json!(limit);
+    // Item 115: `null` each when off or when git failed.
+    let counts = dependencies.counts;
+    row["new_dependencies"] = json!(counts.map(|c| c.new));
+    row["dependency_warnings"] = json!(counts.map(|c| c.warnings));
+    row["dependencies_not_checked"] = json!(counts.map(|c| c.not_checked));
     // Item 96: the `[review] after` this run read.
     row["review_after"] = json!(if config.revisao.after_push { "push" } else { "ci" });
     medicao::record(repo, row);

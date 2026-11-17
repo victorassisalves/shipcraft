@@ -8,6 +8,7 @@ mod check;
 mod ci;
 mod config;
 mod contract;
+mod deps;
 mod docs;
 mod fecha;
 mod fila;
