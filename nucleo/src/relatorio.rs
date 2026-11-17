@@ -171,6 +171,7 @@ pub fn run(prepared: Prepared, as_json: bool, since: Option<&str>, github: bool)
         .chain(report.days())
         .chain(size(&rows))
         .chain(reds(&rows))
+        .chain(review(&rows))
         .chain([dora])
         .chain(summary)
         .chain(gaps)
@@ -1019,6 +1020,39 @@ fn reds(rows: &[Row]) -> Option<Value> {
     }))
 }
 
+/// Item 112: the `review` line, the review rounds each PR needed; None when
+/// no PR is reviewed. A round row is a `review` row with a JSON integer `pr`
+/// above 0, a `passed` or `refused` result, and a `reused` that is not `true`.
+fn review(rows: &[Row]) -> Option<Value> {
+    let mut rounds: BTreeMap<u64, usize> = BTreeMap::new();
+    let mut changes_requested = 0usize;
+    for row in rows {
+        if str_of(row, "layer") != "review" || row.get("reused") == Some(&Value::Bool(true)) {
+            continue;
+        }
+        let Some(pr) = row.get("pr").and_then(Value::as_u64).filter(|n| *n > 0) else { continue };
+        let refused = is(row, "refused");
+        if !refused && !is(row, "passed") {
+            continue;
+        }
+        *rounds.entry(pr).or_insert(0) += 1;
+        changes_requested += usize::from(refused);
+    }
+    if rounds.is_empty() {
+        return None;
+    }
+    let mut most: Vec<(u64, usize)> = rounds.iter().filter(|(_, n)| **n >= 2).map(|(pr, n)| (*pr, *n)).collect();
+    let second_round = most.len();
+    // Most rounds first; the map gave PR order, and the sort is stable.
+    most.sort_by_key(|a| std::cmp::Reverse(a.1));
+    let most: Vec<Value> = most.into_iter().take(5).map(|(pr, n)| json!({"pr": pr, "rounds": n})).collect();
+    Some(json!({
+        "kind": "review", "prs": rounds.len(), "rounds": rounds.values().sum::<usize>(),
+        "changes_requested": changes_requested, "second_round": second_round,
+        "second_round_share": num(second_round as f64 / rounds.len() as f64), "most": most,
+    }))
+}
+
 /// The locks a row is about: its `lock` and its `locks`.
 fn locks_of(row: &Row) -> Vec<String> {
     let mut ids: Vec<String> = Vec::new();
@@ -1236,6 +1270,20 @@ fn text(lines: &[Value]) -> String {
                     show_with(&line["green_again_share"], percent),
                     show_with(&line["green_again_secs"], duration),
                     line["named"]
+                );
+            }
+            // Item 112: the review rounds each PR needed.
+            "review" => {
+                let most = line["most"].as_array().filter(|m| !m.is_empty()).map_or("none".to_string(), |m| {
+                    m.iter().map(|e| format!("#{} ({})", e["pr"], e["rounds"])).collect::<Vec<_>>().join(", ")
+                });
+                out += &format!(
+                    "review: {} PR(s) reviewed in {} round(s), {} requested changes; {} needed a second round ({}): {most}\n",
+                    line["prs"],
+                    line["rounds"],
+                    line["changes_requested"],
+                    line["second_round"],
+                    show_with(&line["second_round_share"], percent)
                 );
             }
             "dora" => out += &dora_text(meta, line),
@@ -1643,6 +1691,93 @@ mod tests {
             text(&[line]),
             "reds: 3 suite-red, 1 green again on the same commit (33%), 0 s of CI; cases named in 0: none\n"
         );
+    }
+
+    #[test]
+    fn review_counts_the_round_rows_of_each_pr() {
+        let rows = |log: &str| read(log.as_bytes()).0;
+        let round = |pr: &str, result: &str| format!("{{\"layer\":\"review\",\"pr\":{pr},\"result\":\"{result}\"}}\n");
+        // No round row: no line. None of these is a round row, nor a gap.
+        for row in [
+            String::new(),
+            round("7", "error"),
+            round("7", "skipped"),
+            r#"{"layer":"review","pr":7,"result":"passed","reused":true}"#.to_string(),
+            r#"{"layer":"review","pr":7,"result":"passed","escape":true}"#.to_string(),
+            r#"{"layer":"review","result":"passed"}"#.to_string(),
+            r#"{"layer":"pr","pr":7,"result":"passed"}"#.to_string(),
+            r#"{"layer":"merge","pr":7,"result":"passed"}"#.to_string(),
+            r#"{"pr":7,"result":"passed"}"#.to_string(),
+            round("0", "passed"),
+            round("-1", "passed"),
+            round("7.0", "passed"),
+            round("7e0", "passed"),
+            round("\"7\"", "passed"),
+            round("true", "passed"),
+            round("null", "passed"),
+            round("[7]", "passed"),
+            round("18446744073709551616", "passed"),
+        ] {
+            assert_eq!(review(&rows(&row)), None, "{row}");
+            assert!(read(row.as_bytes()).1.is_empty(), "{row}");
+        }
+        // Any `reused` but true is a fresh round; one round is no second round.
+        for reused in ["", ",\"reused\":false", ",\"reused\":\"true\"", ",\"reused\":1", ",\"reused\":null"] {
+            let log = format!("{{\"layer\":\"review\",\"pr\":7,\"result\":\"refused\"{reused}}}\n");
+            let line = review(&rows(&log)).unwrap();
+            assert_eq!(
+                line.to_string(),
+                r#"{"changes_requested":1,"kind":"review","most":[],"prs":1,"rounds":1,"second_round":0,"second_round_share":0}"#,
+                "{reused}"
+            );
+            assert_eq!(
+                text(&[line]),
+                "review: 1 PR(s) reviewed in 1 round(s), 1 requested changes; 0 needed a second round (0%): none\n"
+            );
+        }
+        // Rows anywhere in the file; errors and reused verdicts between them add nothing.
+        let log = round("12", "refused")
+            + &round("9", "refused")
+            + &round("12", "error")
+            + r#"{"layer":"review","pr":12,"result":"passed","reused":true}"#
+            + "\n"
+            + &round("12", "refused")
+            + &round("3", "passed")
+            + &round("9", "passed")
+            + &round("12", "passed")
+            + &round("4", "passed");
+        let line = review(&rows(&log)).unwrap();
+        assert_eq!(
+            line,
+            json!({"kind": "review", "prs": 4, "rounds": 7, "changes_requested": 3, "second_round": 2,
+                "second_round_share": 0.5, "most": [{"pr": 12, "rounds": 3}, {"pr": 9, "rounds": 2}]})
+        );
+        assert_eq!(
+            text(&[line]),
+            "review: 4 PR(s) reviewed in 7 round(s), 3 requested changes; 2 needed a second round (50%): #12 (3), #9 (2)\n"
+        );
+        // Ties by PR number as numbers; at most 5 listed; the share a whole 1.
+        let mut log = String::new();
+        for pr in ["100", "20", "3", "20", "100", "3", "7", "7", "50", "50", "8", "8", "8"] {
+            log += &round(pr, "passed");
+        }
+        let line = review(&rows(&log)).unwrap();
+        assert_eq!(
+            line,
+            json!({"kind": "review", "prs": 6, "rounds": 13, "changes_requested": 0, "second_round": 6,
+                "second_round_share": 1, "most": [{"pr": 8, "rounds": 3}, {"pr": 3, "rounds": 2},
+                {"pr": 7, "rounds": 2}, {"pr": 20, "rounds": 2}, {"pr": 50, "rounds": 2}]})
+        );
+        assert_eq!(line["second_round_share"].to_string(), "1");
+        assert_eq!(
+            text(&[line]),
+            "review: 6 PR(s) reviewed in 13 round(s), 0 requested changes; 6 needed a second round (100%): #8 (3), #3 (2), #7 (2), #20 (2), #50 (2)\n"
+        );
+        // A third share prints its fraction in JSON and a whole percent in text.
+        let log = round("1", "passed") + &round("1", "passed") + &round("2", "passed") + &round("3", "passed");
+        let line = review(&rows(&log)).unwrap();
+        assert_eq!(line["second_round_share"].to_string(), "0.3333333333333333");
+        assert!(text(&[line]).ends_with("1 needed a second round (33%): #1 (2)\n"));
     }
 
     #[test]
