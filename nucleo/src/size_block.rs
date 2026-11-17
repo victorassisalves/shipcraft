@@ -24,6 +24,12 @@ pub fn lines((added, removed): (u64, u64), limit: u64) -> Vec<String> {
     lines
 }
 
+/// Item 108: the line `pr` prints after the block's lines when git could
+/// not say which files are generated, so none was left out of the count.
+pub fn not_left_out(reason: &str) -> String {
+    format!("shipcraft: generated files were not left out of the size: {reason}")
+}
+
 /// The whole block, each line ending in `\n`.
 pub fn block(size: (u64, u64), limit: u64) -> String {
     let mut text = format!("{START}\n");
@@ -112,6 +118,14 @@ mod tests {
         let above = block((300, 201), 500);
         assert_eq!(above.lines().nth(2).unwrap(), ABOVE);
         assert_eq!(above.lines().count(), 4);
+    }
+
+    #[test]
+    fn the_line_of_generated_files_not_left_out() {
+        assert_eq!(
+            not_left_out("git check-attr gave an unreadable answer"),
+            "shipcraft: generated files were not left out of the size: git check-attr gave an unreadable answer"
+        );
     }
 
     #[test]
