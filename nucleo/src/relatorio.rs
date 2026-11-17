@@ -170,6 +170,7 @@ pub fn run(prepared: Prepared, as_json: bool, since: Option<&str>, github: bool)
         .chain(report.locks.clone())
         .chain(report.days())
         .chain(size(&rows))
+        .chain(reds(&rows))
         .chain([dora])
         .chain(summary)
         .chain(gaps)
@@ -965,6 +966,59 @@ fn size(rows: &[Row]) -> Option<Value> {
     }))
 }
 
+/// Item 109: the `reds` line, the `suite-red` rows of `ci` and those a later
+/// green `ci` row on the same commit followed, in the file's order; None when
+/// no red row exists. `at`, `branch`, `lock`, `locks` and `failed_count` are not read.
+fn reds(rows: &[Row]) -> Option<Value> {
+    fn commit(r: &Row) -> Option<&str> {
+        r.get("commit").and_then(Value::as_str).filter(|c| !c.is_empty())
+    }
+    let ci = |r: &Row| str_of(r, "layer") == "ci";
+    let red = |r: &Row| ci(r) && is(r, "refused") && str_of(r, "code") == "suite-red" && commit(r).is_some();
+    // Items 40 and 62: a row that skipped the suite or left it to GitHub did not run it.
+    let skipped = |r: &Row, key: &str| r.get(key) == Some(&Value::Bool(true));
+    let green = |r: &Row| {
+        ci(r) && is(r, "passed") && commit(r).is_some() && !skipped(r, "docs_only") && !skipped(r, "suite_in_checks")
+    };
+    // The last green row of each commit, by position in the file.
+    let mut last_green: BTreeMap<&str, usize> = BTreeMap::new();
+    for (i, row) in rows.iter().enumerate() {
+        if green(row) {
+            last_green.insert(commit(row).expect("green rows have a commit"), i);
+        }
+    }
+    let (mut suite_red, mut green_again, mut named) = (0usize, 0usize, 0usize);
+    let mut secs = 0.0f64;
+    let mut cases: BTreeMap<&str, usize> = BTreeMap::new();
+    for (i, row) in rows.iter().enumerate().filter(|(_, r)| red(r)) {
+        suite_red += 1;
+        if !last_green.get(commit(row).expect("red rows have a commit")).is_some_and(|g| *g > i) {
+            continue;
+        }
+        green_again += 1;
+        secs += row.get("secs").and_then(Value::as_f64).filter(|s| *s >= 0.0).unwrap_or(0.0);
+        if let Some(failed) = row.get("failed").and_then(Value::as_array) {
+            named += 1;
+            let ids: BTreeSet<&str> = failed.iter().filter_map(Value::as_str).collect();
+            for id in ids {
+                *cases.entry(id).or_insert(0) += 1;
+            }
+        }
+    }
+    if suite_red == 0 {
+        return None;
+    }
+    let mut top: Vec<(&str, usize)> = cases.into_iter().collect();
+    // Most rows first; the map gave byte order, and the sort is stable.
+    top.sort_by_key(|a| std::cmp::Reverse(a.1));
+    let cases: Vec<Value> = top.into_iter().take(5).map(|(id, n)| json!({"id": id, "rows": n})).collect();
+    Some(json!({
+        "kind": "reds", "suite_red": suite_red, "green_again": green_again,
+        "green_again_share": num(green_again as f64 / suite_red as f64),
+        "green_again_secs": num(secs), "named": named, "cases": cases,
+    }))
+}
+
 /// The locks a row is about: its `lock` and its `locks`.
 fn locks_of(row: &Row) -> Vec<String> {
     let mut ids: Vec<String> = Vec::new();
@@ -1162,6 +1216,26 @@ fn text(lines: &[Value]) -> String {
                     line["merged_prs"],
                     line["merged_above"],
                     show_with(&line["merged_above_share"], percent)
+                );
+            }
+            // Item 109: the suite-red runs that went green on the same commit.
+            "reds" => {
+                let cases = line["cases"].as_array().filter(|c| !c.is_empty()).map_or("none".to_string(), |c| {
+                    c.iter()
+                        .map(|case| {
+                            let id = case["id"].as_str().unwrap_or_default();
+                            format!("{} ({})", Value::String(id.to_string()), case["rows"])
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                });
+                out += &format!(
+                    "reds: {} suite-red, {} green again on the same commit ({}), {} of CI; cases named in {}: {cases}\n",
+                    line["suite_red"],
+                    line["green_again"],
+                    show_with(&line["green_again_share"], percent),
+                    show_with(&line["green_again_secs"], duration),
+                    line["named"]
                 );
             }
             "dora" => out += &dora_text(meta, line),
@@ -1428,6 +1502,138 @@ mod tests {
         let line = size(&rows(&pr(7, 1, 500))).unwrap();
         assert_eq!(line["above_share"].to_string(), "0");
         assert_eq!(text(&[line]), "size: 1 PR(s) measured, 0 above their limit (0%); merged 0, 0 above (-)\n");
+    }
+
+    #[test]
+    fn reds_count_each_red_row_green_again_by_a_later_green_row_on_its_commit() {
+        let rows = |log: &str| read(log.as_bytes()).0;
+        let red = |commit: &str, secs: &str, failed: &str| {
+            format!("{{\"layer\":\"ci\",\"result\":\"refused\",\"code\":\"suite-red\",\"commit\":{commit},\"secs\":{secs}{failed}}}\n")
+        };
+        let green =
+            |commit: &str| format!("{{\"layer\":\"ci\",\"result\":\"passed\",\"commit\":{commit},\"secs\":3}}\n");
+        // No red row: no line. None of these is a red row, nor a gap.
+        for row in [
+            String::new(),
+            green("\"a\""),
+            r#"{"layer":"ci","result":"refused","code":"no-report","commit":"a","secs":5}"#.to_string(),
+            r#"{"layer":"ci","result":"refused","code":"case-broke","commit":"a"}"#.to_string(),
+            r#"{"layer":"ci","result":"error","code":"suite-red","commit":"a"}"#.to_string(),
+            r#"{"layer":"ci","result":"error","code":"timed-out","commit":"a"}"#.to_string(),
+            r#"{"layer":"hook","result":"refused","code":"suite-red","commit":"a"}"#.to_string(),
+            red("\"\"", "1", ""),
+            red("7", "1", ""),
+            red("null", "1", ""),
+            r#"{"layer":"ci","result":"refused","code":"suite-red"}"#.to_string(),
+            r#"{"layer":"ci","result":"refused","code":"suite-red","commit":"a","escape":true}"#.to_string(),
+        ] {
+            assert_eq!(reds(&rows(&row)), None, "{row}");
+        }
+        // A red row alone: counted, never green again.
+        let line = reds(&rows(&red("\"a\"", "12", ",\"failed\":[\"t1\"]"))).unwrap();
+        assert_eq!(
+            line.to_string(),
+            r#"{"cases":[],"green_again":0,"green_again_secs":0,"green_again_share":0,"kind":"reds","named":0,"suite_red":1}"#
+        );
+        assert_eq!(
+            text(&[line]),
+            "reds: 1 suite-red, 0 green again on the same commit (0%), 0 s of CI; cases named in 0: none\n"
+        );
+        // File order: a green row before the red row, or on another commit, does not count.
+        let log = green("\"a\"") + &red("\"a\"", "5", "") + &green("\"b\"");
+        assert_eq!(reds(&rows(&log)).unwrap()["green_again"], 0);
+        // Two reds, one green: both green again; time summed, fractions kept.
+        let log = red("\"a\"", "100.5", ",\"failed\":[]") + &red("\"a\"", "25", "") + &green("\"a\"");
+        let line = reds(&rows(&log)).unwrap();
+        assert_eq!(
+            line,
+            json!({"kind": "reds", "suite_red": 2, "green_again": 2, "green_again_share": 1,
+                "green_again_secs": 125.5, "named": 1, "cases": []})
+        );
+        assert_eq!(line["green_again_share"].to_string(), "1");
+        assert_eq!(
+            text(&[line]),
+            "reds: 2 suite-red, 2 green again on the same commit (100%), 2 min 6 s of CI; cases named in 1: none\n"
+        );
+        // Commits compare byte for byte; branch and lock play no part.
+        let log =
+            red("\"a\"", "1", "") + r#"{"layer":"ci","result":"passed","commit":"A","branch":"x","lock":"y"}"# + "\n";
+        assert_eq!(reds(&rows(&log)).unwrap()["green_again"], 0);
+        // Green rows that did not run the suite do not count; any value but true does.
+        for (field, counts) in [
+            ("\"docs_only\":true", false),
+            ("\"suite_in_checks\":true", false),
+            ("\"docs_only\":false", true),
+            ("\"docs_only\":\"true\"", true),
+            ("\"suite_in_checks\":1", true),
+            ("\"suite_in_checks\":null", true),
+        ] {
+            let log = red("\"a\"", "1", "")
+                + &format!("{{\"layer\":\"ci\",\"result\":\"passed\",\"commit\":\"a\",{field}}}\n");
+            assert_eq!(reds(&rows(&log)).unwrap()["green_again"], u64::from(counts), "{field}");
+        }
+        // Other green-row shapes: not ci, not passed, empty or non-string commit.
+        for row in [
+            r#"{"layer":"hook","result":"passed","commit":"a"}"#,
+            r#"{"layer":"ci","result":"error","commit":"a"}"#,
+            r#"{"layer":"ci","result":"passed","commit":""}"#,
+            r#"{"layer":"ci","result":"passed","commit":["a"]}"#,
+            r#"{"layer":"ci","result":"passed","commit":"a","escape":true}"#,
+        ] {
+            let log = red("\"a\"", "1", "") + row + "\n";
+            assert_eq!(reds(&rows(&log)).unwrap()["green_again"], 0, "{row}");
+        }
+        // Secs that are not a number of 0 or more add 0.
+        for secs in ["-3", "\"40\"", "null", "true"] {
+            let log = red("\"a\"", secs, "") + &green("\"a\"");
+            assert_eq!(reds(&rows(&log)).unwrap()["green_again_secs"].to_string(), "0", "{secs}");
+        }
+        let log = red("\"a\"", "3725", "") + &green("\"a\"");
+        assert!(text(&[reds(&rows(&log)).unwrap()]).contains(", 1 h 2 min 5 s of CI;"));
+        // Failed: only an array names; non-strings skipped; a duplicate taken once per row.
+        for failed in [",\"failed\":\"t1\"", ",\"failed\":{\"t1\":1}", ",\"failed\":null", ""] {
+            let log = red("\"a\"", "1", failed) + &green("\"a\"");
+            let line = reds(&rows(&log)).unwrap();
+            assert_eq!((line["named"].clone(), line["cases"].clone()), (json!(0), json!([])), "{failed}");
+        }
+        let log = red("\"a\"", "1", ",\"failed\":[\"t1\",\"t1\",2,null,\"t2\"],\"failed_count\":99") + &green("\"a\"");
+        assert_eq!(reds(&rows(&log)).unwrap()["cases"], json!([{"id": "t1", "rows": 1}, {"id": "t2", "rows": 1}]));
+        // Top 5 by rows, ties by byte order; only green-again rows give cases.
+        let log = red("\"a\"", "1", ",\"failed\":[\"z\",\"b\",\"B\",\"a\"]")
+            + &red("\"a\"", "1", ",\"failed\":[\"z\",\"b\",\"c\",\"d\"]")
+            + &red("\"a\"", "1", ",\"failed\":[\"z\",\"e\"]")
+            + &green("\"a\"")
+            + &red("\"a\"", "1", ",\"failed\":[\"z\",\"never\"]")
+            + &red("\"c\"", "1", ",\"failed\":[\"never\"]");
+        let line = reds(&rows(&log)).unwrap();
+        assert_eq!(
+            line,
+            json!({"kind": "reds", "suite_red": 5, "green_again": 3, "green_again_share": 0.6,
+                "green_again_secs": 3, "named": 3, "cases": [
+                    {"id": "z", "rows": 3}, {"id": "b", "rows": 2}, {"id": "B", "rows": 1},
+                    {"id": "a", "rows": 1}, {"id": "c", "rows": 1}]})
+        );
+        assert_eq!(
+            text(&[line]),
+            "reds: 5 suite-red, 3 green again on the same commit (60%), 3 s of CI; cases named in 3: \"z\" (3), \"b\" (2), \"B\" (1), \"a\" (1), \"c\" (1)\n"
+        );
+        // Ids in the text are JSON string literals; the JSON holds the id itself.
+        let log = red("\"a\"", "1", r#","failed":["t, (1)\n\"x\"\\\u0001\u007f"]"#) + &green("\"a\"");
+        let line = reds(&rows(&log)).unwrap();
+        assert_eq!(line["cases"][0]["id"], "t, (1)\n\"x\"\\\u{1}\u{7f}");
+        assert_eq!(
+            text(&[line]),
+            "reds: 1 suite-red, 1 green again on the same commit (100%), 1 s of CI; cases named in 1: \"t, (1)\\n\\\"x\\\"\\\\\\u0001\u{7f}\" (1)\n"
+        );
+        // A third share prints its fraction in JSON and a whole percent in text.
+        let log = red("\"a\"", "0.4", "") + &red("\"b\"", "1", "") + &red("\"c\"", "1", "") + &green("\"a\"");
+        let line = reds(&rows(&log)).unwrap();
+        assert_eq!(line["green_again_share"].to_string(), "0.3333333333333333");
+        assert_eq!(line["green_again_secs"].to_string(), "0.4");
+        assert_eq!(
+            text(&[line]),
+            "reds: 3 suite-red, 1 green again on the same commit (33%), 0 s of CI; cases named in 0: none\n"
+        );
     }
 
     #[test]
