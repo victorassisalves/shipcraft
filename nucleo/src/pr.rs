@@ -58,7 +58,8 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>) -> Result<(
     // Item 103: the product lines are counted after the open PR is looked up
     // and before anything is created or edited; a failure writes no `pr` row.
     let base_sha = repo.text(&["merge-base", &format!("origin/{base}"), "HEAD"])?;
-    let size = medicao::product_lines(repo, &config, &base_sha, &head)?;
+    // Item 108: `not_left_out` is why the generated files stayed in the count.
+    let (size, not_left_out) = medicao::product_lines(repo, &config, &base_sha, &head)?;
     let limit = config.pr.aviso_linhas;
     // Item 103: the warnings about the size line, printed after it.
     let mut warnings: Vec<String> = Vec::new();
@@ -114,6 +115,10 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>) -> Result<(
     println!("shipcraft: PR #{number}");
     for line in size_block::lines(size, limit) {
         println!("shipcraft: {line}");
+    }
+    // Item 108: right after the block's lines, only once they are printed.
+    if let Some(reason) = &not_left_out {
+        println!("{}", size_block::not_left_out(reason));
     }
     for warning in &warnings {
         println!("{warning}");
