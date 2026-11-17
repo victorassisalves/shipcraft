@@ -1992,7 +1992,7 @@ Item 89's `status` says to run `shipcraft init` when the `AGENTS.md` block is ol
 | `[review] guide` | Path of a project file whose text the reviewer gets in its own section of the brief, read at the base commit (item 102). | none |
 | `[report] release_tags` | The tags `report` reads as releases: a pattern where `*` matches any run of characters (item 99). | `v<X>.<Y>.<Z>` tags |
 | `[machine] slots` | Concurrent local CI and review runs on this machine. | `1` |
-| `[pr] warn_lines` | Product lines above which the size line in the PR body (item 103) and the PR summary suggest a split. | `500` |
+| `[pr] warn_lines` | Product lines above which the size line in the PR body (item 103) and the PR summary suggest a split; `init` writes it, and `report` counts PRs against it (item 107). | `500` |
 | `[pr] shape_lines` | Fixes the file-size threshold of the shape warning (an integer above 0). | p90 of the project |
 
 ### Rules
@@ -2171,7 +2171,7 @@ Found in POC-040 (private process repository, 2026-11-10): in Hands-off, with a 
 
 **Known limits.** Shipcraft writes raw text; a body that ends inside an unclosed code fence or HTML comment shows the block inside it on GitHub, though the reviewer reads the raw text. A person's edit inside the trailing block is overwritten on the next `pr`. Between `pr` reading the body and writing it, another edit on GitHub is lost (last write wins). A non-empty body that does not end in `\n` keys differently once `pr` has added the block (its rest gains the `\n`), so that first run's review is not reused. A body near GitHub's length limit can exceed it with the block; creating or editing it with `--body` then fails as an error, as any create or edit failure does today.
 
-**Metric:** in the next 20 merged PRs of an adopter that runs this binary without POC-040's wrapper, the share above its limit stays at or below 25% (Hands-off's window: 10%; baseline 85%) and review rounds per PR do not rise above that adopter's last 20. Revert: drop the block in a release; the summary comment is unchanged, so nothing else depends on it. `init` writing the limit and `report` counting it are item 104.
+**Metric:** in the next 20 merged PRs of an adopter that runs this binary without POC-040's wrapper, the share above its limit stays at or below 25% (Hands-off's window: 10%; baseline 85%) and review rounds per PR do not rise above that adopter's last 20. Revert: drop the block in a release; the summary comment is unchanged, so nothing else depends on it. `init` writing the limit and `report` counting it are item 107.
 
 **Touches.** Read first, and keep:
 - Item 11: every `v1-11.*` case, `sz_size` included: the summary's `Size: +A / -R product lines` line and the hint above `warn_lines` (default 500) are unchanged.
@@ -2196,6 +2196,52 @@ Found in POC-040 (private process repository, 2026-11-10): in Hands-off, with a 
 - Product lines reach the `ci` and `review` rows through the environment; the shape warning is computed after the PR is known. Keep both.
 - The review reads the body `pr` holds; the summary comment is posted at the end with the `Size:` line and the hint. Keep both.
 - Nothing `pr` writes to GitHub is rolled back on a later failure. Keep.
+
+### `init` writes the size limit, and `report` counts PRs against it (item 107)
+
+The second half of POC-040's product item (private process repository, verdict keep, 2026-11-10); item 103 shipped the line in the PR body. Two things were left. The limit that line uses, `[pr] warn_lines`, is a default no project sees in its config, so nobody knows it can be set. And the share of PRs above the limit, the number POC-040's verdict and item 103's metric read, was counted by a private script. Now `init` writes the limit and `report` prints the count. Nothing is refused, and no exit code, status or verdict changes.
+
+1. **`init` writes the limit.** The config `init` writes gains these four lines, right after the `[review]` table's `timeout = 1200` line and before `[build]` and any `[[suite]]`:
+
+   - an empty line;
+   - `[pr]`
+   - `# product lines above which the PR body and the PR summary suggest a split; a line, never a refusal`
+   - `warn_lines = 500`
+
+   Each ends in `\n`. They are written in every config `init` writes (a language, `--lang other` with `--command`, a workspace with `[[suite]]` tables, with or without `[build]`), always with `500`, the default: a new project's behavior is the same as without the lines. Nothing else in the file changes, and `init` prints nothing new. A config that already exists is kept byte for byte, as today (item 90): `init` never adds the table to it.
+2. **`report` counts the PRs.** `report` reads the `pr` rows of the run log it already reads; no git, no network.
+   - **A measured row** is a row whose `layer` is `"pr"`, whose `pr` is a JSON integer above 0, and whose `product_lines` and `warn_lines` are both JSON integers of 0 or more, whatever its `result`. "JSON integer" is as item 79 reads `pr`: a number written with no fraction and no exponent that fits 64 unsigned bits (`400`; never `400.0`, `4e2`, `"400"` or `-1`). A row that is not measured is skipped; it is never a gap.
+   - **A measured PR** is a `pr` number with at least one measured row. Its size and its limit are the `product_lines` and `warn_lines` of its last measured row in the file's order (the log is append-only; `at` is not read). It is **above** when `product_lines > warn_lines`, the same test as the PR body's block (item 103) and the summary's hint (item 11).
+   - **A merged PR** is a measured PR whose number is the `pr` of some `merge` row that counts by item 38: `result` is `passed`, `base` and `default_branch` are equal strings, and the row is not an escape. The `merge` row's own `pr` is read as above (a JSON integer above 0). Its locks play no part, so a PR with no lock counts.
+   - **The line.** When at least one PR is measured, `--json` prints one more object, after the last `day` line and before the `dora` line, with exactly these keys: `kind` (`"size"`), `prs` (measured PRs), `above` (those above), `above_share` (`above / prs`), `merged_prs` (merged PRs), `merged_above` (those above), `merged_above_share` (`merged_above / merged_prs`, or `null` when `merged_prs` is 0). Counts are JSON integers; a share is a number as the `day` row's share is printed (a whole value as an integer: `0`, `1`; otherwise the fraction). The text output prints, at the same position, one line: `size: <prs> PR(s) measured, <above> above their limit (<share>); merged <merged_prs>, <merged_above> above (<merged share>)`, each share as item 83's whole percent (`25%`, `0%`, `100%`) and `-` for `null`.
+   - **No measured PR:** no `size` object and no `size:` line. A run log without measured rows (none yet, or only rows from before 2.53.0) reports byte for byte as today, in both forms.
+   - `--since` and `--github` do not change the line: it always covers the whole run log, and nothing in it is filled from GitHub.
+
+**Known limits.** The count covers what ran on this machine, as the report's first line says: a PR opened or merged elsewhere (another clone, GitHub's button) is not measured or not counted as merged. A PR's size is the one its last `pr` run saw; commits pushed after it without `shipcraft pr` are not read. Each PR is judged by the limit its own last row carries, so a project that changes `warn_lines` mixes limits in one count. PR numbers are not checked against the repository: a run log copied from another repository counts its PRs. A project that wants POC-040's limit sets `warn_lines = 400` itself; `init` writes the default.
+
+**Metric:** on an adopter's machine, `report`'s `size` line equals the count POC-040's script gives for the same PRs (checked once on Hands-off's run log after its next 20 merged PRs), and item 103's metric is then read from this line. Revert: a release that drops the line and the four config lines; a config that already has `[pr] warn_lines = 500` behaves the same either way.
+
+**Touches.** Read first:
+- **The version:** the contract goes to 2.56.0 (`v1-62.version`, `v1-64.version`, `v1-87.version` and the others that read section 11 or the manifest).
+- **Assertions that change, and nothing else in them:** item 91's frozen config text (`acceptance/lib/item91.sh`, the `expected` string its warning cases compare byte for byte: `v1-91.no-runner`, `absent`, `invalid`, `invalid-utf8`, `manifest-directory`, `dangling`, `symlink-none`, `workspace`, `parent-only`, `installed-only`, `agents-fail`, `briefs-fail`, `github-fail`) gains point 1's four lines after `timeout = 1200\n`.
+- **Must keep passing unchanged:**
+  - item 90 (`v1-90.*`) and item 91's `kept`, `kept-link` and `kept-invalid`: an existing config is kept byte for byte;
+  - `python::init-files`, `node::init-files`, `go::init-files`, item 67's and item 71's `init` cases, item 68's `equal-*` cases: they read keys or compare two `init` runs, not the whole text;
+  - item 11 (`v1-11.*`), item 50 and item 103 (`v1-103.*`): the `Size:` lines, the hint, the block, and the `pr` row's `product_lines` and `warn_lines`; `warn_lines` read from a config with and without the key;
+  - `english.sh`'s `e1-legacy-hook-pr-warn-lines` and `e1-legacy-ci-pr-warn-lines`;
+  - every `report` case of items 38, 46, 75, 76, 79, 83, 99 and 105, text and `--json`: their run logs hold no measured row, so their output is unchanged;
+  - item 10's `v1-10.1-execucoes-jsonl`: no row gains or loses a field.
+- **New cases** write the run log by hand after the fixture's last commit, as item 38's and item 83's do, and run `init` in fresh repositories. Estimate: 10 for point 1, 26 for point 2. Cap: 40.
+
+**Current behavior** on these paths (keep unless marked change):
+- `init` without a config writes `.shipcraft.toml` from one template: the header comment, `shipcraft_min`, the top-level suite keys, `[execution]`, `[roles]`, `[review]`, then `[build]` when detected and the `[[suite]]` tables. Change: the `[pr]` table of point 1 after `[review]`. Its other files (`AGENTS.md`'s block, the briefs, the hooks, `.shipcraft/locks/.gitkeep`), its messages, its exit codes, its rollback of what it created when a later step fails, and its branch-protection call: keep.
+- `init` with a config keeps the file and reads it (item 90). Keep.
+- `[pr] warn_lines` is read as a non-negative integer with default 500; the old name `aviso_linhas` is refused; `pr` reads it from the base's config. Keep.
+- `pr` writes `product_lines` and `warn_lines` on its `pr` row (item 103); `merge` writes `pr`, `base` and `default_branch` on its row. Keep: this item adds no row and no field.
+- `report` reads the run log with `serde_json`, one object per line; a field of the wrong type is read as empty, never a gap; rows with `escape: true` and blank lines are ignored; a BOM and a trailing CR are stripped. Keep, and the `size` line reads through the same reader.
+- `report` prints `meta`, the `lock` lines, the `day` lines, `dora`, `github` (with `--github`) and the `gap` lines, in that order, exits 0, writes nothing and appends no row. Keep. Change: the `size` line between the `day` lines and `dora`, only when a PR is measured.
+- `report`'s git reads (item 76), `--since`'s refusal, `--github`'s calls and the usage refusal: keep.
+- The standing effects the spec-review brief lists: the new `report` cases run no hook after writing their log; the `init` cases meet `.shipcraft/locks/.gitkeep` and the hooks as today. Keep.
 
 ### The review
 
@@ -2487,6 +2533,8 @@ Besides the refusal codes, `code` can hold run outcomes that are not refusals: `
 
 `shipcraft pr` posts the branch's summary from this file.
 
+`shipcraft report` also counts, from the `pr` rows, the PRs above their size limit (item 107, section 5).
+
 ### Measuring the flow (item 38)
 
 Time to main is Shipcraft's main number. It must come from what Shipcraft recorded, not from agents or prose, and not from git history: squash, rebase, fast-forward, deleted or reused branches and two locks on one branch each break a reconstruction from history.
@@ -2536,4 +2584,4 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.55.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.56.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
