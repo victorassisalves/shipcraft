@@ -28,7 +28,7 @@ enum Gate {
     Stopped(&'static str, String),
 }
 
-pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>) -> Result<()> {
+pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>, merge: bool) -> Result<()> {
     let started = Instant::now();
     let base = repo.default_branch();
     repo.run(&["fetch", "-q", "origin"])?;
@@ -210,6 +210,11 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>) -> Result<(
     // Item 96: the `[review] after` this run read.
     row["review_after"] = json!(if config.revisao.after_push { "push" } else { "ci" });
     medicao::record(repo, row);
+    // Item 110: only after the `ready` line and the `pr` row, and only when
+    // `pr` passed, the merge is `shipcraft merge <n>`'s own, without `--no-review`.
+    if merge && result.is_ok() {
+        return crate::merge::merge(repo, &number.to_string(), None);
+    }
     result
 }
 

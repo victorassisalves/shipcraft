@@ -162,7 +162,7 @@ Upgrading: with the npm install, `pnpm add -DE shipcraft@latest` (or `npm i -D -
 | `shipcraft check [--commit-msg <file>]` | Called by the hook. Judges the commit being made against open locks and closes a lock when its cases pass. |
 | `shipcraft close` | Closes a lock in its own commit; the post-commit hook runs it, and you can run it by hand. |
 | `shipcraft ci --base <ref> [--pr]` | Re-checks every commit in `<ref>..HEAD` and runs the full suite on HEAD, unless the PR is docs only or `[execution] suite_checks` leaves the suite to your GitHub checks. Runs locally or in GitHub Actions. |
-| `shipcraft pr [--title <t>] [--body <file>]` | Pushes the branch, opens or updates the PR, runs CI and review, and publishes the `shipcraft/ci` and `shipcraft/review` statuses. |
+| `shipcraft pr [--title <t>] [--body <file>] [--merge]` | Pushes the branch, opens or updates the PR, runs CI and review, and publishes the `shipcraft/ci` and `shipcraft/review` statuses. With `--merge`, once the PR is ready it then merges it exactly as `shipcraft merge <n>`. |
 | `shipcraft review [--pr <n>]` | Runs the review on the local HEAD (to catch blockers before opening the PR) or on any PR. |
 | `shipcraft merge <pr> [--no-review "<reason>"]` | Merges only when CI and review are green on the PR's head. `--no-review "<reason>"` is the recorded way out, and the reason shows up in the PR and in the numbers. |
 | `shipcraft status` | The open locks, and how protected the repository really is (branch protection or only `shipcraft merge`). |

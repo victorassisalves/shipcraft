@@ -53,7 +53,7 @@ const USAGE: &str =
      | shipcraft red [--redo] [--base <ref>] [--all] [--fix [--reported-at <time>] [--fixes-release <tag>]]
      | shipcraft check [--commit-msg <file>] | shipcraft close
      | shipcraft ci --base <ref> [--pr]
-     | shipcraft pr [--title <t>] [--body <file>] | shipcraft review [--pr <n>]
+     | shipcraft pr [--title <t>] [--body <file>] [--merge] | shipcraft review [--pr <n>]
      | shipcraft merge <pr> [--no-review \"<reason>\"] | shipcraft status | shipcraft report [--json] [--since <tag>] [--github]";
 
 fn main() -> ExitCode {
@@ -198,16 +198,19 @@ fn run(args: &[&str]) -> Result<()> {
         ["ci", "--base", base] => measured("ci", |repo, row| ci::run(repo, base, false, row)),
         ["ci", "--base", base, "--pr"] => measured("ci", |repo, row| ci::run(repo, base, true, row)),
         ["pr", rest @ ..] => {
-            let (mut title, mut body) = (None, None);
+            // Item 110: `--merge` once, with no value, in an option position;
+            // `--title` and `--body` still take the next argument whatever it is.
+            let (mut title, mut body, mut merge) = (None, None, false);
             let mut rest = rest.iter();
             while let Some(arg) = rest.next() {
                 match *arg {
                     "--title" => title = Some(*rest.next().ok_or_else(|| invalid(args))?),
                     "--body" => body = Some(*rest.next().ok_or_else(|| invalid(args))?),
+                    "--merge" if !merge => merge = true,
                     _ => return Err(invalid(args)),
                 }
             }
-            pr::pr(&Repo::open()?, title, body)
+            pr::pr(&Repo::open()?, title, body, merge)
         }
         ["review"] => pr::local(&Repo::open()?),
         ["review", "--pr", n] => pr::of_pr(&Repo::open()?, n),
