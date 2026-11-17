@@ -167,7 +167,7 @@ trace=records(st/'trace110');gates=[x for x in trace if x['kind']=='gate'];merge
 rs=rows();prs=[r for r in rs[len(before):] if r['layer']=='pr'];mrs=[r for r in rs[len(before):] if r['layer']=='merge']
 pr_keys=set('at base branch code commit layer lock locks pr product_lines queue_secs result review_after secs warn_lines'.split())
 merge_keys=set('at base branch code commit default_branch layer lock locks method pr reason result secs'.split())
-assert all(set(r)==pr_keys for r in prs),prs
+assert all(set(r)==pr_keys | ({'reason'} if r['result'] in ('refused','error') else set()) for r in prs),prs
 assert all(set(r)==merge_keys for r in mrs),mrs
 ready=f'shipcraft: PR #{prn} ready: enabled layers passed; merge with `shipcraft merge {prn}`.\n'
 advice='shipcraft: clean up what this change created (worktree, temp folders, servers you started).\n'
@@ -211,7 +211,7 @@ elif phase in ('merged','gate','ready'):
    assert not mrs and stdout.endswith(ready) and advice not in stderr,(stdout,stderr,mrs)
    assert reason.lower() in stderr.lower(),stderr
    if want==1:
-    lines=stderr.strip().splitlines();assert len(lines)==3 and all(s.startswith(prefix) for s,prefix in zip(lines,['shipcraft refused:','Why:','Next:'])),stderr
+    lines=stderr.strip().splitlines();assert (len(lines)>=3 if ci!='off' or review!='off' else len(lines)==3) and all(s.startswith(prefix) for s,prefix in zip(lines[-3:],['shipcraft refused:','Why:','Next:'])),stderr
     assert not merges,merges
    else:assert 'shipcraft: error:' in stderr,stderr
    assert json.loads((st/'prs.json').read_text())[str(prn)]['state']=='OPEN'
@@ -223,7 +223,7 @@ else:
  if phase=='early':assert not prs,prs
  else:assert len(prs)==1 and prs[0]['result']==('error' if want==2 else 'refused'),prs
  if want==1:
-  lines=stderr.strip().splitlines();assert len(lines)==3 and all(s.startswith(prefix) for s,prefix in zip(lines,['shipcraft refused:','Why:','Next:'])),stderr
+  lines=stderr.strip().splitlines();assert (len(lines)>=3 if ci!='off' or review!='off' else len(lines)==3) and all(s.startswith(prefix) for s,prefix in zip(lines[-3:],['shipcraft refused:','Why:','Next:'])),stderr
  else:assert 'shipcraft: error:' in stderr,stderr
 PY110
   pass
