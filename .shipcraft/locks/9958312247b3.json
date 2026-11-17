@@ -18,7 +18,7 @@
     "acceptance/lib/item106.sh": "sha256:2680f74cec85a611ea71b42fa1bb1f6477e5ca93c0013a2742eae155a3d559de",
     "acceptance/lib/item107.sh": "sha256:be290f8006849e8f7f958ac0d67c407c576c1baa5c983fad03a8c361b3d630a7",
     "acceptance/lib/item108.sh": "sha256:fd29731fc63f72c0803829239c1dcb3b46d20999fb1ab82ecdea826d9b2ec989",
-    "acceptance/lib/item110.sh": "sha256:28498bec9c4664dcbff8819f042ec3fafef55ad9b4007dd19daa1c394f06d5b6",
+    "acceptance/lib/item110.sh": "sha256:ec22eb3ce7c0c5facd442ab4b294435229adc8449472fb1f6473b7039c6b40dd",
     "acceptance/lib/item16a.sh": "sha256:d83f4146699d5f19ce369613c49449b2c6b4de1bd96c66e17d7a4f2ce350e125",
     "acceptance/lib/item16b.sh": "sha256:9f0d6b228a19c89e070e28ec4e4c41fa67ff812474e71adf9220788a7ce15f2d",
     "acceptance/lib/item17.sh": "sha256:5efdcfc0c8b419625cbc0e96a6aaac226387a5a7dad57f8ac90d64cdedbee4c1",
@@ -299,5 +299,5 @@
   "kind": "feature",
   "reported_at": null,
   "fixes_release": null,
-  "seal": "b34247aa5b3845b1413ad323c70e39210f3f5a8c213db65c43697dd547b75add"
+  "seal": "a70b128b6822f98fabad7f7bd74f872fa10eba90a4652f5970ff55977d3b6a60"
 }

@@ -167,7 +167,7 @@ trace=records(st/'trace110');gates=[x for x in trace if x['kind']=='gate'];merge
 rs=rows();prs=[r for r in rs[len(before):] if r['layer']=='pr'];mrs=[r for r in rs[len(before):] if r['layer']=='merge']
 pr_keys=set('at base branch code commit layer lock locks pr product_lines queue_secs result review_after secs warn_lines'.split())
 merge_keys=set('at base branch code commit default_branch layer lock locks method pr reason result secs'.split())
-assert all(set(r)==pr_keys | ({'reason'} if r['result'] in ('refused','error') else set()) for r in prs),prs
+assert all(set(r)==pr_keys | ({'reason'} if r['result']=='refused' else set()) for r in prs),prs
 assert all(set(r)==merge_keys for r in mrs),mrs
 ready=f'shipcraft: PR #{prn} ready: enabled layers passed; merge with `shipcraft merge {prn}`.\n'
 advice='shipcraft: clean up what this change created (worktree, temp folders, servers you started).\n'
