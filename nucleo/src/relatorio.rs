@@ -169,6 +169,7 @@ pub fn run(prepared: Prepared, as_json: bool, since: Option<&str>, github: bool)
         .into_iter()
         .chain(report.locks.clone())
         .chain(report.days())
+        .chain(size(&rows))
         .chain([dora])
         .chain(summary)
         .chain(gaps)
@@ -917,12 +918,50 @@ fn lock_row(id: &str, rows: &[&Row]) -> (Value, Option<Merged>) {
 
 /// The earliest passed `merge` row; a merge counts only into the default branch.
 fn merge_row<'a>(rows: &[&'a Row]) -> Option<&'a Row> {
-    first_row(rows.iter().copied().filter(|r| {
-        str_of(r, "layer") == "merge"
-            && is(r, "passed")
-            && r.get("base")
-                .and_then(Value::as_str)
-                .is_some_and(|b| r.get("default_branch").and_then(Value::as_str) == Some(b))
+    first_row(rows.iter().copied().filter(|r| merge_counts(r)))
+}
+
+/// A `merge` row that counts: passed, into the default branch.
+fn merge_counts(row: &Row) -> bool {
+    str_of(row, "layer") == "merge"
+        && is(row, "passed")
+        && row
+            .get("base")
+            .and_then(Value::as_str)
+            .is_some_and(|b| row.get("default_branch").and_then(Value::as_str) == Some(b))
+}
+
+/// Item 107: the `size` line, the PRs counted against their size limit, from
+/// the `pr` and `merge` rows in the file's order; None when no PR is measured.
+/// A PR's size and limit are those of its last measured `pr` row (a JSON
+/// integer `pr` above 0, `product_lines` and `warn_lines` JSON integers) before
+/// the first counting `merge` row of the same number.
+fn size(rows: &[Row]) -> Option<Value> {
+    let int = |r: &Row, key: &str| r.get(key).and_then(Value::as_u64);
+    let mut measured: BTreeMap<u64, bool> = BTreeMap::new();
+    let mut merged: BTreeSet<u64> = BTreeSet::new();
+    for row in rows {
+        let Some(pr) = int(row, "pr").filter(|n| *n > 0) else { continue };
+        if merge_counts(row) {
+            merged.insert(pr);
+        } else if str_of(row, "layer") == "pr" && !merged.contains(&pr) {
+            if let Some((lines, limit)) = int(row, "product_lines").zip(int(row, "warn_lines")) {
+                measured.insert(pr, lines > limit);
+            }
+        }
+    }
+    if measured.is_empty() {
+        return None;
+    }
+    let count = |all: &[bool]| (all.len(), all.iter().filter(|above| **above).count());
+    let (prs, above) = count(&measured.values().copied().collect::<Vec<_>>());
+    let (merged_prs, merged_above) =
+        count(&measured.iter().filter(|(pr, _)| merged.contains(pr)).map(|(_, above)| *above).collect::<Vec<_>>());
+    let share = |part: usize, whole: usize| (whole > 0).then(|| num(part as f64 / whole as f64));
+    Some(json!({
+        "kind": "size", "prs": prs, "above": above, "above_share": share(above, prs),
+        "merged_prs": merged_prs, "merged_above": merged_above,
+        "merged_above_share": share(merged_above, merged_prs),
     }))
 }
 
@@ -1111,6 +1150,18 @@ fn text(lines: &[Value]) -> String {
                     span(&line["red_to_merge_median"]),
                     span(&line["waiting_median"]),
                     show_with(&line["first_review_approved_share"], percent)
+                );
+            }
+            // Item 107: the PRs counted against their size limit.
+            "size" => {
+                out += &format!(
+                    "size: {} PR(s) measured, {} above their limit ({}); merged {}, {} above ({})\n",
+                    line["prs"],
+                    line["above"],
+                    show_with(&line["above_share"], percent),
+                    line["merged_prs"],
+                    line["merged_above"],
+                    show_with(&line["merged_above_share"], percent)
                 );
             }
             "dora" => out += &dora_text(meta, line),
@@ -1320,6 +1371,63 @@ mod tests {
         ] {
             assert_eq!(fix_of_row(&row(value.clone())).fixes_release.as_deref(), read, "{value}");
         }
+    }
+
+    #[test]
+    fn size_counts_each_pr_by_its_last_measured_row_before_its_merge() {
+        let rows = |log: &str| read(log.as_bytes()).0;
+        let pr = |n: u64, lines: u64, limit: u64| {
+            format!("{{\"layer\":\"pr\",\"result\":\"refused\",\"pr\":{n},\"product_lines\":{lines},\"warn_lines\":{limit}}}\n")
+        };
+        let merge = |n: u64, base: &str| {
+            format!("{{\"layer\":\"merge\",\"result\":\"passed\",\"pr\":{n},\"base\":\"{base}\",\"default_branch\":\"main\"}}\n")
+        };
+        // No measured row: no line. Each of these is skipped, never a gap.
+        for row in [
+            r#"{"layer":"pr","pr":1,"product_lines":400.0,"warn_lines":500}"#,
+            r#"{"layer":"pr","pr":1,"product_lines":4e2,"warn_lines":500}"#,
+            r#"{"layer":"pr","pr":1,"product_lines":"400","warn_lines":500}"#,
+            r#"{"layer":"pr","pr":1,"product_lines":400,"warn_lines":-1}"#,
+            r#"{"layer":"pr","pr":1,"product_lines":400}"#,
+            r#"{"layer":"pr","pr":0,"product_lines":400,"warn_lines":500}"#,
+            r#"{"layer":"pr","pr":1.0,"product_lines":400,"warn_lines":500}"#,
+            r#"{"layer":"ci","pr":1,"product_lines":400,"warn_lines":500}"#,
+            r#"{"layer":"pr","pr":1,"product_lines":400,"warn_lines":500,"escape":true}"#,
+        ] {
+            assert_eq!(size(&rows(row)), None, "{row}");
+        }
+        assert_eq!(size(&rows(&(merge(1, "main") + &pr(1, 900, 500)))), None);
+        // The last measured row gives the size and the limit; equal is not above.
+        let log = pr(1, 900, 500) + &pr(1, 500, 500) + &pr(2, 1, 0) + &pr(3, 0, 0);
+        assert_eq!(
+            size(&rows(&log)).unwrap().to_string(),
+            r#"{"above":1,"above_share":0.3333333333333333,"kind":"size","merged_above":0,"merged_above_share":null,"merged_prs":0,"prs":3}"#
+        );
+        // Rows after the first counting merge are not measured; a merge into
+        // another base, a refused one and an escape do not count.
+        let log = pr(1, 600, 500)
+            + &merge(1, "main")
+            + &pr(1, 10, 500)
+            + &pr(2, 10, 500)
+            + &merge(2, "release")
+            + &pr(2, 700, 500)
+            + &pr(3, 800, 500)
+            + r#"{"layer":"merge","result":"refused","pr":3,"base":"main","default_branch":"main"}"#
+            + "\n"
+            + r#"{"layer":"merge","result":"passed","pr":3,"base":"main","default_branch":"main","escape":true}"#
+            + "\n"
+            + &pr(4, 10, 500)
+            + &merge(4, "main");
+        let line = size(&rows(&log)).unwrap();
+        assert_eq!(
+            line,
+            json!({"kind": "size", "prs": 4, "above": 3, "above_share": 0.75,
+                "merged_prs": 2, "merged_above": 1, "merged_above_share": 0.5})
+        );
+        assert_eq!(text(&[line]), "size: 4 PR(s) measured, 3 above their limit (75%); merged 2, 1 above (50%)\n");
+        let line = size(&rows(&pr(7, 1, 500))).unwrap();
+        assert_eq!(line["above_share"].to_string(), "0");
+        assert_eq!(text(&[line]), "size: 1 PR(s) measured, 0 above their limit (0%); merged 0, 0 above (-)\n");
     }
 
     #[test]

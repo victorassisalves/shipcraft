@@ -503,6 +503,8 @@ fn config_text(
     );
     text +=
         "\n[review]\n# seconds; optional project spec included in the brief: spec = \"docs/spec.md\"\ntimeout = 1200\n";
+    // Item 107: the default size limit, in every config init writes.
+    text += "\n[pr]\n# product lines above which the PR body and the PR summary suggest a split; a line, never a refusal\nwarn_lines = 500\n";
     if let Some(command) = build {
         text += &format!(
             "\n[build]\n# runs once at the root, before suites, in shipcraft ci and shipcraft red\ncommand = {}\n",
@@ -1340,4 +1342,23 @@ fn make_executable(path: &Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(path, fs::Permissions::from_mode(0o755))
         .map_err(|e| failed(format!("make {} executable: {e}", path.display())))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_text_writes_the_size_limit_after_review_and_before_build() {
+        const PR: &str = "timeout = 1200\n\n[pr]\n# product lines above which the PR body and the PR summary suggest a split; a line, never a refusal\nwarn_lines = 500\n";
+        let plain = config_text(None, None, &[], false, &None, None);
+        assert!(plain.ends_with(PR), "{plain}");
+        let built = config_text(None, None, &[], false, &Some("claude".to_string()), Some("make"));
+        assert!(built.contains(&format!("{PR}\n[build]\n")), "{built}");
+        for text in [plain, built] {
+            assert_eq!(text.matches("[pr]").count(), 1);
+            let table: toml::Table = text.parse().unwrap();
+            assert_eq!(table["pr"]["warn_lines"].as_integer(), Some(500));
+        }
+    }
 }
