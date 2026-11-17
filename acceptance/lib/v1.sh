@@ -112,6 +112,7 @@ stubs_for() { # stubs_for <cbdir> [agents...]
   local cb="$1"; shift
   mkdir -p "$cb/state"
   cp "$ACEITE/stubs/gh" "$cb/gh"; chmod +x "$cb/gh"
+  cp "$ACEITE/stubs/curl" "$cb/curl"; chmod +x "$cb/curl"
   local a
   for a in "$@"; do cp "$ACEITE/stubs/agent" "$cb/$a"; chmod +x "$cb/$a"; done
 }

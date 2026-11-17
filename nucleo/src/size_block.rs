@@ -30,11 +30,12 @@ pub fn not_left_out(reason: &str) -> String {
     format!("shipcraft: generated files were not left out of the size: {reason}")
 }
 
-/// The whole block, each line ending in `\n`.
-pub fn block(size: (u64, u64), limit: u64) -> String {
+/// The whole block, each line ending in `\n`. Item 115: `extra` (the new
+/// dependencies' lines) comes after the `Size:` / `Above the limit:` lines.
+pub fn block(size: (u64, u64), limit: u64, extra: &[String]) -> String {
     let mut text = format!("{START}\n");
-    for line in lines(size, limit) {
-        text.push_str(&line);
+    for line in lines(size, limit).iter().chain(extra) {
+        text.push_str(line);
         text.push('\n');
     }
     text.push_str(END);
@@ -82,9 +83,9 @@ pub fn rest(body: &str) -> &str {
 
 /// The new body from the base text: the block alone when the base's rest is
 /// empty; else the rest, `\n` when it does not end in one, a blank line, the block.
-pub fn new_body(base: &str, size: (u64, u64), limit: u64) -> String {
+pub fn new_body(base: &str, size: (u64, u64), limit: u64, extra: &[String]) -> String {
     let rest = rest(base);
-    let block = block(size, limit);
+    let block = block(size, limit, extra);
     if rest.is_empty() {
         return block;
     }
@@ -104,20 +105,33 @@ mod tests {
     const SMALL: (u64, u64) = (3, 2);
 
     fn blk() -> String {
-        block(SMALL, 500)
+        block(SMALL, 500, &[])
     }
 
     #[test]
     fn block_below_and_above_the_limit() {
         assert_eq!(
-            block((3, 2), 500),
+            block((3, 2), 500, &[]),
             "<!-- shipcraft:size -->\nSize: 5 product lines against a limit of 500 (+3 / -2, counted as in the PR summary).\n<!-- /shipcraft:size -->\n"
         );
-        let at = block((250, 250), 500);
+        let at = block((250, 250), 500, &[]);
         assert!(!at.contains("Above the limit"), "500 is not above 500");
-        let above = block((300, 201), 500);
+        let above = block((300, 201), 500, &[]);
         assert_eq!(above.lines().nth(2).unwrap(), ABOVE);
         assert_eq!(above.lines().count(), 4);
+    }
+
+    #[test]
+    fn the_dependency_lines_go_after_the_size_lines() {
+        let extra = vec!["New dependency X".to_string(), "New dependency Y".to_string()];
+        let above = block((300, 201), 500, &extra);
+        let lines: Vec<&str> = above.lines().collect();
+        assert_eq!(lines[2], ABOVE);
+        assert_eq!(&lines[3..5], ["New dependency X", "New dependency Y"]);
+        assert_eq!(lines[5], END);
+        // The rest is unchanged by the extra lines, so the text key is too.
+        let body = new_body("Intent.\n", SMALL, 500, &extra);
+        assert_eq!(rest(&body), "Intent.\n");
     }
 
     #[test]
@@ -201,44 +215,44 @@ mod tests {
         assert_eq!(rest(cr), cr);
         let body = format!("Intent.\u{2028}\u{2029}\n\n{}", blk());
         assert_eq!(rest(&body), "Intent.\u{2028}\u{2029}\n");
-        assert_eq!(rest(&new_body("a\u{2028}b", SMALL, 500)), "a\u{2028}b\n");
+        assert_eq!(rest(&new_body("a\u{2028}b", SMALL, 500, &[])), "a\u{2028}b\n");
     }
 
     #[test]
     fn empty_body_gets_the_block_alone() {
-        assert_eq!(new_body("", SMALL, 500), blk());
-        assert_eq!(new_body(&blk(), (9, 9), 500), block((9, 9), 500));
+        assert_eq!(new_body("", SMALL, 500, &[]), blk());
+        assert_eq!(new_body(&blk(), (9, 9), 500, &[]), block((9, 9), 500, &[]));
     }
 
     #[test]
     fn the_separator_is_reversible() {
         for base in ["X\n", "X\n\n", "\n", "\n\n", "a\nb\n", "X\r\n"] {
-            let new = new_body(base, SMALL, 500);
+            let new = new_body(base, SMALL, 500, &[]);
             assert_eq!(rest(&new), base, "base {base:?}");
         }
         // A rest that does not end in `\n` gains one.
-        assert_eq!(new_body("X", SMALL, 500), format!("X\n\n{}", blk()));
-        assert_eq!(rest(&new_body("X", SMALL, 500)), "X\n");
-        assert_eq!(new_body("X\n", SMALL, 500), format!("X\n\n{}", blk()));
+        assert_eq!(new_body("X", SMALL, 500, &[]), format!("X\n\n{}", blk()));
+        assert_eq!(rest(&new_body("X", SMALL, 500, &[])), "X\n");
+        assert_eq!(new_body("X\n", SMALL, 500, &[]), format!("X\n\n{}", blk()));
     }
 
     #[test]
     fn applying_twice_gives_the_same_body() {
         for base in ["", "X", "X\n", "X\n\n", "\n", "X\r\n", "A\n<!-- shipcraft:size -->\n", "a\u{2028}"] {
-            let once = new_body(base, SMALL, 500);
-            assert_eq!(new_body(&once, SMALL, 500), once, "base {base:?}");
+            let once = new_body(base, SMALL, 500, &[]);
+            assert_eq!(new_body(&once, SMALL, 500, &[]), once, "base {base:?}");
         }
         // A new count replaces the old block in place.
-        let once = new_body("X\n", SMALL, 500);
-        assert_eq!(new_body(&once, (400, 200), 500), new_body("X\n", (400, 200), 500));
+        let once = new_body("X\n", SMALL, 500, &[]);
+        assert_eq!(new_body(&once, (400, 200), 500, &[]), new_body("X\n", (400, 200), 500, &[]));
     }
 
     #[test]
     fn the_key_of_x_equals_the_key_of_its_new_body() {
         let key = |title: &str, body: &str| [title.as_bytes(), b"\0", rest(body).as_bytes()].concat();
-        let new = new_body("X\n", SMALL, 500);
+        let new = new_body("X\n", SMALL, 500, &[]);
         assert_eq!(key("T", "X\n"), key("T", &new));
-        assert_eq!(key("T", ""), key("T", &new_body("", SMALL, 500)));
-        assert_ne!(key("T", "X"), key("T", &new_body("X", SMALL, 500)));
+        assert_eq!(key("T", ""), key("T", &new_body("", SMALL, 500, &[])));
+        assert_ne!(key("T", "X"), key("T", &new_body("X", SMALL, 500, &[])));
     }
 }

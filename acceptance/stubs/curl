@@ -1,0 +1,29 @@
+#!/usr/bin/env python3
+"""Offline npm protocol for acceptance; never opens a network connection."""
+import datetime,json,sys
+from pathlib import Path
+state=Path(__file__).resolve().parent/'state'
+state.mkdir(exist_ok=True)
+with (state/'curl.log').open('a') as f:f.write(json.dumps(sys.argv[1:])+'\n')
+try:
+ table=json.loads((state/'registry.json').read_text()) if (state/'registry.json').exists() else {}
+ if not isinstance(table,dict):raise ValueError()
+ for name,entry in table.items():
+  if not isinstance(entry,dict) or set(entry)-{'exit','stdout','status','body','created','created_ago'}:raise ValueError()
+  modes=set(entry)&{'exit','stdout','status','created','created_ago'}
+  if len(modes)>1 or ('body' in entry and 'status' not in entry):raise ValueError()
+  for k,v in entry.items():
+   if k in ('exit','status') and type(v) is not int:raise ValueError()
+   if k in ('stdout','body','created') and not isinstance(v,str):raise ValueError()
+   if k=='created_ago' and type(v) not in (int,float):raise ValueError()
+ name=sys.argv[-1].rsplit('/',1)[-1].replace('%2F','/')
+ entry=table.get(name,{})
+ if 'exit' in entry:sys.exit(entry['exit'])
+ if 'stdout' in entry:sys.stdout.write(entry['stdout'])
+ elif 'status' in entry:sys.stdout.write(entry.get('body','')+'\n'+str(entry['status']))
+ else:
+  created=entry.get('created')
+  if created is None:created=datetime.datetime.fromtimestamp(datetime.datetime.now(datetime.timezone.utc).timestamp()-entry.get('created_ago',10*365*86400),datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+  sys.stdout.write(json.dumps({'time':{'created':created}})+'\n200')
+except (ValueError,TypeError,OSError,IndexError,OverflowError):
+ print('acceptance-stub: bad registry.json',file=sys.stderr);sys.exit(99)
