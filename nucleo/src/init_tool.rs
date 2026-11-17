@@ -179,7 +179,9 @@ fn pre_commit_plan(repo: &Repo, dir: Option<&str>, local: bool) -> Result<Tool> 
             append(&text, &wanted, local).ok_or(()).or_else(|()| stop("cannot prove where to put shipcraft hooks"))?;
         let mut expected = doc.clone();
         let item = parse(&item(&wanted, 0, 1, "\n", local)).ok().and_then(|v| v.as_sequence()?.first().cloned());
-        expected.get_mut("repos").and_then(Value::as_sequence_mut).zip(item).map(|(r, i)| r.push(i));
+        if let Some((r, i)) = expected.get_mut("repos").and_then(Value::as_sequence_mut).zip(item) {
+            r.push(i);
+        }
         if !parse(&new).is_ok_and(|back| back == expected) {
             return stop("cannot prove where to put shipcraft hooks without changing the rest");
         }

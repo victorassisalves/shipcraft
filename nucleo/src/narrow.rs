@@ -72,7 +72,9 @@ impl Chosen {
     pub fn new(plan: &Plan, locked: usize) -> Chosen {
         match plan {
             Plan::All(why) => Chosen { selected: 0, locked, fallback: Some(*why), support: BTreeSet::new() },
-            Plan::Changed { files, .. } => Chosen { selected: *files, locked, fallback: None, support: BTreeSet::new() },
+            Plan::Changed { files, .. } => {
+                Chosen { selected: *files, locked, fallback: None, support: BTreeSet::new() }
+            }
         }
     }
 

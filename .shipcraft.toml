@@ -28,7 +28,10 @@ filter = "command"
 # Metric: RED->main median <= 14 min over the next 5 items, 0 false refusals.
 # Revert: ci = "off", drop suite_checks, shipcraft_min back to "2.13".
 ci = "github"
-suite_checks = ["acceptance"]
+# Item 111 (2026-11-17, POC-049 stage 1): `lint` runs cargo fmt --check and
+# cargo clippy --all-targets -- -D warnings (.github/workflows/lint.yml).
+# Undo: drop "lint" and delete that workflow.
+suite_checks = ["acceptance", "lint"]
 # Dogfood step 2 (2026-10-29): the product's review replaces the hand-made Codex prompt.
 # After green CI the reviewer does not rerun the battery (item 63, 2.19.0): 69 and 94 s
 # on PR #66, against ~22 min before. The timeout stays long for `shipcraft review` and

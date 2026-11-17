@@ -515,11 +515,8 @@ fn leave_out(
         .filter(|case| !outside.contains(case.as_str()))
         .filter_map(|case| file_of.get(case.as_str()).and_then(Option::as_ref))
         .collect();
-    let mut cases: Vec<String> = outside
-        .into_iter()
-        .filter(|case| !staying.contains(candidates[case]))
-        .map(str::to_string)
-        .collect();
+    let mut cases: Vec<String> =
+        outside.into_iter().filter(|case| !staying.contains(candidates[case])).map(str::to_string).collect();
     cases.sort();
     Ok(LeftOut { cases, unread: None })
 }

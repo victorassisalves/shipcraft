@@ -357,7 +357,7 @@ fn brief(req: &Request, tree: &str, work: &str) -> Result<String> {
             .replace("{{PROJECT}}", &repo.name())
             .replace("{{TITLE}}", &req.title)
             .replace("{{SHA}}", &req.sha)
-            .replace("{{SHORT}}", &short(&req.sha))
+            .replace("{{SHORT}}", short(&req.sha))
             .replace("{{BASE_SHA}}", &req.base_sha)
             .replace("{{TREE}}", tree)
             .replace("{{WORK}}", work)

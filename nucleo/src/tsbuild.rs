@@ -78,9 +78,12 @@ fn packages(repo: &Repo, tracked: &BTreeSet<String>) -> Result<Option<BTreeSet<S
     Ok(Some(found))
 }
 
+/// A manifest file and the package globs it lists.
+type Manifest = (&'static str, Vec<String>);
+
 /// The package globs of `pnpm-workspace.yaml` and of `workspaces` in
 /// `package.json`, each with its file.
-fn manifests(repo: &Repo) -> Result<Option<Vec<(&'static str, Vec<String>)>>> {
+fn manifests(repo: &Repo) -> Result<Option<Vec<Manifest>>> {
     let mut all = Vec::new();
     if let Some(text) = indexed(repo, "pnpm-workspace.yaml")? {
         let doc = serde_norway::from_str::<serde_norway::Value>(&text).ok().and_then(|d| serde_json::to_value(d).ok());

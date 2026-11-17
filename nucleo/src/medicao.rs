@@ -93,7 +93,14 @@ fn put_failed(row: &mut Value, failed: &[String]) {
 
 /// The row of a hook or CI run, from how the command ended; `ci` only on
 /// CI rows, `lock` on hook rows (the lock open before the hook ran).
-pub fn layer(repo: &Repo, camada: &str, started: Instant, result: &Result<()>, ci: Option<CiRow>, lock: Option<String>) {
+pub fn layer(
+    repo: &Repo,
+    camada: &str,
+    started: Instant,
+    result: &Result<()>,
+    ci: Option<CiRow>,
+    lock: Option<String>,
+) {
     let mut row = row(repo, camada, started, result);
     if let Some(lock) = lock {
         row["lock"] = json!(lock);
@@ -222,10 +229,14 @@ pub fn product_lines(repo: &Repo, config: &Config, base: &str, head: &str) -> Re
     Ok(((added, removed), reason))
 }
 
+/// One entry of `git diff --numstat -z` as git printed it (item 108): the
+/// path's raw bytes and the (added, removed) counts, `None` for a binary.
+type RawEntry = (Vec<u8>, Option<(u64, u64)>);
+
 /// Item 108: which of the numstat's paths the head commit's `.gitattributes`
 /// mark generated, by one `git check-attr` over all of them; no call when
 /// the diff names no path. `Err` is the reason of the warning line.
-fn generated(repo: &Repo, head: &str, entries: &[(Vec<u8>, Option<(u64, u64)>)]) -> std::result::Result<Vec<bool>, String> {
+fn generated(repo: &Repo, head: &str, entries: &[RawEntry]) -> std::result::Result<Vec<bool>, String> {
     if entries.is_empty() {
         return Ok(Vec::new());
     }
@@ -281,7 +292,7 @@ fn attr_answer(paths: &[&[u8]], answer: &[u8]) -> Option<Vec<bool>> {
         return None;
     }
     let mut marks = Vec::with_capacity(paths.len());
-    for (path, record) in paths.iter().zip(fields.chunks_exact(3)) {
+    for (path, record) in paths.iter().zip(fields.as_chunks::<3>().0) {
         if record[0] != *path || record[1] != GENERATED_ATTR {
             return None;
         }
@@ -293,13 +304,14 @@ fn attr_answer(paths: &[&[u8]], answer: &[u8]) -> Option<Vec<bool>> {
 /// The entries of `git diff --numstat -z` with the path as the bytes git
 /// printed (item 108): the same entries as `numstat`, whose path is the
 /// lossy text of these bytes.
-fn numstat_raw(out: &[u8]) -> Vec<(Vec<u8>, Option<(u64, u64)>)> {
+fn numstat_raw(out: &[u8]) -> Vec<RawEntry> {
     let mut fields = out.split(|b| *b == 0);
     let mut entries = Vec::new();
     while let Some(entry) = fields.next().filter(|e| !e.is_empty()) {
         let mut parts = entry.splitn(3, |b| *b == b'\t');
         let empty: &[u8] = b"";
-        let (a, r, mut path) = (parts.next().unwrap_or(empty), parts.next().unwrap_or(empty), parts.next().unwrap_or(empty));
+        let (a, r, mut path) =
+            (parts.next().unwrap_or(empty), parts.next().unwrap_or(empty), parts.next().unwrap_or(empty));
         if path.is_empty() {
             // A rename: the old path, then the new one, as their own fields.
             fields.next();
@@ -410,8 +422,14 @@ mod tests {
         assert_eq!(attr_answer(&paths, &answer(&[(b"b.ts", ATTR, "unset"), (b"a.ts", ATTR, "set")])), None);
         assert_eq!(attr_answer(&paths, &answer(&[(b"./a.ts", ATTR, "set"), (b"b.ts", ATTR, "unset")])), None);
         // A wrong attribute name.
-        assert_eq!(attr_answer(&paths, &answer(&[(b"a.ts", ATTR, "set"), (b"b.ts", "linguist-vendored", "set")])), None);
-        assert_eq!(attr_answer(&paths, &answer(&[(b"a.ts", "Linguist-Generated", "set"), (b"b.ts", ATTR, "set")])), None);
+        assert_eq!(
+            attr_answer(&paths, &answer(&[(b"a.ts", ATTR, "set"), (b"b.ts", "linguist-vendored", "set")])),
+            None
+        );
+        assert_eq!(
+            attr_answer(&paths, &answer(&[(b"a.ts", "Linguist-Generated", "set"), (b"b.ts", ATTR, "set")])),
+            None
+        );
         // No final NUL.
         assert_eq!(attr_answer(&paths, &fit[..fit.len() - 1]), None);
         // Bytes left over after the last record.
@@ -430,7 +448,10 @@ mod tests {
 
     #[test]
     fn attr_failure_is_the_first_non_empty_stderr_line() {
-        assert_eq!(attr_failure(b"error: unknown option `source=abc'\nusage: git check-attr\n"), "error: unknown option `source=abc'");
+        assert_eq!(
+            attr_failure(b"error: unknown option `source=abc'\nusage: git check-attr\n"),
+            "error: unknown option `source=abc'"
+        );
         assert_eq!(attr_failure(b"\n\r\nfatal: bad\r\nmore\n"), "fatal: bad");
         assert_eq!(attr_failure(b"fatal: no newline"), "fatal: no newline");
         assert_eq!(attr_failure(b""), "git check-attr failed");
@@ -439,7 +460,8 @@ mod tests {
 
     #[test]
     fn numstat_raw_gives_the_entries_of_numstat() {
-        let out: &[u8] = b"3\t1\tsrc/a.rs\0-\t-\timg.png\x000\t0\t\0old.rs\0new.rs\x002\t0\tgen/\xff.ts\x005\t5\tdir/Cargo.lock\0";
+        let out: &[u8] =
+            b"3\t1\tsrc/a.rs\0-\t-\timg.png\x000\t0\t\0old.rs\0new.rs\x002\t0\tgen/\xff.ts\x005\t5\tdir/Cargo.lock\0";
         let raw = numstat_raw(out);
         let lossy: Vec<(String, Option<(u64, u64)>)> =
             raw.iter().map(|(p, c)| (String::from_utf8_lossy(p).into_owned(), *c)).collect();
