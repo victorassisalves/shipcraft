@@ -11,7 +11,7 @@
 use crate::config::{self, CONFIG_FILE};
 use crate::lock::{self, Lock};
 use crate::refusal::Result;
-use crate::relatorio_gh::{Asker, Pr};
+use crate::relatorio_gh::{oid, Asker, Pr};
 use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -162,7 +162,14 @@ pub fn run(prepared: Prepared, as_json: bool, since: Option<&str>, github: bool)
     let evidence_facts = evidence.as_ref().map(|ev| (ev, facts.as_ref().expect("facts with evidence")));
     let dora = dora(&rows, evidence_facts, since, selection.pattern());
     // Item 79: after item 76's reads, and before the day rows take the waiting.
-    let summary = github.then(|| ask_github(&root, &rows, &mut report, evidence.as_ref().ok().map(|ev| (&git, ev))));
+    let git_tip = evidence.as_ref().ok().map(|ev| (&git, ev.branch.as_str(), ev.tip_commit.as_str()));
+    let mut asker = github.then(|| Asker::new(&root, git_tip));
+    let summary = asker.as_mut().map(|asker| ask_github(asker, &rows, &mut report));
+    let mut review_line = review(&rows);
+    // Item 113: after item 79's calls, through the same asker.
+    if let (Some(asker), Some(line)) = (asker.as_mut(), review_line.as_mut()) {
+        blocking(asker, &rows, line);
+    }
     let gaps: Vec<Value> =
         gaps.into_iter().map(|(line, reason)| json!({"kind": "gap", "line": line, "reason": reason})).collect();
     let lines: Vec<Value> = [report.meta.clone()]
@@ -171,7 +178,7 @@ pub fn run(prepared: Prepared, as_json: bool, since: Option<&str>, github: bool)
         .chain(report.days())
         .chain(size(&rows))
         .chain(reds(&rows))
-        .chain(review(&rows))
+        .chain(review_line)
         .chain([dora])
         .chain(summary)
         .chain(gaps)
@@ -232,8 +239,7 @@ pub(crate) const REPOSITORY_VARS: [&str; 16] = [
 /// Item 79: asks GitHub about each selected lock row (`merged` or
 /// `merge_not_observed`, `waiting` null), in print order, and fills what it
 /// answers; every lock row gets its `github` list. The `github` summary line.
-fn ask_github(root: &Path, rows: &[Row], report: &mut Report, git: Option<(&Git, &Evidence)>) -> Value {
-    let mut asker = Asker::new(root, git.map(|(git, ev)| (git, ev.branch.as_str(), ev.tip_commit.as_str())));
+fn ask_github(asker: &mut Asker, rows: &[Row], report: &mut Report) -> Value {
     let (mut selected, mut merge_filled, mut waiting_filled) = (0, 0, 0);
     let mut missing: BTreeMap<String, u64> = BTreeMap::new();
     for (row, merged) in report.locks.iter_mut().zip(report.merged.iter_mut()) {
@@ -1027,14 +1033,8 @@ fn review(rows: &[Row]) -> Option<Value> {
     let mut rounds: BTreeMap<u64, usize> = BTreeMap::new();
     let mut changes_requested = 0usize;
     for row in rows {
-        if str_of(row, "layer") != "review" || row.get("reused") == Some(&Value::Bool(true)) {
-            continue;
-        }
-        let Some(pr) = row.get("pr").and_then(Value::as_u64).filter(|n| *n > 0) else { continue };
+        let Some(pr) = round_pr(row) else { continue };
         let refused = is(row, "refused");
-        if !refused && !is(row, "passed") {
-            continue;
-        }
         *rounds.entry(pr).or_insert(0) += 1;
         changes_requested += usize::from(refused);
     }
@@ -1051,6 +1051,66 @@ fn review(rows: &[Row]) -> Option<Value> {
         "changes_requested": changes_requested, "second_round": second_round,
         "second_round_share": num(second_round as f64 / rounds.len() as f64), "most": most,
     }))
+}
+
+/// Item 112: a round row's PR: a `review` row, not reused, with a `passed`
+/// or `refused` result and a JSON integer `pr` above 0.
+fn round_pr(row: &Row) -> Option<u64> {
+    if str_of(row, "layer") != "review" || row.get("reused") == Some(&Value::Bool(true)) {
+        return None;
+    }
+    if !is(row, "passed") && !is(row, "refused") {
+        return None;
+    }
+    row.get("pr").and_then(Value::as_u64).filter(|n| *n > 0)
+}
+
+/// Item 113: the reviewed commits, item 112's round rows grouped by `pr` and
+/// `commit` (JSON equality; a missing `commit` is its own value), in the order
+/// of each one's first round row.
+fn reviewed_commits(rows: &[Row]) -> Vec<(u64, Option<&Value>)> {
+    let mut commits: Vec<(u64, Option<&Value>)> = Vec::new();
+    for row in rows {
+        let Some(pr) = round_pr(row) else { continue };
+        let commit = (pr, row.get("commit"));
+        if !commits.contains(&commit) {
+            commits.push(commit);
+        }
+    }
+    commits
+}
+
+/// Item 113: with `--github`, the Blocking count of each reviewed commit read
+/// through item 79's asker, added to the `review` object as five keys.
+fn blocking(asker: &mut Asker, rows: &[Row], line: &mut Value) {
+    let commits = reviewed_commits(rows);
+    let mut per_pr: BTreeMap<u64, u64> = BTreeMap::new();
+    let mut missing: BTreeMap<String, u64> = BTreeMap::new();
+    let (mut total, mut read) = (0u64, 0u64);
+    for (pr, commit) in &commits {
+        let outcome = match commit.and_then(Value::as_str).filter(|c| oid(c)) {
+            None => Err("no commit in the run log".to_string()),
+            Some(commit) => asker.blocking(commit),
+        };
+        match outcome {
+            Ok(count) => {
+                total += count;
+                read += 1;
+                *per_pr.entry(*pr).or_default() += count;
+            }
+            Err(reason) => *missing.entry(reason).or_default() += 1,
+        }
+    }
+    let mut most: Vec<(u64, u64)> = per_pr.into_iter().filter(|(_, n)| *n > 0).collect();
+    // Most first; the map gave PR order, and the sort is stable.
+    most.sort_by_key(|a| std::cmp::Reverse(a.1));
+    let most: Vec<Value> = most.into_iter().take(5).map(|(pr, n)| json!({"pr": pr, "blocking": n})).collect();
+    let object = line.as_object_mut().expect("the review line is an object");
+    object.insert("blocking".into(), json!(total));
+    object.insert("blocking_read".into(), json!(read));
+    object.insert("blocking_commits".into(), json!(commits.len()));
+    object.insert("blocking_missing".into(), json!(missing));
+    object.insert("blocking_most".into(), json!(most));
 }
 
 /// The locks a row is about: its `lock` and its `locks`.
@@ -1278,13 +1338,33 @@ fn text(lines: &[Value]) -> String {
                     m.iter().map(|e| format!("#{} ({})", e["pr"], e["rounds"])).collect::<Vec<_>>().join(", ")
                 });
                 out += &format!(
-                    "review: {} PR(s) reviewed in {} round(s), {} requested changes; {} needed a second round ({}): {most}\n",
+                    "review: {} PR(s) reviewed in {} round(s), {} requested changes; {} needed a second round ({}): {most}",
                     line["prs"],
                     line["rounds"],
                     line["changes_requested"],
                     line["second_round"],
                     show_with(&line["second_round_share"], percent)
                 );
+                // Item 113: only with `--github`.
+                if line.get("blocking").is_some() {
+                    let entries = |key: &str, field: &str| {
+                        line[key].as_array().filter(|m| !m.is_empty()).map(|m| {
+                            m.iter().map(|e| format!("#{} ({})", e["pr"], e[field])).collect::<Vec<_>>().join(", ")
+                        })
+                    };
+                    out += &format!(
+                        "; Blocking {} in {} of {} reviewed commit(s): {}",
+                        line["blocking"],
+                        line["blocking_read"],
+                        line["blocking_commits"],
+                        entries("blocking_most", "blocking").unwrap_or_else(|| "none".to_string())
+                    );
+                    if let Some(m) = line["blocking_missing"].as_object().filter(|m| !m.is_empty()) {
+                        let reasons = m.iter().map(|(reason, n)| format!("{reason} {n}")).collect::<Vec<_>>();
+                        out += &format!("; not read: {}", reasons.join(", "));
+                    }
+                }
+                out += "\n";
             }
             "dora" => out += &dora_text(meta, line),
             "github" => {
@@ -1778,6 +1858,94 @@ mod tests {
         let line = review(&rows(&log)).unwrap();
         assert_eq!(line["second_round_share"].to_string(), "0.3333333333333333");
         assert!(text(&[line]).ends_with("1 needed a second round (33%): #1 (2)\n"));
+    }
+
+    #[test]
+    fn blocking_groups_reviewed_commits_and_ranks_prs() {
+        let rows = |log: &str| read(log.as_bytes()).0;
+        let sha = |c: char| c.to_string().repeat(40);
+        let path = |c: &str| format!("repos/{{owner}}/{{repo}}/commits/{c}/statuses?per_page=100");
+        let round =
+            |pr: u64, commit: &str| format!("{{\"layer\":\"review\",\"pr\":{pr},\"result\":\"passed\"{commit}}}\n");
+        let at = |c: char| format!(",\"commit\":\"{}\"", sha(c));
+        let count = |n: u64| {
+            json!([[{"context": "shipcraft/review", "created_at": "2026-01-01T00:00:00Z",
+                "description": format!("on this machine: APPROVE, Blocking {n} (a)")}]])
+        };
+        let (a, b, c, d, e, f, g) = (sha('a'), sha('b'), sha('c'), sha('d'), sha('e'), sha('f'), sha('1'));
+        let (pa, pb, pc, pd, pe, pf, pg) = (path(&a), path(&b), path(&c), path(&d), path(&e), path(&f), path(&g));
+        fn ask<'p>(
+            p: &'p str,
+            outcome: std::result::Result<Value, &'static str>,
+        ) -> (Vec<&'p str>, std::result::Result<Value, &'static str>) {
+            (vec!["api", "--paginate", "--slurp", p], outcome)
+        }
+        // Two rounds on one commit are one reviewed commit; one commit under two PRs is two.
+        let log = round(12, &at('a'))
+            + &round(12, &at('a'))
+            + &round(12, &at('b'))
+            + &round(9, &at('a'))
+            + &round(9, "")
+            + &round(9, ",\"commit\":null")
+            + &round(9, ",\"commit\":1")
+            + &round(9, ",\"commit\":1.0")
+            + &round(9, &at('a').to_uppercase().replace("COMMIT", "commit"))
+            + &round(9, ",\"commit\":\"abc\"")
+            + &round(3, &at('c'))
+            + &round(4, &at('d'))
+            + &round(5, &at('e'))
+            + &round(6, &at('f'))
+            + &round(7, &at('1'));
+        let rows = rows(&log);
+        assert_eq!(reviewed_commits(&rows).len(), 14);
+        let mut asker = Asker::answered(
+            vec![
+                ask(&pa, Ok(count(2))),
+                ask(&pb, Ok(count(1))),
+                ask(&pc, Ok(count(3))),
+                ask(&pd, Ok(count(3))),
+                ask(&pe, Ok(json!([[]]))),
+                ask(&pf, Err("gh failed")),
+                ask(&pg, Ok(count(1))),
+            ],
+            false,
+        );
+        let mut line = review(&rows).unwrap();
+        let plain = text(&[line.clone()]);
+        blocking(&mut asker, &rows, &mut line);
+        assert_eq!(line["blocking"], 12);
+        assert_eq!(line["blocking_read"], 6);
+        assert_eq!(line["blocking_commits"], 14);
+        assert_eq!(
+            line["blocking_missing"],
+            json!({"gh failed": 1, "no blocking count at commit": 1, "no commit in the run log": 6})
+        );
+        assert_eq!(
+            line["blocking_most"],
+            json!([{"pr": 3, "blocking": 3}, {"pr": 4, "blocking": 3}, {"pr": 12, "blocking": 3},
+                {"pr": 9, "blocking": 2}, {"pr": 7, "blocking": 1}])
+        );
+        assert_eq!(
+            text(&[line]),
+            plain.trim_end().to_string()
+                + "; Blocking 12 in 6 of 14 reviewed commit(s): #3 (3), #4 (3), #12 (3), #9 (2), #7 (1); \
+                   not read: gh failed 1, no blocking count at commit 1, no commit in the run log 6\n"
+        );
+        // Everything read: no `not read`; nothing above 0: `none`.
+        let rows = read(round(7, &at('a')).as_bytes()).0;
+        let mut asker = Asker::answered(vec![ask(&pa, Ok(count(0)))], false);
+        let mut line = review(&rows).unwrap();
+        blocking(&mut asker, &rows, &mut line);
+        assert_eq!(line["blocking_missing"], json!({}));
+        assert!(text(&[line]).ends_with("(0%): none; Blocking 0 in 1 of 1 reviewed commit(s): none\n"));
+        // After a timeout, every commit counts as timed out, but one with no commit.
+        let rows = read((round(7, &at('a')) + &round(8, "")).as_bytes()).0;
+        let mut asker = Asker::answered(vec![ask(&pa, Ok(count(4)))], true);
+        let mut line = review(&rows).unwrap();
+        blocking(&mut asker, &rows, &mut line);
+        assert_eq!(line["blocking_missing"], json!({"gh timed out": 1, "no commit in the run log": 1}));
+        assert_eq!(line["blocking"], 0);
+        assert_eq!(line["blocking_most"], json!([]));
     }
 
     #[test]

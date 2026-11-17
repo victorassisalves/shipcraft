@@ -197,8 +197,10 @@ elif case=='v1-112.github':
  assert data(ghcalls)==[['pr','view','97','--json','number,state,mergedAt,headRefOid,mergeCommit']]*2,data(ghcalls)
  ghfault.touch();f=report(rs,args=('--json','--github'));ft=report(rs,args=('--github',))
  assert objects(s,'github')[0]['missing']=={'pr not merged':1} and objects(f,'github')[0]['missing']=={'gh failed':1},(s,f)
- assert reviews(s)==reviews(f)==reviews(report(rs)) and lines(t)==lines(ft)==lines(report(rs,args=())),(s,f,t)
- assert reviews(f)==[dict(kind='review',prs=2,rounds=3,changes_requested=1,second_round=1,second_round_share=.5,most=[dict(pr=97,rounds=2)])],f
+ extra=dict(blocking=0,blocking_read=0,blocking_commits=2,blocking_missing={'no commit in the run log':2},blocking_most=[])
+ assert reviews(s)==reviews(f)==[dict(reviews(report(rs))[0],**extra)],(s,f)
+ assert lines(t)==lines(ft)==[lines(report(rs,args=()))[0]+'; Blocking 0 in 0 of 2 reviewed commit(s): none; not read: no commit in the run log 2'],t
+ assert reviews(f)==[dict(kind='review',prs=2,rounds=3,changes_requested=1,second_round=1,second_round_share=.5,most=[dict(pr=97,rounds=2)],**extra)],f
 elif case=='v1-112.git-failure':
  fault.touch();rs=[row(),row(result='refused')];s=report(rs);t=report(rs,args=())
  assert objects(s,'dora')[0]['git']['reason'].endswith('exited 93'),s
@@ -262,7 +264,7 @@ else:raise AssertionError('unrouted '+case)
 # Schema only: numerical oracles remain in the individual arms above.
 if 's' in locals() and s.startswith('{'):
  for r in reviews(s):
-  assert set(r)=={'kind','prs','rounds','changes_requested','second_round','second_round_share','most'},r
+  assert set(r)==({'kind','prs','rounds','changes_requested','second_round','second_round_share','most'} | (set(extra) if case=='v1-112.github' else set())),r
   assert all(type(r[k]) is int for k in ('prs','rounds','changes_requested','second_round')),r
   assert type(r['second_round_share']) in (int,float),r
   assert all(set(x)=={'pr','rounds'} and type(x['pr']) is int and type(x['rounds']) is int for x in r['most']),r
