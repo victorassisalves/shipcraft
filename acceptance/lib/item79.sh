@@ -312,7 +312,7 @@ counts={r:list(reasons.values()).count(r) for r in sorted(set(reasons.values()),
 want=dict(kind='github',selected=len(selected),merge_filled=len(mergefill),waiting_filled=len(waitfill),missing=counts)
 assert summary[0]==want,('GitHub summary',want,summary[0])
 assert list(summary[0]['missing'])==list(counts),('missing keys byte-sorted',summary[0])
-kinds=[r['kind'] for r in rows];assert kinds==sorted(kinds,key=['meta','lock','day','dora','github','gap'].index),kinds
+kinds=[r['kind'] for r in rows];assert kinds==sorted(kinds,key=['meta','lock','day','review','dora','github','gap'].index),kinds
 assert set(locks)==set(base_locks),('GitHub changed lock row discovery',locks,base_locks)
 for id,r in locks.items():
  old=copy.deepcopy(base_locks[id]);expected=[]
