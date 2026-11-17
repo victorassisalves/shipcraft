@@ -38,7 +38,7 @@ from pathlib import Path
 st=Path(__file__).parent/'state';a=sys.argv[1:]
 with (st/'git115.log').open('a') as f:f.write(json.dumps(a)+'\n')
 mode=(st/'gitfault').read_text() if (st/'gitfault').exists() else ''
-if (mode=='diff' and '--name-only' in a and '--diff-filter=AM' in a) or (mode=='tree' and 'ls-tree' in a and a[-1].endswith('package.json')) or (mode=='blob' and a[:2]==['cat-file','blob'] and (st/'blob115').exists() and a[-1]==(st/'blob115').read_text()) or (mode=='count' and '--numstat' in a):
+if (mode=='diff' and '--name-only' in a and '--diff-filter=AM' in a) or (mode=='tree' and 'ls-tree' in a and a[-1].endswith('package.json')) or (mode=='blob' and any(a[i:i+2]==['cat-file','blob'] for i in range(len(a)-2)) and (st/'blob115').exists() and a[-1]==(st/'blob115').read_text()) or (mode=='count' and '--numstat' in a):
  (st/'githit').write_text(mode);sys.exit(93)
 os.execv(REAL,[REAL,*a])
 '''.replace('REAL',repr(realgit)));(cb/'git').chmod(0o755)
@@ -120,7 +120,7 @@ elif case=='symlink':files={'real.json':{'dependencies':{'skip115':'1'}},'ok/pac
 elif case=='rename':base={'old/package.json':{'dependencies':{'renamed115':'1'}}};files={'old/package.json':'DELETE','new/package.json':base['old/package.json']};expected_names=['renamed115'];counts=(1,0,0)
 elif case=='version-move':base={'package.json':{'dependencies':{'version115':'^1','transition115':'workspace:*'},'devDependencies':{'move115':'1'}}};files={'package.json':{'dependencies':{'version115':'^2','move115':'2','transition115':'*'}}};expected_names=['transition115'];counts=(1,0,0)
 elif case=='invalid-names':
- names=['bad name','-bad','.bad','@scope','@scope/','a'*215,'é'];files={'package.json':{'dependencies':{n:'1' for n in names+['ok115','bad\nkey','bad\rkey','bad\u2028key','bad\u2029key']}}};expected_names=['ok115'];warnings=[(n,'package.json',None) for n in sorted(names,key=lambda s:s.encode())];counts=(8,7,0)
+ names=['bad name','+bad','.bad','@scope','@scope/','a'*215,'é'];files={'package.json':{'dependencies':{n:'1' for n in names+['ok115','bad\nkey','bad\rkey','bad\u2028key','bad\u2029key']}}};expected_names=['ok115'];warnings=[(n,'package.json',None) for n in sorted(names,key=lambda s:s.encode())];counts=(8,7,0)
 elif case=='age-boundary':files={'package.json':{'dependencies':{'a-young':'1','b-old':'1'}}};table={'a-young':{'created_ago':30*86400-3600},'b-old':{'created_ago':30*86400+3600}};expected_names=['a-young','b-old'];warnings=[('a-young','package.json',29)];counts=(2,1,0)
 elif case=='custom-days':config={'new_dependency_days':'36500'};files={'package.json':{'dependencies':{'century115':'1'}}};table={'century115':{'created_ago':100*86400+3600}};expected_names=['century115'];warnings=[('century115','package.json',100)];counts=(1,1,0)
 elif case=='off':config={'new_dependencies':'"off"'};files={'package.json':{'dependencies':{'missing115':'1'}}};table={'missing115':{'status':404}};counts=(None,None,None)
@@ -195,7 +195,7 @@ if special=='proxies':
   write(st/'ghfault',mode);p=run(cb/'gh',*argv);assert p.returncode==1 and (st/'ghhit').read_text()==mode
  write(st/'ghfault','unreadable');p=run(cb/'gh','pr','list','--json','body');assert json.loads(p.stdout)[0]['body'] is False
  write(st/'ghfault','')
- for mode,argv in [('diff',['diff','--name-only','--diff-filter=AM','main','HEAD']),('tree',['ls-tree','HEAD','--','package.json']),('blob',['cat-file','blob','control-oid115']),('count',['diff','--numstat','main','HEAD'])]:
+ for mode,argv in [('diff',['diff','--name-only','--diff-filter=AM','main','HEAD']),('tree',['ls-tree','HEAD','--','package.json']),('blob',['cat-file','blob','control-oid115']),('blob',['-C',str(Path.cwd()),'--literal-pathspecs','cat-file','blob','control-oid115']),('count',['diff','--numstat','main','HEAD'])]:
   write(st/'gitfault',mode);p=run(cb/'git',*argv);assert p.returncode==93 and (st/'githit').read_text()==mode
  write(st/'gitfault','');assert git('rev-parse','HEAD')==sha
  assert next(iter(json.loads((st/'prs.json').read_text()).values()))['body']=='Intent115\n'
