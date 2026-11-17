@@ -138,6 +138,7 @@ elif case=='v1-113.missing-gh':
  assert '; not read: gh failed 2, no commit in the run log 1' in t,t
 elif case=='v1-113.no-start':
  (tools/'gh').write_text('#!/nonexistent113/interpreter\n')
+ (tools/'git').symlink_to(realgit);env['PATH']=str(tools)
  s=report([row()]);assert block(s)==(0,0,1,{'gh failed':1},[]),s
 elif case=='v1-113.reader':
  raw=json.dumps([[status(6,created_at='0001-01-01T00:00:00Z'),status(8,created_at='9999-12-31T23:59:59Z')]],ensure_ascii=False).replace('"context":','"context": 17, "context":',1).encode()+b'\r\n'
