@@ -193,7 +193,13 @@ pub fn holding(
 /// Item 81: the file (from the suite's root) that holds each of `cases`, in
 /// order, mapped once as `covered` maps over the `locked` files; None when the
 /// mapper finds no single map or any case maps to no file or to more than one.
-pub fn holders(dir: &Path, suite: &Suite, locked: &[String], present: &[String], cases: &[&str]) -> Option<Vec<String>> {
+pub fn holders(
+    dir: &Path,
+    suite: &Suite,
+    locked: &[String],
+    present: &[String],
+    cases: &[&str],
+) -> Option<Vec<String>> {
     let map = coverage_map(dir, suite, locked, present, cases)?;
     cases.iter().map(|case| map.holder(case)).collect()
 }

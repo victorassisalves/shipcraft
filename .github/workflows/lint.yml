@@ -1,0 +1,29 @@
+# Format and lint check for the nucleo crate (POC-049 stage 1, item 111).
+# The toolchain comes from rust-toolchain.toml at the repository root.
+# Undo: delete this file and drop "lint" from suite_checks in .shipcraft.toml.
+name: lint
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: nucleo
+      - name: Format
+        working-directory: nucleo
+        run: cargo fmt --check
+      - name: Lint
+        working-directory: nucleo
+        run: cargo clippy --all-targets -- -D warnings

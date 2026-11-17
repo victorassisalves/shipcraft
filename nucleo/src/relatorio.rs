@@ -1271,7 +1271,8 @@ fn dora_text(meta: &Value, dora: &Value) -> String {
     } else {
         format!(
             "run log: first row at {}, last row at {} (UTC); it holds this machine's runs only (local run log).\n",
-            time(&meta["first_at"]), time(&meta["last_at"])
+            time(&meta["first_at"]),
+            time(&meta["last_at"])
         )
     };
     let git = &dora["git"];
@@ -1349,9 +1350,17 @@ mod tests {
     fn readable_text_forms() {
         assert_eq!(utc(100.9), "1970-01-01T00:01:40Z");
         assert_eq!(utc(-1.0), "1969-12-31T23:59:59Z");
-        for (x, want) in [(0.0, "0 s"), (59.0, "59 s"), (60.0, "1 min 0 s"), (3599.0, "59 min 59 s"),
-            (3600.0, "1 h 0 min 0 s"), (4226.0, "1 h 10 min 26 s"), (97_384.0, "27 h 3 min 4 s"),
-            (-65.0, "-1 min 5 s"), (-0.4, "0 s")] {
+        for (x, want) in [
+            (0.0, "0 s"),
+            (59.0, "59 s"),
+            (60.0, "1 min 0 s"),
+            (3599.0, "59 min 59 s"),
+            (3600.0, "1 h 0 min 0 s"),
+            (4226.0, "1 h 10 min 26 s"),
+            (97_384.0, "27 h 3 min 4 s"),
+            (-65.0, "-1 min 5 s"),
+            (-0.4, "0 s"),
+        ] {
             assert_eq!(duration(x), want);
         }
         assert_eq!(percent(2.0 / 3.0), "67%");

@@ -472,10 +472,7 @@ fn config_text(
     // Item 67: no lang, runner, check or [build]; the command filters itself.
     if let Some(custom) = custom {
         let globs = toml::Value::Array(custom.globs.iter().map(|g| toml::Value::String(g.clone())).collect());
-        text += &format!(
-            "test_command = {}\ntest_globs = {globs}\nfilter = \"command\"\n",
-            quoted(&custom.command)
-        );
+        text += &format!("test_command = {}\ntest_globs = {globs}\nfilter = \"command\"\n", quoted(&custom.command));
     }
     if let [(_, raiz, profile)] = suites {
         if raiz == "." && !named {
@@ -1120,35 +1117,35 @@ pub fn block_layout(text: &str) -> std::result::Result<Vec<(String, String, bool
 /// `repos` key and its list; anchors, aliases, merges and `...` everywhere.
 pub fn layout(text: &str, repos_only: bool) -> std::result::Result<Vec<(String, String, bool)>, String> {
     use std::mem::MaybeUninit;
-    use unsafe_libyaml_norway as y;
+    use unsafe_libyaml_norway as unsafe_yaml;
     // One frame per open collection: (is a map, the key whose value comes next).
     let mut stack: Vec<(bool, Option<String>)> = Vec::new();
     let mut written = Vec::new();
-    let mut parser = Box::new(MaybeUninit::<y::yaml_parser_t>::uninit());
+    let mut parser = Box::new(MaybeUninit::<unsafe_yaml::yaml_parser_t>::uninit());
     let parser = parser.as_mut_ptr();
     // SAFETY: the parser is initialized before use and deleted once; each
     // event is read while alive and deleted right after.
     unsafe {
-        if y::yaml_parser_initialize(parser).fail {
+        if unsafe_yaml::yaml_parser_initialize(parser).fail {
             return Err("cannot be read as YAML".into());
         }
-        y::yaml_parser_set_input_string(parser, text.as_ptr(), text.len() as u64);
+        unsafe_yaml::yaml_parser_set_input_string(parser, text.as_ptr(), text.len() as u64);
         let result = loop {
-            let mut event = MaybeUninit::<y::yaml_event_t>::uninit();
-            if y::yaml_parser_parse(parser, event.as_mut_ptr()).fail {
+            let mut event = MaybeUninit::<unsafe_yaml::yaml_event_t>::uninit();
+            if unsafe_yaml::yaml_parser_parse(parser, event.as_mut_ptr()).fail {
                 break Err("cannot be read as YAML".into());
             }
             let e = &*event.as_ptr();
             let step = layout_step(e, &mut stack, &mut written, repos_only);
-            let end = e.type_ == y::YAML_STREAM_END_EVENT;
-            y::yaml_event_delete(event.as_mut_ptr());
+            let end = e.type_ == unsafe_yaml::YAML_STREAM_END_EVENT;
+            unsafe_yaml::yaml_event_delete(event.as_mut_ptr());
             match step {
                 Err(problem) => break Err(problem),
                 Ok(()) if end => break Ok(()),
                 Ok(()) => {}
             }
         };
-        y::yaml_parser_delete(parser);
+        unsafe_yaml::yaml_parser_delete(parser);
         result.map(|()| written)
     }
 }

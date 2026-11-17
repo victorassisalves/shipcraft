@@ -88,7 +88,13 @@ impl Lang {
                     runner,
                     command: run,
                     check,
-                    globs: strings(&["**/*.test.*", "**/*.spec.*", "**/__tests__/**", "**/vitest.config.*", "**/jest.config.*"]),
+                    globs: strings(&[
+                        "**/*.test.*",
+                        "**/*.spec.*",
+                        "**/__tests__/**",
+                        "**/vitest.config.*",
+                        "**/jest.config.*",
+                    ]),
                 }
             }
             Lang::Go => Profile {
