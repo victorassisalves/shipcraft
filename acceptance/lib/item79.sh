@@ -111,6 +111,7 @@ if case in ('no-pr','several-prs','duplicate-prs') or case.startswith('log-pr-')
  elif case=='duplicate-prs':
   rs.append(row('','pr',T+201,locks=['A'],pr=97,result='refused'));rs.append(row('A','review',T+202,pr=98))
   expected_calls.append(['api','--paginate','--slurp','repos/{owner}/{repo}/commits/'+ 'a'*40 +'/statuses?per_page=100'])
+  expected_calls.append(['api','--paginate','--slurp','repos/{owner}/{repo}/pulls/98/commits?per_page=100'])
  else:
   value={'zero':0,'negative':-1,'bool':True,'float':97.0,'string':'97','null':None,'absent':None}[case[7:]]
   rs[2]['pr']=value
@@ -313,7 +314,7 @@ counts={r:list(reasons.values()).count(r) for r in sorted(set(reasons.values()),
 want=dict(kind='github',selected=len(selected),merge_filled=len(mergefill),waiting_filled=len(waitfill),missing=counts)
 assert summary[0]==want,('GitHub summary',want,summary[0])
 assert list(summary[0]['missing'])==list(counts),('missing keys byte-sorted',summary[0])
-kinds=[r['kind'] for r in rows];assert kinds==sorted(kinds,key=['meta','lock','day','review','dora','github','gap'].index),kinds
+kinds=[r['kind'] for r in rows];assert kinds==sorted(kinds,key=['meta','lock','day','review','checks','dora','github','gap'].index),kinds
 assert set(locks)==set(base_locks),('GitHub changed lock row discovery',locks,base_locks)
 for id,r in locks.items():
  old=copy.deepcopy(base_locks[id]);expected=[]
@@ -328,13 +329,15 @@ for id,r in locks.items():
 def comparable(rs):
  result=[]
  for r in rs:
-  if r['kind'] in ('github','lock'):continue
+  if r['kind'] in ('github','lock') or (case=='duplicate-prs' and r['kind']=='checks'):continue
   r=copy.deepcopy(r)
   if r['kind']=='day':r.pop('waiting_median')
   if case=='duplicate-prs' and r['kind']=='review':
    for k in ('blocking','blocking_read','blocking_commits','blocking_missing','blocking_most'):r.pop(k,None)
   result.append(r)
  return result
+if case=='duplicate-prs':
+ assert [r for r in rows if r['kind']=='checks']==[dict(kind='checks',prs=1,prs_read=0,missing={'gh failed':1},names=[dict(name='zeta suite/β',runs=0,red=0,green_again=0,new_commit=0,still_red=0)])],rows
 assert comparable(rows)==comparable(base),('GitHub changed DORA/meta/day/gaps',rows,base)
 for day in [r for r in rows if r['kind']=='day']:
  samples=[r['waiting'] for r in locks.values() if r['state']=='merged' and r['merge_at'] is not None and utc(r['merge_at'])[:10]==day['day'] and r['waiting'] is not None]
