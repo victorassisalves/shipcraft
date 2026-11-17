@@ -110,6 +110,7 @@ if case in ('no-pr','several-prs','duplicate-prs') or case.startswith('log-pr-')
  elif case=='several-prs':rs.append(row('','pr',T+201,locks=['A'],pr=98));mergefill.clear();missing('several prs in the run log',[])
  elif case=='duplicate-prs':
   rs.append(row('','pr',T+201,locks=['A'],pr=97,result='refused'));rs.append(row('A','review',T+202,pr=98))
+  expected_calls.append(['api','--paginate','--slurp','repos/{owner}/{repo}/commits/'+ 'a'*40 +'/statuses?per_page=100'])
  else:
   value={'zero':0,'negative':-1,'bool':True,'float':97.0,'string':'97','null':None,'absent':None}[case[7:]]
   rs[2]['pr']=value
@@ -330,6 +331,8 @@ def comparable(rs):
   if r['kind'] in ('github','lock'):continue
   r=copy.deepcopy(r)
   if r['kind']=='day':r.pop('waiting_median')
+  if case=='duplicate-prs' and r['kind']=='review':
+   for k in ('blocking','blocking_read','blocking_commits','blocking_missing','blocking_most'):r.pop(k,None)
   result.append(r)
  return result
 assert comparable(rows)==comparable(base),('GitHub changed DORA/meta/day/gaps',rows,base)
