@@ -1,6 +1,6 @@
 {
   "format": 5,
-  "state": "open",
+  "state": "closed",
   "files": {
     ".shipcraft.toml": "sha256:b046dce71eed03bba631c634e580cc8610a3ee40b78d8ef53062acfaf0fe7fc0",
     "acceptance/fixtures/item30/go/config.toml": "sha256:cc23597859839f6906f615a217400a817863eb15d8e7957c5ca6acf833e73f8c",
@@ -274,5 +274,5 @@
   "kind": "feature",
   "reported_at": null,
   "fixes_release": null,
-  "seal": "3a12069b1a6717ae2a5e69c0ecb5e06fff115e017306072d03726e2919b089d6"
+  "seal": "e1e0a4d62bcd38b15c8ffb3c860be660efc893d665e8ca7ad98c6bb70b90e669"
 }
