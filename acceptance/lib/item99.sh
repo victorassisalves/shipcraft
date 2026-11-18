@@ -156,7 +156,7 @@ elif case=='reader-variants':
 elif case=='coverage-default':
  tags(('v1.0.0','v2.0.0'))
  d=decoded(report('--json'));assert d['git']['release_tags'] is None,d
- assert list(d['git'])==['default_branch','reason','release_tags','releases'],d
+ assert list(d['git'])==['default_branch','deploy','deploy_source','merges','reason','release_tags','releases'],d
  text=report().stdout.decode();coverage=next(s for s in text.splitlines() if s.startswith('git:'));assert coverage.endswith('; release tags: vX.Y.Z') and not coverage.endswith('.; release tags: vX.Y.Z'),text
 elif case=='fallback-malformed':
  tags(('v1.0.0','v2.0.0'))
