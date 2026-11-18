@@ -7,6 +7,8 @@
 //! from GitHub through `gh` (relatorio_gh); without it, nothing changes.
 //! Item 99: `[report] release_tags` in `<root>/.shipcraft.toml` names the
 //! project's release tags; without it, item 76's `vX.Y.Z` tags.
+//! Item 125: in merge mode, `--since` also takes a merge id, and the text
+//! names the merge that would fill rework rate and change failure rate.
 
 mod dora;
 mod evidence;
@@ -21,10 +23,10 @@ mod selection;
 mod tests;
 mod text;
 
-use crate::config;
-use crate::refusal::Result;
+use crate::config::{self, Deploy};
+use crate::refusal::{Result, Stop};
 use crate::relatorio_gh::Asker;
-use dora::dora;
+use dora::{dora, fill_line, merge_id, merge_named};
 pub(crate) use evidence::days_from_civil;
 use evidence::{Evidence, Facts};
 use flow::{read, Report};
@@ -69,16 +71,30 @@ impl Prepared {
     }
 
     /// `--since`'s grammar: the pattern when `release_tags` is valid, item
-    /// 76's `vX.Y.Z` with the default reading, none with an invalid `[report]`.
+    /// 76's `vX.Y.Z` with the default reading, none with an invalid `[report]`;
+    /// item 125: or a merge id, unless `[report] deploy = "release"`.
     pub fn since_grammar(&self, tag: &str) -> bool {
-        match &self.selection {
-            Selection::Invalid(_) => true,
-            selection => selection.names(tag),
-        }
+        release_grammar(&self.selection, tag) || (merge_id(tag) && self.selection.deploy() != Some(Deploy::Release))
     }
 }
 
-pub fn run(prepared: Prepared, as_json: bool, since: Option<&str>, github: bool) -> Result<()> {
+/// Today's (item 99's) `--since` grammar.
+fn release_grammar(selection: &Selection, tag: &str) -> bool {
+    match selection {
+        Selection::Invalid(_) => true,
+        selection => selection.names(tag),
+    }
+}
+
+/// `usage` is `main`'s argument refusal, for a `--since` item 125 refuses as
+/// today after git is read.
+pub fn run(
+    prepared: Prepared,
+    as_json: bool,
+    since: Option<&str>,
+    github: bool,
+    usage: impl FnOnce() -> Stop,
+) -> Result<()> {
     let Prepared { found, selection } = prepared;
     let bytes = found.as_ref().and_then(|(_, log)| fs::read(log).ok()).unwrap_or_default();
     let (rows, gaps) = read(&bytes);
@@ -96,18 +112,40 @@ pub fn run(prepared: Prepared, as_json: bool, since: Option<&str>, github: bool)
         (Some(_), Selection::Invalid(problem)) => Err(config::report_invalid(problem)),
         (Some(_), selection) => Evidence::read(&git, &ids, selection),
     };
-    if let (Some(tag), Ok(ev)) = (since, &evidence) {
-        if !ev.releases.iter().any(|r| r.name == tag) {
-            eprintln!("report: --since {tag} is not a release tag on {}", ev.branch);
+    // Item 125: a release tag first, then in merge mode a merge id (checked
+    // after the merge reads), then today's refusals.
+    let tag = |ev: &Evidence, value: &str| ev.releases.iter().any(|r| r.name == value);
+    match (since, &evidence) {
+        (Some(value), Ok(ev)) if !tag(ev, value) && !(ev.deploy.0 == Deploy::Merge && merge_id(value)) => {
+            if !selection.names(value) {
+                return Err(usage());
+            }
+            eprintln!("report: --since {value} is not a release tag on {}", ev.branch);
             std::process::exit(2);
         }
+        (Some(value), Err(_)) if !release_grammar(&selection, value) && selection.deploy() != Some(Deploy::Merge) => {
+            return Err(usage());
+        }
+        _ => {}
     }
     // Item 124: the merges only after `--since`'s check, in merge mode.
     let evidence = evidence.and_then(|ev| ev.read_merges(&git, &ids));
+    if let (Some(value), Ok(ev)) = (since, &evidence) {
+        if ev.merges.as_deref().is_some_and(|m| !tag(ev, value) && merge_named(m, value).is_none()) {
+            eprintln!("report: --since {value} is not a merge on {}", ev.branch);
+            std::process::exit(2);
+        }
+    }
     let facts = evidence.as_ref().ok().map(|ev| Facts::of(ev, &rows, &ids));
     let mut report = Report::of(&rows, &ids, facts.as_ref());
     let evidence_facts = evidence.as_ref().map(|ev| (ev, facts.as_ref().expect("facts with evidence")));
-    let dora = dora(&rows, evidence_facts, since, selection.pattern(), selection.deploy());
+    let mut dora = dora(&rows, evidence_facts, since, selection.pattern(), selection.deploy());
+    // Item 125: the fill line is text only; `--json` gains nothing.
+    if let (false, Ok((ev, facts))) = (as_json, evidence_facts) {
+        if let Some(line) = fill_line(ev, facts, &dora) {
+            dora["fill"] = line.into();
+        }
+    }
     // Item 79: after item 76's reads, and before the day rows take the waiting.
     let git_tip = evidence.as_ref().ok().map(|ev| (&git, ev.branch.as_str(), ev.tip_commit.as_str()));
     let mut asker = github.then(|| Asker::new(&root, git_tip));

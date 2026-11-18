@@ -45,7 +45,12 @@ pub(super) fn dora(
     let deployed = ev.deploys();
     let (one, many, done) = if merge { ("merge", "merges", "merged") } else { ("release", "releases", "released") };
     let start = since.and_then(|tag| ev.releases.iter().find(|r| r.name == tag)).map(|r| r.time);
-    let read: Vec<usize> = (0..deployed.len()).filter(|i| start.is_none_or(|t| deployed[*i].time >= t)).collect();
+    // Item 125: else a merge id starts the window at its merge, by line order.
+    let from = match (start, ev.merges.as_deref(), since) {
+        (None, Some(merges), Some(value)) => merge_named(merges, value).unwrap_or(0),
+        _ => 0,
+    };
+    let read: Vec<usize> = (from..deployed.len()).filter(|i| start.is_none_or(|t| deployed[*i].time >= t)).collect();
     let names: BTreeSet<&str> = deployed.iter().map(|r| r.name.as_str()).collect();
     let read_names: BTreeSet<&str> = read.iter().map(|i| deployed[*i].name.as_str()).collect();
     // The shipped locks: those whose release is read.
@@ -166,6 +171,47 @@ fn live_merge(merges: &[Release], own: usize, fix: &FixData) -> Option<usize> {
     (0..own).rev().find(|i| merges[*i].time <= reported)
 }
 
+/// Item 125: 7 to 64 lowercase hex digits.
+pub(super) fn merge_id(value: &str) -> bool {
+    (7..=64).contains(&value.len()) && value.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// Item 125: the one merge whose full id a merge id prefixes, else None.
+pub(super) fn merge_named(merges: &[Release], value: &str) -> Option<usize> {
+    if !merge_id(value) {
+        return None;
+    }
+    let mut hits = merges.iter().enumerate().filter(|(_, m)| m.commit.starts_with(value)).map(|(i, _)| i);
+    match (hits.next(), hits.next()) {
+        (Some(i), None) => Some(i),
+        _ => None,
+    }
+}
+
+/// Item 125: in merge mode with `change_failure_rate`'s `missing` above 0,
+/// the merge after the latest missing merge on the whole line: one shipping
+/// a lock with an unknown `change_kind`, or a fix naming no merge.
+pub(super) fn fill_line(ev: &Evidence, facts: &Facts, dora: &Value) -> Option<String> {
+    let merges = ev.merges.as_deref()?;
+    if dora["change_failure_rate"]["missing"].as_u64().unwrap_or(0) == 0 {
+        return None;
+    }
+    let missing = |(id, i): (&String, &usize)| {
+        let f = &facts.fix[id];
+        let unnamed = f.kind.as_deref() == Some("fix") && live_merge(merges, *i, f).is_none();
+        (f.kind.is_none() || unnamed).then_some(*i)
+    };
+    let last = facts.release.iter().filter_map(missing).max()?;
+    let tail = "the last merge that ships a lock counted missing";
+    Some(match merges.get(last + 1) {
+        Some(next) => format!(
+            "to fill rework rate and change failure rate: report --since {} (the first merge after {}, {tail})",
+            next.commit, merges[last].commit
+        ),
+        None => format!("to fill rework rate and change failure rate: no merge after {}, {tail}", merges[last].commit),
+    })
+}
+
 #[cfg(test)]
 mod merge_mode {
     use super::{live_merge, FixData, Release};
@@ -184,5 +230,19 @@ mod merge_mode {
         assert_eq!(live_merge(&merges, 3, &fix("1970-01-01T00:01:00Z")), None);
         assert_eq!(live_merge(&merges, 0, &fix("1970-01-01T00:05:00Z")), None);
         assert_eq!(live_merge(&merges, 3, &FixData::default()), None);
+    }
+
+    #[test]
+    fn a_merge_id_names_one_merge_by_its_prefix() {
+        use super::{merge_id, merge_named};
+        assert!(merge_id("abcdef0") && merge_id(&"f".repeat(64)));
+        assert!(!merge_id("abcdef") && !merge_id(&"f".repeat(65)) && !merge_id("ABCDEF0") && !merge_id("abcdefg"));
+        let merge =
+            |commit: &str| Release { name: commit.into(), time: 0, commit: commit.into(), locks: BTreeMap::new() };
+        let merges = [merge(&format!("aaaaaaa1{}", "0".repeat(32))), merge(&format!("aaaaaaa2{}", "0".repeat(32)))];
+        assert_eq!(merge_named(&merges, "aaaaaaa2"), Some(1));
+        assert_eq!(merge_named(&merges, "aaaaaaa"), None);
+        assert_eq!(merge_named(&merges, "bbbbbbb"), None);
+        assert_eq!(merge_named(&merges, &merges[0].commit), Some(0));
     }
 }
