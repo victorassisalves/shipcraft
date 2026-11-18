@@ -53,3 +53,18 @@ pub(super) fn check_report(text: &str) -> Result<()> {
         ),
     }
 }
+
+/// Item 122: an invalid `[findings]` refuses wherever the config is
+/// validated, last in `Config::parse`. An older binary ignores the table.
+pub(super) fn check_findings(text: &str) -> Result<()> {
+    let Ok(table) = text.parse::<toml::Table>() else { return Ok(()) };
+    match crate::findings::classes(&table) {
+        Ok(_) => Ok(()),
+        Err(problem) => refuse(
+            "config-invalid",
+            crate::findings::invalid(&problem),
+            "report --findings groups the review findings by these classes, and shipcraft does not guess a class it cannot read",
+            format!("give each [[findings.class]] a name and a non-empty list of valid keyword patterns, or remove [findings], in {CONFIG_FILE} and run again"),
+        ),
+    }
+}
