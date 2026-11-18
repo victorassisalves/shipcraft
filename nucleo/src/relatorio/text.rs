@@ -134,8 +134,10 @@ pub(super) fn text(lines: &[Value]) -> String {
                     show_with(&line["merged_above_share"], percent)
                 );
             }
-            // Item 109: the suite-red runs that went green on the same commit.
-            "reds" => {
+            // Item 109: the suite-red runs that went green on the same commit;
+            // item 123: the same per ISO week, `reds <week>:`.
+            "reds" | "reds_week" => {
+                let label = line["week"].as_str().map_or("reds".to_string(), |week| format!("reds {week}"));
                 let cases = line["cases"].as_array().filter(|c| !c.is_empty()).map_or("none".to_string(), |c| {
                     c.iter()
                         .map(|case| {
@@ -146,7 +148,7 @@ pub(super) fn text(lines: &[Value]) -> String {
                         .join(", ")
                 });
                 out += &format!(
-                    "reds: {} suite-red, {} green again on the same commit ({}), {} of CI; cases named in {}: {cases}\n",
+                    "{label}: {} suite-red, {} green again on the same commit ({}), {} of CI; cases named in {}: {cases}\n",
                     line["suite_red"],
                     line["green_again"],
                     show_with(&line["green_again_share"], percent),
