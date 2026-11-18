@@ -50,7 +50,7 @@ type Row = Map<String, Value>;
 /// (item 99's full reason, as `report` prints it) under an invalid
 /// `[report]`, where no tag is accepted.
 pub fn not_a_release_name(tag: &str) -> Option<String> {
-    let selection = discover().map_or(Selection::Default, |(root, _)| Selection::read(&root));
+    let selection = discover().map_or(Selection::Default(None), |(root, _)| Selection::read(&root));
     selection.release_name_problem(tag)
 }
 
@@ -64,7 +64,7 @@ pub struct Prepared {
 impl Prepared {
     pub fn read() -> Prepared {
         let found = discover();
-        let selection = found.as_ref().map_or(Selection::Default, |(root, _)| Selection::read(root));
+        let selection = found.as_ref().map_or(Selection::Default(None), |(root, _)| Selection::read(root));
         Prepared { found, selection }
     }
 
@@ -102,10 +102,12 @@ pub fn run(prepared: Prepared, as_json: bool, since: Option<&str>, github: bool)
             std::process::exit(2);
         }
     }
+    // Item 124: the merges only after `--since`'s check, in merge mode.
+    let evidence = evidence.and_then(|ev| ev.read_merges(&git, &ids));
     let facts = evidence.as_ref().ok().map(|ev| Facts::of(ev, &rows, &ids));
     let mut report = Report::of(&rows, &ids, facts.as_ref());
     let evidence_facts = evidence.as_ref().map(|ev| (ev, facts.as_ref().expect("facts with evidence")));
-    let dora = dora(&rows, evidence_facts, since, selection.pattern());
+    let dora = dora(&rows, evidence_facts, since, selection.pattern(), selection.deploy());
     // Item 79: after item 76's reads, and before the day rows take the waiting.
     let git_tip = evidence.as_ref().ok().map(|ev| (&git, ev.branch.as_str(), ev.tip_commit.as_str()));
     let mut asker = github.then(|| Asker::new(&root, git_tip));

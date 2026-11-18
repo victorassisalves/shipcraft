@@ -24,7 +24,7 @@ pub use pr::NewDependencies;
 use pr::Pr;
 use reading::{check_legacy_keys, not_toml};
 use report::{check_findings, check_report};
-pub use report::{report_invalid, report_release_tags};
+pub use report::{report_deploy, report_invalid, report_release_tags, Deploy};
 use review::{check_retry_wait, Revisao};
 pub use review::{check_review_after, check_review_guide};
 pub use roles::Papel;

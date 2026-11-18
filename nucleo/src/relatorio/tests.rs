@@ -78,8 +78,8 @@ fn selection_reads_only_the_report_table_and_never_refuses() {
             fs::write(&path, bytes).unwrap();
         }
         match Selection::read(&dir) {
-            Selection::Default => "default".to_string(),
-            Selection::Pattern(p) => format!("pattern {p}"),
+            Selection::Default(_) => "default".to_string(),
+            Selection::Pattern(p, _) => format!("pattern {p}"),
             Selection::Invalid(p) => format!("invalid {p}"),
         }
     };
@@ -93,21 +93,21 @@ fn selection_reads_only_the_report_table_and_never_refuses() {
     assert_eq!(read(Some(b"report = \"v*\"")), "invalid [report] is not a table");
     fs::remove_file(dir.join(CONFIG_FILE)).unwrap();
     fs::create_dir_all(dir.join(CONFIG_FILE)).unwrap();
-    assert!(matches!(Selection::read(&dir), Selection::Default));
+    assert!(matches!(Selection::read(&dir), Selection::Default(_)));
     let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn fixes_release_must_be_a_release_name_of_the_selection() {
-    let default = Selection::Default;
+    let default = Selection::Default(None);
     assert_eq!(default.release_name_problem("v2.25.0"), None);
     assert_eq!(default.release_name_problem("2.25.0").as_deref(), Some("vX.Y.Z"));
     assert_eq!(default.release_name_problem("deploy-1").as_deref(), Some("vX.Y.Z"));
-    let deploy = Selection::Pattern("deploy-*".into());
+    let deploy = Selection::Pattern("deploy-*".into(), None);
     assert_eq!(deploy.release_name_problem("deploy-20261112-200036"), None);
     assert_eq!(deploy.release_name_problem("v1.0.0").as_deref(), Some("deploy-*"));
     assert_eq!(deploy.release_name_problem("deployed/prod").as_deref(), Some("deploy-*"));
-    let v = Selection::Pattern("v*".into());
+    let v = Selection::Pattern("v*".into(), None);
     assert_eq!(v.release_name_problem("v1.0.0"), None);
     assert_eq!(v.release_name_problem("v2"), None);
     let invalid = Selection::Invalid("unknown key release_tag".into());

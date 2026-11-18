@@ -301,7 +301,17 @@ fn dora_text(meta: &Value, dora: &Value) -> String {
     let since = dora["since"].as_str().map(|s| format!(", since {s}")).unwrap_or_default();
     // Item 99: the line ends with the release tags read, `vX.Y.Z` without the key.
     let tags = git["release_tags"].as_str().unwrap_or("vX.Y.Z");
+    // Item 124: merge mode's coverage line.
+    let why = match git["deploy_source"].as_str() {
+        Some("config") => "[report] deploy = \"merge\"",
+        _ => "no release tag read",
+    };
+    let merge = git["deploy"] == "merge" && git["default_branch"].is_string();
     out += &match git["default_branch"].as_str() {
+        Some(branch) if merge => format!(
+            "git: default branch {branch}; {} merge(s){since}; lock rows without log times come from the branch tip; release tags: {tags}; deploys are merges to the default branch ({why})\n",
+            dora["deploys"]["n"]
+        ),
         Some(branch) => format!(
             "git: default branch {branch}; {} release(s){since}; lock rows without log times come from the branch tip; release tags: {tags}\n",
             // The releases read: all of them, or those at or after `--since` (deploys' `n`).
@@ -330,8 +340,9 @@ fn dora_text(meta: &Value, dora: &Value) -> String {
         format!("deploys: -{}", tail(d))
     } else {
         format!(
-            "deploys: {} release(s), first at {}, last at {}, per day {}{}",
+            "deploys: {} {}(s), first at {}, last at {}, per day {}{}",
             v["count"],
+            if merge { "merge" } else { "release" },
             time(&v["first"]),
             time(&v["last"]),
             show_with(&v["per_day"], |x| format!("{x:.2}")),
