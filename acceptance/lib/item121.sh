@@ -60,7 +60,7 @@ def run(args):
  return p,records(calls),time.time()-start
 prefix='**shipcraft: review executed by codex, on this machine**\n'
 def body(s):return {'body':prefix+s}
-def finding(title,cls='Other',pr=7,location=None):return dict(kind='finding',pr=pr,**{'class':cls},title=title,location=location)
+def finding(title,cls='Other',pr=7,location=None):return dict(kind='finding',pr=pr,**{'class':cls},class_source=None if cls=='Other' else 'builtin',title=title,location=location)
 classes=[
 'Typed input lost (leave, reload, refresh over a dirty form)',
 'Session, workspace or project boundary (sign-out, another user, slug, tenant)',

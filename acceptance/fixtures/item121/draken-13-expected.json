@@ -3,6 +3,7 @@
     "kind": "finding",
     "pr": 13,
     "class": "Session, workspace or project boundary (sign-out, another user, slug, tenant)",
+    "class_source": "builtin",
     "title": "Reference links cause false cross-locale failures",
     "location": "[checks.ts:632](arvore/src/editorial-mcp/src/review/checks.ts#L632), `checkCrossLocale` signature construction."
   },
@@ -10,6 +11,7 @@
     "kind": "finding",
     "pr": 13,
     "class": "Failure paths (error, refusal, 4xx/5xx, partial failure)",
+    "class_source": "builtin",
     "title": "Markdown entities produce incorrect numeric failures",
     "location": "`src/editorial-mcp/src/review/checks.ts:124`"
   },
@@ -17,6 +19,7 @@
     "kind": "finding",
     "pr": 13,
     "class": "Failure paths (error, refusal, 4xx/5xx, partial failure)",
+    "class_source": "builtin",
     "title": "Hidden HTML comments create false numeric failures",
     "location": "`src/editorial-mcp/src/review/checks.ts:158`."
   },
@@ -24,6 +27,7 @@
     "kind": "finding",
     "pr": 13,
     "class": "Markdown, MDX and link handling (a syntax form that slips past a check)",
+    "class_source": "builtin",
     "title": "Bold formatting bypasses monetary-value verification",
     "location": "`src/editorial-mcp/src/review/checks.ts:524–526`."
   },
@@ -31,6 +35,7 @@
     "kind": "finding",
     "pr": 13,
     "class": "Markdown, MDX and link handling (a syntax form that slips past a check)",
+    "class_source": "builtin",
     "title": "Single-quoted Markdown link titles suppress source verification",
     "location": "`src/editorial-mcp/src/review/checks.ts:75`"
   },
@@ -38,6 +43,7 @@
     "kind": "finding",
     "pr": 13,
     "class": "Markdown, MDX and link handling (a syntax form that slips past a check)",
+    "class_source": "builtin",
     "title": "Parênteses no destino do link impedem a conferência do valor",
     "location": null
   },
@@ -45,6 +51,7 @@
     "kind": "finding",
     "pr": 13,
     "class": "Markdown, MDX and link handling (a syntax form that slips past a check)",
+    "class_source": "builtin",
     "title": "Nested URL parentheses bypass linked-number verification",
     "location": "[checks.ts:80](arvore/src/editorial-mcp/src/review/checks.ts#L80), `LINK`, consumed at lines 567–579."
   },
@@ -52,6 +59,7 @@
     "kind": "finding",
     "pr": 13,
     "class": "Markdown, MDX and link handling (a syntax form that slips past a check)",
+    "class_source": "builtin",
     "title": "Setext H1 bypasses the prohibition on body H1",
     "location": "`src/editorial-mcp/src/review/checks.ts:50`"
   },
@@ -59,6 +67,7 @@
     "kind": "finding",
     "pr": 13,
     "class": "Markdown, MDX and link handling (a syntax form that slips past a check)",
+    "class_source": "builtin",
     "title": "Autolinks bypass source-value verification",
     "location": "`src/editorial-mcp/src/review/checks.ts:135`."
   },
@@ -66,6 +75,7 @@
     "kind": "finding",
     "pr": 13,
     "class": "Markdown, MDX and link handling (a syntax form that slips past a check)",
+    "class_source": "builtin",
     "title": "Emphasis changes the value being verified",
     "location": "`src/editorial-mcp/src/review/checks.ts:218`"
   },
@@ -73,6 +83,7 @@
     "kind": "finding",
     "pr": 13,
     "class": "Markdown, MDX and link handling (a syntax form that slips past a check)",
+    "class_source": "builtin",
     "title": "Unlinked statutory thresholds are silently excluded",
     "location": "`src/editorial-mcp/src/review/checks.ts:375`"
   },
@@ -80,6 +91,7 @@
     "kind": "finding",
     "pr": 13,
     "class": "Markdown, MDX and link handling (a syntax form that slips past a check)",
+    "class_source": "builtin",
     "title": "Markdown emphasis changes the facts being reviewed",
     "location": "`src/editorial-mcp/src/review/checks.ts:218` and `:713`."
   },
@@ -87,6 +99,7 @@
     "kind": "finding",
     "pr": 13,
     "class": "Dates, numbers and declared limits",
+    "class_source": "builtin",
     "title": "Numeric deadlines escape citation checks",
     "location": "`src/editorial-mcp/src/review/checks.ts:249–251`."
   },
@@ -94,6 +107,7 @@
     "kind": "finding",
     "pr": 13,
     "class": "Dates, numbers and declared limits",
+    "class_source": "builtin",
     "title": "Legal years and count limits bypass number verification",
     "location": "`src/editorial-mcp/src/review/checks.ts:265`"
   },
@@ -101,6 +115,7 @@
     "kind": "finding",
     "pr": 13,
     "class": "Dates, numbers and declared limits",
+    "class_source": "builtin",
     "title": "O sinal do percentual desaparece na comparação",
     "location": null
   }
