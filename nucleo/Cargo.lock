@@ -242,7 +242,7 @@ dependencies = [
 
 [[package]]
 name = "shipcraft"
-version = "2.72.0"
+version = "2.73.0"
 dependencies = [
  "regex",
  "roxmltree",
