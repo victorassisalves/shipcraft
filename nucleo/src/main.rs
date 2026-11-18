@@ -224,7 +224,8 @@ fn run(args: &[&str]) -> Result<()> {
         // any git or `gh` call): `--json`, `--since <tag>` and `--github` once each.
         // Item 99: `--since`'s grammar is the release selection's, read from
         // `[report]` without git. Item 121: `--findings`, with `--since <pr>`
-        // (a PR number, `[report]` not read) and never with `--github`.
+        // (a PR number, `[report]` not read) and never with `--github`. Item
+        // 125: or a merge id in merge mode (relatorio checks it after git).
         ["report", rest @ ..] => {
             let (mut as_json, mut since, mut github, mut findings) = (false, None, false, false);
             let mut rest = rest.iter();
@@ -248,7 +249,7 @@ fn run(args: &[&str]) -> Result<()> {
             if since.is_some_and(|tag| !prepared.since_grammar(tag)) {
                 return Err(invalid(args));
             }
-            relatorio::run(prepared, as_json, since, github)
+            relatorio::run(prepared, as_json, since, github, || invalid(args))
         }
         // Item 23: records no row, as `init`.
         // Item 21.1: any folder, no repository nor .shipcraft.toml needed.

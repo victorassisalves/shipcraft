@@ -359,5 +359,9 @@ fn dora_text(meta: &Value, dora: &Value) -> String {
         share(&dora["change_failure_rate"]["value"]),
         tail(&dora["change_failure_rate"])
     );
+    // Item 125: the merge that would fill the two metrics (text only).
+    if let Some(fill) = dora["fill"].as_str() {
+        out += &format!("{fill}\n");
+    }
     out
 }
