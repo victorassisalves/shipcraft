@@ -892,8 +892,26 @@ def main():
         data = {"name": REPO, "nameWithOwner": "%s/%s" % (OWNER, REPO), "owner": {"login": OWNER}, "isPrivate": True,
                 "visibility": "PRIVATE", "defaultBranchRef": {"name": "main"}, "url": "https://github.com/%s/%s" % (OWNER, REPO),
                 "viewerPermission": "ADMIN", "isFork": False}
+        # Optional repo-view answers, keyed by the exact positional URL (or *).
+        answers = rd("repo-view.json", {})
+        answer = answers.get(pos[0] if pos else "", answers.get("*"))
+        if answer is not None:
+            if answer.get("exit", 0):
+                sys.stdout.write(answer.get("stdout", ""))
+                sys.stderr.write(answer.get("stderr", ""))
+                sys.exit(answer["exit"])
+            if "raw" in answer:
+                sys.stdout.write(answer["raw"])
+                return
+            data.update(answer.get("fields", {}))
+            for key in answer.get("omit", []):
+                data.pop(key, None)
         if o.get("json"):
-            jq_out(pick(data, o["json"]), o.get("jq"))
+            selected = pick(data, o["json"])
+            if answer is not None:
+                for key in answer.get("omit", []):
+                    selected.pop(key, None)
+            jq_out(selected, o.get("jq"))
         else:
             print("%s/%s" % (OWNER, REPO))
         return
