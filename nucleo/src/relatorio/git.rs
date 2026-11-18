@@ -1,6 +1,6 @@
 //! The read-only git runner (item 76).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
@@ -101,6 +101,111 @@ impl Git {
     }
 }
 
+/// Item 127: the args of the one `git log` call that reads RED commits: every
+/// commit of every ref and HEAD, as stored, with each lock file change against
+/// its parent, NUL-framed (`%H`, `%P`, `%ct`, `%B`, then raw pairs).
+const RED_LOG: [&str; 18] = [
+    "--no-replace-objects",
+    "-c",
+    "log.showSignature=false",
+    "-c",
+    "i18n.logOutputEncoding=UTF-8",
+    "-c",
+    "log.follow=false",
+    "log",
+    "--no-show-signature",
+    "--no-color",
+    "--all",
+    "--full-history",
+    "--no-renames",
+    "--raw",
+    "-z",
+    "--no-abbrev",
+    "--format=%H%x00%P%x00%ct%x00%B",
+    "--",
+];
+
+impl Git {
+    /// Item 127: for each wanted (lock, parent), the message of its RED commit:
+    /// one parent equal to `parent`, adding `.shipcraft/locks/<lock>.json` as a
+    /// regular file; the earliest by committer time, then by id.
+    pub(super) fn red_commits(
+        &self,
+        wanted: &BTreeSet<(String, String)>,
+    ) -> std::result::Result<BTreeMap<(String, String), String>, String> {
+        let args = [&RED_LOG[..], &[".shipcraft/locks/"]].concat();
+        let out = self.ok(&args)?;
+        let mut found: BTreeMap<(String, String), (i64, String, String)> = BTreeMap::new();
+        for c in lock_commits(&out).ok_or_else(|| unreadable(&args))? {
+            let [parent] = &c.parents[..] else { continue };
+            for (lock, p) in wanted.iter().filter(|(_, p)| p == parent) {
+                let path = format!(".shipcraft/locks/{lock}.json").into_bytes();
+                let mut inside = path.clone();
+                inside.push(b'/');
+                let added = c.changes.iter().any(|(mode, status, file)| {
+                    *file == path && *status == b"A" && (*mode == b"100644" || *mode == b"100755")
+                });
+                if !added || c.changes.iter().any(|(_, _, file)| file.starts_with(&inside)) {
+                    continue;
+                }
+                let candidate = (c.time, c.id.clone(), String::from_utf8_lossy(c.message).into_owned());
+                let best = found.entry((lock.clone(), p.clone())).or_insert_with(|| candidate.clone());
+                if (candidate.0, &candidate.1) < (best.0, &best.1) {
+                    *best = candidate;
+                }
+            }
+        }
+        Ok(found.into_iter().map(|(key, (_, _, message))| (key, message)).collect())
+    }
+}
+
+/// A commit of item 127's log: its changes as (new mode, status, path) bytes.
+struct LogCommit<'a> {
+    id: String,
+    parents: Vec<String>,
+    time: i64,
+    message: &'a [u8],
+    changes: Vec<(&'a [u8], &'a [u8], &'a [u8])>,
+}
+
+/// Item 127: whole records only; None for anything else.
+fn lock_commits(out: &[u8]) -> Option<Vec<LogCommit<'_>>> {
+    let full = |t: &str| {
+        (t.len() == 40 || t.len() == 64) && t.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    };
+    let text = |t: &[u8]| std::str::from_utf8(t).ok().map(str::to_string);
+    let mut tokens: Vec<&[u8]> = out.split(|b| *b == 0).collect();
+    // Every record ends with a NUL: the last piece is empty.
+    if tokens.pop()? != b"" {
+        return None;
+    }
+    let mut tokens = tokens.into_iter().peekable();
+    let mut commits = Vec::new();
+    while let Some(id) = tokens.next() {
+        let id = text(id).filter(|t| full(t))?;
+        let parents = text(tokens.next()?)?;
+        let parents: Vec<String> = parents.split(' ').filter(|p| !p.is_empty()).map(str::to_string).collect();
+        if !parents.iter().all(|p| full(p)) {
+            return None;
+        }
+        let time = text(tokens.next()?)?;
+        let digits = time.strip_prefix('-').unwrap_or(&time);
+        if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        let (time, message) = (time.parse().ok()?, tokens.next()?);
+        let mut changes = Vec::new();
+        while let Some(meta) = tokens.peek().and_then(|t| t.strip_prefix(b"\n").unwrap_or(t).strip_prefix(b":")) {
+            tokens.next();
+            let fields: Vec<&[u8]> = meta.split(|b| *b == b' ').collect();
+            let [_, mode, _, _, status] = fields[..] else { return None };
+            changes.push((mode, status, tokens.next()?));
+        }
+        commits.push(LogCommit { id, parents, time, message, changes });
+    }
+    Some(commits)
+}
+
 pub(super) fn failure(args: &[&str], code: Option<i32>) -> String {
     match code {
         Some(code) => format!("git failed: `git {}` exited {code}", args.join(" ")),
@@ -114,4 +219,32 @@ pub(super) fn unreadable(args: &[&str]) -> String {
 
 pub(super) fn utf8(args: &[&str], out: Vec<u8>) -> std::result::Result<String, String> {
     String::from_utf8(out).map_err(|_| unreadable(args))
+}
+
+#[cfg(test)]
+mod red_log {
+    use super::lock_commits;
+
+    #[test]
+    fn red_log_records_parse_whole_or_not_at_all() {
+        let (a, b, z) = ("a".repeat(40), "b".repeat(64), "0".repeat(40));
+        let mut out = format!(
+            "{a}\0{b}\0100\0red\n:000000 100644 {z}\0\n:000000 100644 {z} {a} A\0.shipcraft/locks/x.json\0:100644 100755 {a} {a} M\0p"
+        )
+        .into_bytes();
+        out.push(0xff);
+        out.extend_from_slice(format!("\0{b}\0{a} {a}\0-5\0\0").as_bytes());
+        let got = lock_commits(&out).expect("whole records");
+        assert_eq!(got.len(), 2);
+        assert_eq!((got[0].parents.clone(), got[0].time), (vec![b.clone()], 100));
+        assert_eq!(got[0].message, format!("red\n:000000 100644 {z}").as_bytes());
+        assert_eq!(got[0].changes[0], (&b"100644"[..], &b"A"[..], &b".shipcraft/locks/x.json"[..]));
+        assert_eq!(got[0].changes[1].2, &[b'p', 0xff][..]);
+        assert_eq!((got[1].parents.len(), got[1].time, got[1].message), (2, -5, &b""[..]));
+        assert!(lock_commits(b"").expect("no commit").is_empty());
+        assert!(lock_commits(&out[..out.len() - 1]).is_none());
+        assert!(lock_commits(format!("{a}\0\0x\0m\0").as_bytes()).is_none());
+        assert!(lock_commits(format!("{}\0\01\0m\0", a.to_uppercase()).as_bytes()).is_none());
+        assert!(lock_commits(format!("{a}\0\01\0m\0:1 2 A\0p\0").as_bytes()).is_none());
+    }
 }
