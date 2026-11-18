@@ -1,0 +1,34 @@
+[
+ [
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nCHANGES REQUESTED at 0000000000000000000000000000000000000000\n\nBlocking: 4\n\n## Reproduction setup\n\n## Blocking 1 — A delayed answer marks a newer revision as approved\n\n**Location:** `app/packages/api/src/server/card/proposal-card.ts:175–187`.\n\n## Blocking 2 — Matching seats by name fabricates approvals\n\n**Location:** `app/packages/api/src/server/card/proposal-card.ts:184`.\n\n## Blocking 3 — Refresh and failed-answer recovery silently discard rejection text\n\n**Locations:** `app/packages/api/src/server/card/proposal-card.ts:198` and `:212`.\n\n## Blocking 4 — A rejection draft crosses project boundaries\n\n**Location:** `app/packages/api/src/server/card/proposal-card.ts:208–212`.\n\n## Notes — non-blocking\n\n## Own checks\n"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nCHANGES REQUESTED at 0000000000000000000000000000000000000000\n\nBlocking: 1\n\n### Commands and exit codes\n\n### Blocking 1 — Delayed approval overwrites a newer, confirmed answer\n\n**Location:** `app/packages/api/src/server/card/proposal-card.ts:212`, particularly the mutations at lines 240–243.\n\n### Notes — non-blocking\n\n### Own checks\n"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nCHANGES REQUESTED at 0000000000000000000000000000000000000000\n\nBlocking: 1\n\n### Blocking 1: A completed answer’s success message survives a contradictory refresh\n\n**Location:** `app/packages/api/src/server/card/proposal-card.ts:110–114`, rendered at line 160.\n\n### Notes\n\n### Own checks\n"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nCHANGES REQUESTED at 0000000000000000000000000000000000000000\n\nBlocking: 2\n\n### Blocking 1: Renaming an approver can mark another person’s seat approved\n\nLocation: `app/packages/api/src/server/card/proposal-card.ts:304–306`.\n\n### Blocking 2: Duplicate-name readback overwrites a newer rejection with an approval success message\n\nLocation: `app/packages/api/src/server/card/proposal-card.ts:282–294`.\n\n### Reproduction scripts\n\n### Notes\n"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nAPPROVE at 0000000000000000000000000000000000000000\n\nBlocking: 0\n"
+  },
+  {
+   "body": "(other comment)"
+  }
+ ]
+]

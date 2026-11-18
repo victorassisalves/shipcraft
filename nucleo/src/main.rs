@@ -12,6 +12,7 @@ mod deps;
 mod docs;
 mod fecha;
 mod fila;
+mod findings;
 mod forma;
 mod gh;
 mod git;
@@ -55,7 +56,7 @@ const USAGE: &str =
      | shipcraft check [--commit-msg <file>] | shipcraft close
      | shipcraft ci --base <ref> [--pr]
      | shipcraft pr [--title <t>] [--body <file>] [--merge] | shipcraft review [--pr <n>]
-     | shipcraft merge <pr> [--no-review \"<reason>\"] | shipcraft status | shipcraft report [--json] [--since <tag>] [--github]";
+     | shipcraft merge <pr> [--no-review \"<reason>\"] | shipcraft status | shipcraft report [--json] [--since <tag>] [--github] | shipcraft report --findings [--json] [--since <pr>]";
 
 fn main() -> ExitCode {
     // Item 22.2: the lists reach only the hook's suite, never a value inherited.
@@ -222,17 +223,26 @@ fn run(args: &[&str]) -> Result<()> {
         // GitHub through `gh` with `--github` only. Syntax first (exit 2, before
         // any git or `gh` call): `--json`, `--since <tag>` and `--github` once each.
         // Item 99: `--since`'s grammar is the release selection's, read from
-        // `[report]` without git.
+        // `[report]` without git. Item 121: `--findings`, with `--since <pr>`
+        // (a PR number, `[report]` not read) and never with `--github`.
         ["report", rest @ ..] => {
-            let (mut as_json, mut since, mut github) = (false, None, false);
+            let (mut as_json, mut since, mut github, mut findings) = (false, None, false, false);
             let mut rest = rest.iter();
             while let Some(arg) = rest.next() {
                 match *arg {
                     "--json" if !as_json => as_json = true,
                     "--github" if !github => github = true,
+                    "--findings" if !findings => findings = true,
                     "--since" if since.is_none() => since = Some(*rest.next().ok_or_else(|| invalid(args))?),
                     _ => return Err(invalid(args)),
                 }
+            }
+            if findings {
+                let pr = since.map(|v| findings::since(v).ok_or_else(|| invalid(args))).transpose()?;
+                if github {
+                    return Err(invalid(args));
+                }
+                return findings::run(as_json, pr);
             }
             let prepared = relatorio::Prepared::read();
             if since.is_some_and(|tag| !prepared.since_grammar(tag)) {

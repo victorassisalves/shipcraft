@@ -1,0 +1,37 @@
+[
+  {
+    "kind": "finding",
+    "pr": 160,
+    "class": "Typed input lost (leave, reload, refresh over a dirty form)",
+    "title": "Leaving the form silently discards typed input",
+    "location": "`app/packages/web/src/live-form.ts:51–62`, integrated at `app/packages/web/src/app.tsx:170`."
+  },
+  {
+    "kind": "finding",
+    "pr": 160,
+    "class": "Typed input lost (leave, reload, refresh over a dirty form)",
+    "title": "Leaving during creation loses the secret and permits duplicate submission",
+    "location": "`app/packages/web/src/live-form.ts:53,83`; `app/packages/web/src/screens/S20-settings/Integrations.tsx:64`."
+  },
+  {
+    "kind": "finding",
+    "pr": 160,
+    "class": "Session, workspace or project boundary (sign-out, another user, slug, tenant)",
+    "title": "Secrets cross workspace boundaries when project slugs match",
+    "location": "`app/packages/web/src/screens/S20-settings/Integrations.tsx:44–61`."
+  },
+  {
+    "kind": "finding",
+    "pr": 160,
+    "class": "Session, workspace or project boundary (sign-out, another user, slug, tenant)",
+    "title": "Retained secrets cross sign-out/sign-in boundaries",
+    "location": "`app/packages/web/src/screens/S20-settings/Integrations.tsx:48,58`; `app/packages/web/src/live-dirty.ts:48`. The authentication transition is at `app/packages/web/src/app.tsx:143–145`."
+  },
+  {
+    "kind": "finding",
+    "pr": 160,
+    "class": "Session, workspace or project boundary (sign-out, another user, slug, tenant)",
+    "title": "A previous user’s signing secret survives sign-out during the create reload",
+    "location": "`app/packages/web/src/live-form.ts:141–144`, consumed by `app/packages/web/src/screens/S20-settings/Integrations.tsx:66–68`."
+  }
+]

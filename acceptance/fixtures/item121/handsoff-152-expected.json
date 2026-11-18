@@ -1,0 +1,58 @@
+[
+  {
+    "kind": "finding",
+    "pr": 152,
+    "class": "Typed input lost (leave, reload, refresh over a dirty form)",
+    "title": "Refresh and failed-answer recovery silently discard rejection text",
+    "location": "`app/packages/api/src/server/card/proposal-card.ts:198` and `:212`."
+  },
+  {
+    "kind": "finding",
+    "pr": 152,
+    "class": "Session, workspace or project boundary (sign-out, another user, slug, tenant)",
+    "title": "A rejection draft crosses project boundaries",
+    "location": "`app/packages/api/src/server/card/proposal-card.ts:208–212`."
+  },
+  {
+    "kind": "finding",
+    "pr": 152,
+    "class": "Session, workspace or project boundary (sign-out, another user, slug, tenant)",
+    "title": "Renaming an approver can mark another person’s seat approved",
+    "location": "`app/packages/api/src/server/card/proposal-card.ts:304–306`."
+  },
+  {
+    "kind": "finding",
+    "pr": 152,
+    "class": "Order and overlap (late or out-of-order response, overlapping saves, retry, during a refresh)",
+    "title": "A delayed answer marks a newer revision as approved",
+    "location": "`app/packages/api/src/server/card/proposal-card.ts:175–187`."
+  },
+  {
+    "kind": "finding",
+    "pr": 152,
+    "class": "Order and overlap (late or out-of-order response, overlapping saves, retry, during a refresh)",
+    "title": "Delayed approval overwrites a newer, confirmed answer",
+    "location": "`app/packages/api/src/server/card/proposal-card.ts:212`, particularly the mutations at lines 240–243."
+  },
+  {
+    "kind": "finding",
+    "pr": 152,
+    "class": "Order and overlap (late or out-of-order response, overlapping saves, retry, during a refresh)",
+    "title": "Duplicate-name readback overwrites a newer rejection with an approval success message",
+    "location": "`app/packages/api/src/server/card/proposal-card.ts:282–294`."
+  },
+  {
+    "kind": "finding",
+    "pr": 152,
+    "class": "Other",
+    "title": "Matching seats by name fabricates approvals",
+    "location": "`app/packages/api/src/server/card/proposal-card.ts:184`."
+  },
+  {
+    "kind": "finding",
+    "pr": 152,
+    "class": "Other",
+    "title": "A completed answer’s success message survives a contradictory refresh",
+    "location": "`app/packages/api/src/server/card/proposal-card.ts:110–114`, rendered at line 160."
+  }
+]

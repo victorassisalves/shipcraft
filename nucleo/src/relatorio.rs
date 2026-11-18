@@ -149,7 +149,7 @@ pub fn run(prepared: Prepared, as_json: bool, since: Option<&str>, github: bool)
 /// the current directory, and `<common git dir>/shipcraft/runs.jsonl`, the run
 /// log `medicao` writes, found without git: a `.git` file (`gitdir: <dir>`)
 /// leads to its `commondir`.
-fn discover() -> Option<(PathBuf, PathBuf)> {
+pub(crate) fn discover() -> Option<(PathBuf, PathBuf)> {
     let cwd = std::env::current_dir().ok()?;
     let dot = cwd.ancestors().map(|d| d.join(".git")).find(|p| p.exists())?;
     let root = dot.parent()?.to_path_buf();
