@@ -1992,6 +1992,8 @@ Item 89's `status` says to run `shipcraft init` when the `AGENTS.md` block is ol
 | `[review] after` | When `shipcraft pr` starts the review with `ci = "github"`: `ci` (after GitHub CI passed) or `push` (at once, beside GitHub CI; item 96). | `ci` |
 | `[review] guide` | Path of a project file whose text the reviewer gets in its own section of the brief, read at the base commit (item 102). | none |
 | `[report] release_tags` | The tags `report` reads as releases: a pattern where `*` matches any run of characters (item 99). | `v<X>.<Y>.<Z>` tags |
+| `[findings] builtin_classes` | Whether `report --findings` groups by item 121's built-in classes after the project's own (item 122). | `true` |
+| `[[findings.class]] name`, `keywords` | A class of review findings for `report --findings`: its name and the patterns that match a finding's title, tried before the built-in classes (item 122). | none |
 | `[machine] slots` | Concurrent local CI and review runs on this machine. | `1` |
 | `[pr] warn_lines` | Product lines above which the size line in the PR body (item 103) and the PR summary suggest a split; `init` writes it, and `report` counts PRs against it (item 107). | `500` |
 | `[pr] shape_lines` | Fixes the file-size threshold of the shape warning (an integer above 0). | p90 of the project |
@@ -2716,6 +2718,73 @@ On 2026-11-18 Victor started POC-050 in Hands-off and Draken: a 600-product-line
 - `shipcraft review --pr <n>` (the control's path) also takes a review queue slot (folders and `slot-*` files under `$XDG_STATE_HOME/shipcraft/queue`, or the HOME fallback, a released slot truncated, not removed), runs the reviewer in a registered detached worktree under a `shipcraft-revisao-*` folder in the caller's `TMPDIR` (`brief.md`, `saida.txt`, `erros.txt`, possibly `ultima-mensagem.md`), and removes and prunes it afterwards, best effort. Keep; the control isolates `TMPDIR` and `XDG_STATE_HOME`, and its no-write assertions on `report --findings` take their snapshots after the review.
 - The standing effects the spec-review brief lists: `report --findings` runs no hook and appends no row; the control case that runs `review --pr` appends its row and posts to the fake `gh` as today. Keep.
 
+### `report --findings` groups findings by the project's own classes (item 122)
+
+Item 121 grouped the findings of `report --findings` by one built-in class table, tuned on Hands-off's and Draken's findings. A project with other kinds of code gets most of its findings in `Other`: on 2026-11-18 Hands-off's own ledger still had 58 of its 233 findings there. POC-050's RED reads the ledger to see which kinds of error keep coming back, so the grouping is what makes the ledger useful. This item lets a project declare its own classes in `.shipcraft.toml`. It is a reading only: `report --findings` prints the same lines as item 121 with a project that declares no class, and no other command changes except that an invalid `[findings]` table is refused where the config is validated (point 2).
+
+1. **The keys.** In `.shipcraft.toml`:
+   ```toml
+   [findings]
+   builtin_classes = true        # optional; false leaves out item 121's table
+
+   [[findings.class]]
+   name = "Money and rounding"
+   keywords = ["round", "cents", '\bBRL\b']
+   ```
+   - `[findings]` is optional; its keys are `builtin_classes` (a boolean, default `true`) and `class` (an array of tables, written `[[findings.class]]`, default none). An empty array (`class = []`) is no class.
+   - Each class has exactly the keys `name` (a string) and `keywords` (an array of strings, at least one). A keyword is a pattern of Rust's `regex` crate, built as item 121 builds its table's patterns: case-insensitive, Unicode, matched anywhere in the title. A class matches a title when any of its keywords matches.
+   - **The class table in effect** is the declared classes in the file's order, then item 121's eleven classes in their order (only when `builtin_classes` is `true` or absent), then `Other`. Each finding gets the first class of that table that matches its title, or `Other`; item 121's point 4 otherwise holds unchanged. With `builtin_classes = false` and no declared class, every finding is `Other`.
+   - The output's order (item 121 point 5) follows the table in effect: declared classes first, then the built-in ones, then `Other`; within a class, by PR from the largest number down, then in reading order, as today.
+   - An older binary ignores `[findings]` (the config reader ignores unknown tables), so no `shipcraft_min` raise is needed; that binary groups by the built-in table.
+2. **Validation.** `[findings]` is checked wherever the config is read and validated today (the hook and `check` on a staged config, `ci`, `red`, `pr`, `merge`, `status`, `review`, `report --github`'s whole-config read), right after item 99's `[report]` check and before item 102's `[review] guide` check, so a config with both an invalid `[report]` and an invalid `[findings]` gives `[report]`'s refusal. The checks run on the file parsed as a TOML table, in this order, and the first problem found is the one named:
+   1. `findings` that is not a table (`findings = 1`, `[[findings]]`): `[findings] is not a table`;
+   2. a key other than `builtin_classes` and `class`, the first in byte order: `unknown key <key>`;
+   3. `builtin_classes` that is not a boolean: `builtin_classes is not a boolean`;
+   4. `class` that is not an array whose every element is a table: `class is not an array of tables`;
+   5. then each class in order, numbered from 1 as `<i>`, every check of one class before the next class:
+      - a key other than `name` and `keywords`, the first in byte order: `class <i>: unknown key <key>`;
+      - `name` absent: `class <i>: name is missing`; not a string: `class <i>: name is not a string`; empty or only spaces and tabs: `class <i>: name is empty`; holding a control character (U+0000 to U+001F or U+007F): `class <i>: name has a control character`;
+      - `name` equal, byte for byte, to `Other`, to the name of an earlier declared class, or, when the built-in table is in effect, to one of item 121's eleven class names: `class <i>: name <name> is already a class`;
+      - `keywords` absent: `class <i>: keywords is missing`; not an array: `class <i>: keywords is not an array`; an empty array: `class <i>: keywords is empty`;
+      - then each keyword in order, numbered from 1 as `<j>`: not a string: `class <i>: keyword <j> is not a string`; the empty string: `class <i>: keyword <j> is empty`; a pattern the `regex` crate does not build with item 121's options (a syntax error, or above the crate's default size limit): `class <i>: keyword <j> is not a valid pattern` (the crate's own message is not printed).
+
+   A problem refuses `config-invalid` with today's three-line refusal shape for config errors:
+   - `[findings] in .shipcraft.toml is invalid: <problem>`
+   - `report --findings groups the review findings by these classes, and shipcraft does not guess a class it cannot read`
+   - `give each [[findings.class]] a name and a non-empty list of valid keyword patterns, or remove [findings], in .shipcraft.toml and run again`
+
+   A name is used as written (not trimmed). The checks read only the TOML table: text that is not TOML is refused earlier by item 31's check, as today.
+3. **What `report --findings` reads and prints.**
+   - **Reading the config.** After the root is found (item 121 point 2) and before any `gh` call, `report --findings` reads `<root>/.shipcraft.toml` from the working tree, as item 99's reader reads `[report]`: when the path is absent, is not a regular file, cannot be read, is not UTF-8 or is not TOML, the table in effect is the built-in one, exactly as item 121 (no line or warning about it). It reads only `[findings]`, with point 2's checks; an invalid `[report]` or any other key of the file does not change the ledger. When `[findings]` is invalid, no `gh` call is made and the output is item 121's not-read result with the reason `[findings] in .shipcraft.toml is invalid: <problem>` (`review findings not read: <reason>` in text, `{"kind":"findings_not_read","reason":"<reason>"}` with `--json`), nothing on stderr, exit 0. With no root, item 121's `no git repository found` stays as it is and no config is read.
+   - **Text** (without `--json`): unchanged in form. A declared class is a `## <name> (<count>)` section like any other, in the order of the table in effect; the text does not say where a class came from.
+   - **`--json`:** each `finding` object gains one key, `class_source`: `"project"` for a declared class, `"builtin"` for one of item 121's classes, and `null` for `Other`. Its keys are exactly `kind`, `pr`, `class`, `class_source`, `title`, `location`. The `pr_not_read` and `findings_not_read` objects do not change.
+   - Everything else in item 121 holds unchanged: the arguments, the calls, the comments read, the headings, titles, locations, the count check, the not-read marker and the exit code 0. `report --findings` still writes no file or folder and appends no row.
+
+**Known limits.** A keyword is a regular expression, so `.` and `(` mean what they mean there; a project that wants a literal writes `\.`. The classes are matched on the title only, as item 121's. A class's name is not checked against Markdown: a name with `#` or `*` prints as written. Declared classes that never match are not reported. The config check builds every keyword's pattern on each config read, a cost of microseconds for a few dozen keywords.
+
+**Metric:** in Hands-off, after it declares its classes, the share of its findings in `Other` (58 of 233 on 2026-11-18 with the built-in table), read by hand once from `report --findings` on the release day, outside the battery. Revert: a later release that ignores `[findings]` again; the key is ignored by older binaries, so a project that set it reads the built-in table back.
+
+**Touches.** Read first:
+- **The version:** the contract goes to 2.66.0 (`v1-62.version`, `v1-64.version`, `v1-87.version`, `v1-103.version`, `v1-108.version` and the others that read section 11 or the manifest).
+- **Assertions that change, and nothing else in them:**
+  - item 121's `--json` finding rows (`acceptance/lib/item121.sh`, the `finding(...)` helper, line 63, which every `--json` comparison of the file builds its rows with): each row gains `class_source`, `null` when the class is `Other` and `"builtin"` otherwise. No other line of `item121.sh` changes; its text-output assertions stay byte for byte, since no fixture of item 121 has a `.shipcraft.toml` with `[findings]`.
+- **Must keep passing unchanged:**
+  - every other case of item 121 (`acceptance/lib/item121.sh`), text and `--json`, including `v1-121.discovery`, `missing-root`, `bad-git`, `readonly`, `live`, `control-gh` and `control-live`: their fixtures declare no `[findings]`, so the built-in table applies;
+  - item 99's `[report]` cases (`acceptance/lib/item99.sh`): `[report]` is checked before `[findings]`, and `v1-99.invalid-precedence` and `status-invalid` keep their refusal;
+  - item 118's structural cases (`acceptance/lib/item118.sh`): `nucleo/src/config/` keeps exactly its ten files, so the new check goes in an existing file (`config/report.rs` is the natural one) and the pattern code in `nucleo/src/findings.rs`; every file stays at most 600 lines; `config/tests.rs` keeps its 11 tests (new unit tests go in `findings.rs`);
+  - item 116's and item 119's structural cases: no file under `nucleo/src/relatorio/` or `nucleo/src/relatorio_gh/` changes;
+  - item 79's `report --github` cases, `v1-79.unobserved-config` included: their configs have no `[findings]`;
+  - the config refusal and default cases item 118 names (`acceptance/lib/english.sh`, items 9, 30.1, 31, 42, 47, 59, 62, 64, 71, 80, 87, 90, 96, 99, 102, 105, 110, 112, 114, 115 and item 44's base-config cases): none of their configs has `[findings]`;
+  - item 10's `v1-10.1-execucoes-jsonl`: no row gains or loses a field.
+- **New cases** go in `acceptance/lib/item122.sh`, with item 121's fixture repository and fake `gh` (`acceptance/lib/item121.sh`'s helpers may be copied, not changed), never the network. Estimate: point 1, 9 (declared first; built-in after; `builtin_classes = false`; any keyword matches; case-insensitive and Unicode keyword; file order between declared classes; a declared class that wins over a built-in one on the same title; empty `class = []`; `builtin_classes = false` with no class gives `Other`); point 2, 17 (each problem of the list through `check` on a staged config, the precedence over `[report]`'s problem the other way round, one case through `status`, one through the hook's commit refusal); point 3, 8 (the four reading fallbacks giving the built-in table, an invalid `[findings]` as the not-read line in text and in `--json` with no `gh` call, `class_source` for project, built-in and `Other` rows, the text form of a declared class); 2 controls (a config with a valid `[findings]` passes `check` and `status`; an invalid `[report]` with a valid `[findings]` still prints the ledger with declared classes). Cap: 40.
+
+**Current behavior** on these paths (keep unless marked change):
+- `Config::parse` runs its checks in item 118's order, ending with item 99's `[report]` check and item 102's `[review] guide`; an unknown table such as `[findings]` is ignored. Change: `[findings]` is checked between them (point 2). Every other check, its order and its refusal text: keep.
+- `report --findings` (item 121) finds the root by `report`'s discovery, runs no git subprocess, reads neither the run log nor `.shipcraft.toml`, groups by the built-in table, and prints the ledger or the not-read line, exit 0, writing nothing. Change: it reads `<root>/.shipcraft.toml`'s `[findings]` (point 3) and `--json` finding rows gain `class_source`. Everything else: keep.
+- `report` without `--findings` reads only `[report]` of the config (item 99), and `report --github` validates the whole working-tree config and marks selected locks `config unreadable` when that fails (item 99 point 2). Keep; with an invalid `[findings]` the whole-config validation fails, so `--github`'s selected locks read `config unreadable`, as with an invalid `[report]`. `report` without `--github` and without `--findings` does not read `[findings]`.
+- `status` and the hook's and `check`'s staged-config checks refuse an invalid config with its code and three lines, and the hook appends its row as today. Keep; they refuse an invalid `[findings]` the same way.
+- The standing effects the spec-review brief lists: `report --findings` and `check` run no suite and append no row; a case that commits through the hook appends its row and may close a lock as today. Keep.
+
 ### `report --github`'s code split into modules (item 119)
 
 This item changes Shipcraft's own code, not the product: no command, config key, lock, refusal, row, `gh` call or output of `shipcraft` changes. `nucleo/src/relatorio_gh.rs`, the code that asks GitHub through `gh` for `report --github` (items 79, 113 and 114), has 716 lines on `origin/main` `ec1880f` (525 of code and 191 of unit tests); since items 116 and 117 it is one of the larger files in `nucleo/src`, and items 113 and 114 each grew it. This item moves its code, unchanged, into modules along its own seams, by item 116's method. It is a refactor: a patch release, 2.63.4 (item 118, running beside it, takes 2.63.3; whichever of the two merges second rebases onto the other).
@@ -3325,4 +3394,4 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.65.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.66.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
