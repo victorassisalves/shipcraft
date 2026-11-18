@@ -117,13 +117,31 @@ impl Config {
     /// The config a PR is judged by (item 1, rule 3): the base branch's, as
     /// origin has it; the tree's when the base has none yet.
     pub fn of_base(repo: &Repo, base: &str) -> Result<Config> {
-        let rev = format!("origin/{base}");
-        if repo.resolve(&rev)?.is_some() {
-            if let Some(config) = Config::at(repo, &Snapshot::Commit(rev))? {
-                return Ok(config);
-            }
+        Config::of_base_why(repo, base).map(|(config, _)| config)
+    }
+
+    /// `of_base`, printing why the working tree's config was taken (item
+    /// 128): for `pr` and `merge`; the reviews stay silent.
+    pub fn of_base_told(repo: &Repo, base: &str) -> Result<Config> {
+        let (config, why) = Config::of_base_why(repo, base)?;
+        if let Some(why) = why {
+            println!("{why}");
         }
-        Config::load(repo)
+        Ok(config)
+    }
+
+    /// The base's config, or the tree's with the line that says why.
+    fn of_base_why(repo: &Repo, base: &str) -> Result<(Config, Option<String>)> {
+        let rev = format!("origin/{base}");
+        let why = if repo.resolve(&rev)?.is_some() {
+            if let Some(config) = Config::at(repo, &Snapshot::Commit(rev.clone()))? {
+                return Ok((config, None));
+            }
+            format!("{rev} has no {CONFIG_FILE}, so this PR is judged by the working tree's (a first install is judged by the config it adds).")
+        } else {
+            format!("{rev} is not in this clone, so this PR is judged by the working tree's {CONFIG_FILE} (fetch {rev} if it has one).")
+        };
+        Ok((Config::load(repo)?, Some(format!("shipcraft: {why}"))))
     }
 
     pub fn parse(text: &str) -> Result<Config> {

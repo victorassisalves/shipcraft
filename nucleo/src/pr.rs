@@ -33,7 +33,7 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>, merge: bool
     let started = Instant::now();
     let base = repo.default_branch();
     repo.run(&["fetch", "-q", "origin"])?;
-    let config = Config::of_base(repo, &base)?;
+    let config = Config::of_base_told(repo, &base)?;
     let (ci, revisao) = config.camadas()?;
     let branch = repo.branch();
     if branch.is_empty() || branch == base {
