@@ -2822,7 +2822,7 @@ The 2026-11-07 gaps review (private process repository, `prd/lacunas-e-proximos-
 **Metric:** on draken's and draken-platform's run logs (read only), on the release day: the `reds` line's totals equal the 2026-11-07 measure for the rows that existed then (12 of 29 and 72.5 min in draken-platform; 5 of 16 and 31.9 min in draken, whose log has 5 later red rows, none green again), and the week lines' `suite_red`, `green_again`, `named` and `green_again_secs` (the JSON values, the seconds within floating-point addition error) add up to the `reds` line's less its red rows without a week (none on either log today). Shares and case lists are not additive and are not compared. Revert: a later release that drops the `reds_week` lines; nothing is written by this item, so nothing needs undoing.
 
 **Touches.** Read first:
-- **The version:** the contract goes to 2.67.0 (`v1-62.version`, `v1-64.version`, `v1-87.version`, `v1-103.version`, `v1-108.version` and the others that read section 11 or the manifest).
+- **The version:** the contract goes to 2.67.0 (`v1-62.version`, `v1-63.version`, `v1-64.version`, `v1-67.version`, `v1-87.version`, `v1-103.version`, `v1-108.version`, `v1-69.machine-version`, `v1-69.machine-nested-version`, `v1-65.main`, `v1-65.many` and `v1-66.passing`, which compare `--version` with the manifest, and the others that read section 11 or the manifest); their test code is unchanged and they pass once both say 2.67.0.
 - **Assertions that change, and nothing else in them** (each has a red row with `at` 100, so a `reds_week` line for `1970-W01` now follows `reds`):
   - item 109's `v1-109.order-size`: the kinds become `['meta','lock','day','size','reds','reds_week','dora','gap']`, and in the text the line after `reds:` starts with `reds 1970-W01:` and the one after that is `DORA`;
   - item 109's `v1-109.order-day`: the kinds become `['meta','lock','day','reds','reds_week','dora']`, and in the text the line after `reds:` starts with `reds 1970-W01:` and the one after that is `DORA`;
@@ -2835,7 +2835,8 @@ The 2026-11-07 gaps review (private process repository, `prd/lacunas-e-proximos-
   - item 116's structural cases (`acceptance/lib/item116.sh`): the new code goes in the existing files of `nucleo/src/relatorio/` (no new file there), every table item keeps its file, every file stays at most 600 lines, and `relatorio/tests.rs` keeps its 13 tests (this item's unit tests go in a `#[cfg(test)] mod tests` of the file that holds its code);
   - item 97's, 43's, 81's and 33's `suite-red` cases: the refusal and its row are written as today;
   - item 40's and item 62's `ci` cases that write `docs_only` and `suite_in_checks` (`v1-40.raiz-md`, `v1-40.sem-pr`, `v1-62.ci-light` among them), and item 109's `v1-109.green-flags` and `v1-109.green-other`: the fields are written and read as today, so a green row that skipped the suite still makes no red row green again, in the week lines too;
-  - item 10's `v1-10.1-execucoes-jsonl`: no row gains or loses a field.
+  - item 10's `v1-10.1-execucoes-jsonl`: no row gains or loses a field;
+  - item 22's `v1-22.ambiente-red`, `ambiente-ci`, `ambiente-verifica`, `ambiente-build` and `ambiente-vazio`: startup still removes `SHIPCRAFT_CASES` and `SHIPCRAFT_FILES` before dispatch.
 - **New cases** go in `acceptance/lib/item123.sh` and write the run log by hand after the fixture's last commit, as item 109's do, and run `report --json` and `report`. Estimate: 14 for point 1 (the week of a red row at the ISO edges, `at` missing, a string, negative, at the upper bound; two weeks; green again across a week edge, judged on the red row's week; the sums against the `reds` line), 14 for point 2 (keys and integer types, share and secs forms, cases per week and their cut at 5, order of weeks, the text form, no week line without red rows or without a week, `--since` and `--github` unchanged, position against `review` and `dora`), plus the 4 changed assertions. Cap: 40.
 
 **Current behavior** on these paths (keep unless marked change):
@@ -2845,6 +2846,7 @@ The 2026-11-07 gaps review (private process repository, `prd/lacunas-e-proximos-
 - Item 109's `reds` line and its `reds:` text line: keep, byte for byte.
 - `report --findings` (items 121, 122), `report`'s git reads (item 76), `--since`'s refusal, `--github`'s calls, `[report]`'s config refusal path and the usage refusal: keep.
 - `ci` writes a `suite-red` row with `commit`, `secs`, `failed` (at most 50 ids) and `failed_count` (item 97), and a passing row with `commit` and `secs`. Keep: this item adds no row and no field.
+- Startup removes `SHIPCRAFT_CASES` and `SHIPCRAFT_FILES` from the environment before dispatch (item 22), for `report` and its git and `gh` children too. Keep.
 - The standing effects the spec-review brief lists: the new cases run no hook after writing their log. Keep.
 
 ### `report --github`'s code split into modules (item 119)
