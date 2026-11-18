@@ -111,7 +111,7 @@ elif case=='v1-120.basic':
  calls.unlink(missing_ok=True);s,t=pair(rs);observed=data(calls);calls.unlink()
  pair([dict(r,pr=None) if r['layer']=='merge' else r for r in rs])
  assert data(calls)==observed and not ghcalls.exists(),'extra Git/network call'
- assert prs(s)==[dict(kind='merged_pr',pr=140,locks=['8c042eb7c328'],merge_at=1794963902,week='2026-W47',product_lines=1429,rounds=1,changes_requested=0,first_round_approved=True,red_to_merge=613)],s
+ assert prs(s)==[dict(kind='merged_pr',pr=140,locks=['8c042eb7c328'],merge_at=1794963902,week='2026-W47',product_lines=1429,rounds=1,changes_requested=0,first_round_approved=True,red_to_merge=613,markers=None)],s
  assert textlines(t,'pr #')==['pr #140: merged at 2026-11-18T01:05:02Z (2026-W47); locks 8c042eb7c328; 1429 product lines; 1 review round(s), 0 requested changes, approved on round 1 yes; red to merge 10 min 13 s'],t
 elif case=='v1-120.merge-choice':
  rs=[merge(result='refused',at=3),merge(base='other',at=4),merge(escape=True,at=5),merge(at=200,lock='first'),merge(at=10,lock='later'),merge(2,at=90),merge(10,at=80)]
@@ -328,7 +328,7 @@ else:raise AssertionError('unrouted '+case)
 # Schemas only; each case above owns its numeric and text expectations.
 for r in selected(s):
  if r['kind']=='merged_pr':
-  assert set(r)=={'kind','pr','locks','merge_at','week','product_lines','rounds','changes_requested','first_round_approved','red_to_merge'},r
+  assert set(r)=={'kind','pr','locks','merge_at','week','product_lines','rounds','changes_requested','first_round_approved','red_to_merge','markers'},r
   assert all(type(r[k]) is int for k in ('pr','rounds','changes_requested')),r
   assert r['product_lines'] is None or type(r['product_lines']) is int,r
   assert r['first_round_approved'] is None or type(r['first_round_approved']) is bool,r
