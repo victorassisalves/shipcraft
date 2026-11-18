@@ -144,7 +144,8 @@ elif case=='grammar':
 elif case=='line-endings':
  red(message='order cases: yes\r\nledger cases: 00\r\nplain cases: no\r\rx cases: yes\ny cases: yes\u2028z cases: no\n\ufeffbom cases: yes\nq cases: yes\u2029w cases: no\n'.encode());s=output(rows());assert marks(s)==[{'order':'yes','ledger':'00'}],s
 elif case=='encoding':
- git('config','i18n.commitEncoding','ISO-8859-1');git('config','i18n.logOutputEncoding','UTF-16');red(message=b'caf\xe9\norder cases: yes\n');s=output(rows());assert marks(s)==[{'order':'yes'}],s
+ git('config','i18n.commitEncoding','ISO-8859-1');git('config','i18n.logOutputEncoding','ISO-8859-1');red(message=b'caf\xe9\norder cases: yes\n');s=output(rows());assert select(s,'dora')[0]['git']['releases']==1,s
+ assert marks(s)==[{'order':'yes'}],s
 elif case=='framing':
  sha=red(message=b'commit '+base.encode()+b'\n\x1e\x1f\t.shipcraft/locks/B.json\n\norder cases: yes\nnoise BADBYTE\nledger cases: 010\n')
  raw=run(realgit,'cat-file','commit',sha).stdout.replace(b'BADBYTE',b'\xff');sha=git('hash-object','-t','commit','-w','--stdin',data=raw);git('update-ref','HEAD',sha)
@@ -164,7 +165,8 @@ elif case=='text':
  red();rs=rows()+[row('review')];p=report(rs,());lines=p.stdout.decode().split('\n');assert p.returncode==0 and not p.stderr
  assert [l for l in lines if l.startswith('marker ')]==['marker order cases set: 1 merged PR(s), 1 reviewed, approved on round 1 100%, 0.00 change requests per PR, 3 or more rounds 0 (0%)','marker order cases unset: 0 merged PR(s), 0 reviewed, approved on round 1 -, - change requests per PR, 3 or more rounds 0 (-)','marker order cases none: 0 merged PR(s), 0 reviewed, approved on round 1 -, - change requests per PR, 3 or more rounds 0 (-)'],lines
 elif case=='position':
- red(message=b'z cases: yes\na cases: no\n');rs=rows()+[row('pr',product_lines=20,warn_lines=600)];s=output(rs);ks=[r['kind'] for r in s];m=select(s,'marker');assert [(r['marker'],r['group']) for r in m]==[(w,g) for w in ('a','z') for g in ('set','unset','none')],s
+ red(message=b'z cases: yes\na cases: no\n');rs=[row('pr',pr=7,product_lines=20,warn_lines=600)]+rows(pr=7);s=output(rs);ks=[r['kind'] for r in s];assert 'limit' in ks and select(s,'merged_pr')[0]['product_lines']==20,s
+ m=select(s,'marker');assert [(r['marker'],r['group']) for r in m]==[(w,g) for w in ('a','z') for g in ('set','unset','none')],s
  i=ks.index('marker');assert ks[i-1]=='limit' and ks[i+6]=='dora';t=report(rs,()).stdout.decode().splitlines();j=t.index('DORA');assert all(l.startswith('marker ') for l in t[j-6:j]) and t[j-7].startswith('suggested limit:'),t
 elif case=='since-tag':
  red();git('tag','-a','v2.0.0','-m','window',at=T+50);rs=rows()+rows(pr=8)+rows(pr=9);rs[1]['at']=T+49;rs[3]['at']=T+50;rs[5]['at']=None;s=output(rs,('--json','--since','v2.0.0'))
