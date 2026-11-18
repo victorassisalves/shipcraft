@@ -142,7 +142,7 @@ Before item 55, `red` ran every suite in full to learn which cases fail, and mos
   - and are not `.shipcraft.toml` itself.
 - Paths are relative to each suite's `root`.
 - Each selected file must be a readable regular file as `lstat` sees it (a symlink is not one), and every path git reports must be valid UTF-8. Otherwise `red` falls back to the full run (`unreadable path`).
-- A changed path that matched a suite's globs at the base commit and was deleted or is no longer a regular file makes `red` fall back to the full run. So does a changed `.shipcraft.toml`, unless the merge base has none (item 129: the install narrows).
+- A changed path that matched a suite's globs at the base commit and was deleted or is no longer a regular file makes `red` fall back to the full run. So does a changed `.shipcraft.toml`, except an added one when item 129 finds that the merge base holds neither `.shipcraft.toml` nor `.sc2.toml` (the install narrows); a failed read of the legacy file keeps the full run.
 
 **The narrowed run.** When some suite has selected files and no fallback applies:
 1. `red` runs `[build]` as today.
