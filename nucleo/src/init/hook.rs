@@ -1,0 +1,223 @@
+//! Which hook route a commit takes, the install's form, and shipcraft's own hooks (items 15a, 15b, 20, 25, 58).
+
+use super::files::{is_executable, make_executable, write};
+use super::lefthook::single_source;
+use crate::git::{git_in, text, Repo};
+use crate::init_hooks;
+use crate::init_msg::{self, Plan};
+use crate::init_tool::{self, Tool};
+use crate::refusal::{failed, Result};
+use crate::suite::shell_quote;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+const HOOK_MARK: &str = "# shipcraft hook";
+/// Item 58: how the hooks of a project-local install call it.
+pub const LOCAL: &str = "./node_modules/.bin/shipcraft";
+const PLAIN_LOCAL: &str = "\"$(git rev-parse --show-toplevel)/node_modules/.bin/shipcraft\"";
+
+pub const LEFTHOOK_FILES: [&str; 4] = ["lefthook.yml", ".lefthook.yml", "lefthook.yaml", ".lefthook.yaml"];
+
+/// Where `shipcraft check` goes. There is one route: `shipcraft check --commit-msg`
+/// in `commit-msg` and `shipcraft close` in `post-commit`, through shipcraft's own
+/// hooks, the lefthook file (item 20), or the husky 9 and pre-commit (item 25).
+pub(super) enum Hook {
+    Own(Vec<PathBuf>),
+    Msg(Plan),
+    Tool(Tool),
+}
+
+/// `shipcraft status`: whether commits go through shipcraft; any doubt reads as no hook.
+pub fn hook_status(repo: &Repo) -> String {
+    // core.hooksPath is read once, for item 101's route and for today's.
+    let path = hooks_path(repo);
+    // Item 101: hooks a project keeps in its own core.hooksPath.
+    if let Ok(HooksPath::Set(dir)) = &path {
+        if let Some(line) = init_hooks::status(repo, dir) {
+            return line;
+        }
+    }
+    match path.and_then(|path| decide_hook_with(repo, false, path)) {
+        decided if init_tool::present(repo) => {
+            init_tool::status(
+                decided.and_then(|h| if let Hook::Tool(t) = h { Ok(t) } else { Err(failed(String::new())) }),
+            )
+        }
+        // 20.3: each event says what it misses, even when the init refuses.
+        decided if LEFTHOOK_FILES.iter().any(|f| repo.path(f).symlink_metadata().is_ok()) => {
+            init_msg::status(repo, matches!(decided, Ok(Hook::Msg(_))))
+        }
+        Ok(Hook::Own(hooks)) if hooks.iter().all(|h| own_hook(h) && is_executable(h)) => {
+            "shipcraft: shipcraft hooks installed (commit-msg and post-commit)".into()
+        }
+        _ => "shipcraft: missing hook: the commit does not go through `shipcraft check`; run `shipcraft init`".into(),
+    }
+}
+
+/// Item 58: where the running binary is installed, both paths canonical.
+pub(crate) enum Install {
+    Machine,
+    Project,
+    /// A package's `node_modules` under the root.
+    Nested(PathBuf),
+}
+
+/// Item 58: the project's install is a binary under `<root>/node_modules/`, with
+/// `<root>/node_modules/.bin/shipcraft` an executable regular file; any doubt is the machine's.
+pub(super) fn install(repo: &Repo) -> Install {
+    install_at(repo.root())
+}
+
+/// Item 58's rule for any working-tree root; item 69's hint applies it too.
+pub(crate) fn install_at(root: &Path) -> Install {
+    let exe = std::env::current_exe().and_then(fs::canonicalize);
+    let (Ok(exe), Ok(root)) = (exe, fs::canonicalize(root)) else { return Install::Machine };
+    let modules = root.join("node_modules");
+    if exe.starts_with(&modules) {
+        return if is_executable(&modules.join(".bin/shipcraft")) { Install::Project } else { Install::Machine };
+    }
+    let Ok(inside) = exe.strip_prefix(&root) else { return Install::Machine };
+    let parent = inside.parent().unwrap_or(Path::new(""));
+    let mut dir = root.clone();
+    for part in parent.components() {
+        dir.push(part);
+        if part.as_os_str() == "node_modules" {
+            return Install::Nested(dir);
+        }
+    }
+    Install::Machine
+}
+
+fn own_hook(path: &Path) -> bool {
+    fs::read_to_string(path).is_ok_and(|t| t.contains(HOOK_MARK))
+}
+
+/// `git config core.hooksPath`, read once for `init` and `status`.
+pub(crate) enum HooksPath {
+    Unset,
+    /// The raw value.
+    Set(String),
+    /// Any exit other than 0 or 1: the first line of git's error.
+    Fails(String),
+}
+
+/// The raw value, letter by letter (15a.3): '.git/hooks/', './.git/hooks',
+/// the absolute path or a space refuse, even when they name the same directory.
+/// Exit 1 is an unset key; any other failure is not absence (15a.2).
+pub(crate) fn hooks_path(repo: &Repo) -> Result<HooksPath> {
+    let out = git_in(repo.root(), &["config", "core.hooksPath"])?;
+    Ok(match out.status.code() {
+        Some(1) => HooksPath::Unset,
+        Some(0) => HooksPath::Set(text(out.stdout.strip_suffix(b"\n").unwrap_or(&out.stdout))),
+        _ => HooksPath::Fails(text(&out.stderr).lines().next().unwrap_or_default().to_string()),
+    })
+}
+
+/// Item 15a: the hook is decided before any question or write. shipcraft installs
+/// its own hook only where no other tool manages pre-commit, and integrates
+/// with the lefthook only where it surely runs the hook (item 15b); any doubt
+/// is a refusal that leaves the tree as it was (rule 17).
+pub(super) fn decide_hook(repo: &Repo, local: bool) -> Result<Hook> {
+    decide_hook_with(repo, local, hooks_path(repo)?)
+}
+
+/// `decide_hook` with `core.hooksPath` already read.
+fn decide_hook_with(repo: &Repo, local: bool, path: HooksPath) -> Result<Hook> {
+    let stop = |what: String| init_msg::alien(what.clone(), &what);
+    let dir = match path {
+        HooksPath::Unset => None,
+        HooksPath::Set(dir) => Some(dir),
+        HooksPath::Fails(why) => return stop(format!("git config fails ({why})")),
+    };
+    // Item 25 (changes 15a.2 and 15a.3): `.husky/` or the pre-commit config.
+    if init_tool::present(repo) || init_tool::husky_path(dir.as_deref()) {
+        return init_tool::decide(repo, dir.as_deref(), local).map(Hook::Tool);
+    }
+    if let Some(dir) = dir.filter(|d| d != ".git/hooks") {
+        return stop(format!("core.hooksPath is {dir:?}, and shipcraft only accepts .git/hooks, exactly"));
+    }
+    let lefthook: Vec<&str> = LEFTHOOK_FILES.into_iter().filter(|f| repo.path(f).symlink_metadata().is_ok()).collect();
+    match lefthook.as_slice() {
+        // 15a.2: the first `lefthook install` would remove the shipcraft hooks.
+        [] => {
+            if let Err(problem) = single_source(repo, "") {
+                return stop(format!("lefthook configuration may be outside the 4 root names: {problem}"));
+            }
+            let mut hooks = Vec::new();
+            for event in ["commit-msg", "post-commit"] {
+                let hook = repo.hook_path(event)?;
+                if hook.symlink_metadata().is_ok() && !own_hook(&hook) {
+                    let shown = hook.strip_prefix(repo.root()).unwrap_or(&hook).display().to_string();
+                    return stop(format!("a {event} hook not owned by shipcraft already exists ({shown})"));
+                }
+                hooks.push(hook);
+            }
+            Ok(Hook::Own(hooks))
+        }
+        [file] => lefthook_hook(repo, file, local),
+        files => stop(format!("there is more than one lefthook file at the root ({})", files.join(", "))),
+    }
+}
+
+/// One lefthook file at the root: the conditions (15b.1, 15b.3), then the
+/// plan of item 20.
+fn lefthook_hook(repo: &Repo, file: &str, local: bool) -> Result<Hook> {
+    let path = repo.path(file);
+    let problem = if path.symlink_metadata().is_ok_and(|m| m.file_type().is_symlink()) {
+        // 15b.3: a link is never written through.
+        Some(format!("{file} is a symbolic link"))
+    } else if let Err(problem) = single_source(repo, file) {
+        Some(format!("{file} is not the only lefthook configuration: {problem}"))
+    } else {
+        None
+    };
+    if let Some(what) = problem {
+        return init_msg::alien(what.clone(), &what);
+    }
+    let text = fs::read_to_string(&path).map_err(|e| failed(format!("read {file}: {e}")))?;
+    if let Err(problem) = init_msg::readable(&text) {
+        return init_msg::alien(format!("{file} {problem}"), &problem);
+    }
+    init_msg::plan(repo, file, text, local).map(Hook::Msg)
+}
+
+/// Writes shipcraft's own hooks; whether it wrote any. Item 58: from the
+/// project's install, they call the checkout's `node_modules/.bin/shipcraft`, and an
+/// existing hook is kept; a hook in that form is kept by any binary.
+pub(super) fn install_hooks(hooks: &[PathBuf], local: bool, created: &mut Vec<PathBuf>) -> Result<bool> {
+    let exe = std::env::current_exe().map_err(|e| failed(format!("find the current binary: {e}")))?;
+    let exe = format!("exec {}", shell_quote(&exe.to_string_lossy()));
+    let missing = "shipcraft: not installed in this checkout (node_modules/.bin/shipcraft)";
+    let mut wrote = false;
+    for hook in hooks {
+        let msg = hook.ends_with("commit-msg");
+        if own_hook(hook) && (local || fs::read_to_string(hook).is_ok_and(|t| t.contains(PLAIN_LOCAL))) {
+            continue;
+        }
+        let (what, args) = if msg {
+            ("checks the commit against open locks", "check --commit-msg \"$1\"")
+        } else {
+            ("closes the lock the commit-msg check marked", "close")
+        };
+        let script = if !local {
+            format!("#!/bin/sh\n{HOOK_MARK}: {what}\n{exe} {args}\n")
+        } else if msg {
+            format!(
+                "#!/bin/sh\n{HOOK_MARK}: {what}\nif [ ! -f {PLAIN_LOCAL} ] || [ ! -x {PLAIN_LOCAL} ]; then\n  echo \"{missing}: install the project's dependencies\" >&2\n  exit 1\nfi\nexec {PLAIN_LOCAL} {args}\n"
+            )
+        } else {
+            format!(
+                "#!/bin/sh\n{HOOK_MARK}: {what}\nif [ ! -f {PLAIN_LOCAL} ] || [ ! -x {PLAIN_LOCAL} ]; then\n  echo \"{missing}: the lock stays open; install the project's dependencies and run node_modules/.bin/shipcraft close\" >&2\n  exit 0\nfi\nexec {PLAIN_LOCAL} {args}\n"
+            )
+        };
+        write(hook, &script, created)?;
+        make_executable(hook)?;
+        wrote = true;
+    }
+    if wrote {
+        println!("shipcraft: commit-msg and post-commit hooks installed");
+    } else {
+        println!("shipcraft: commit-msg and post-commit hooks already installed, kept");
+    }
+    Ok(wrote)
+}
