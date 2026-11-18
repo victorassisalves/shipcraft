@@ -31,7 +31,7 @@ use flow::{read, Report};
 pub(crate) use git::{Git, REPOSITORY_VARS};
 use github::{ask_github, blocking, checks};
 use prs::merged_prs;
-use quality::{reds, review, size};
+use quality::{reds, reds_weeks, review, size};
 use rows::locks_of;
 pub(crate) use rows::num;
 use selection::Selection;
@@ -128,6 +128,7 @@ pub fn run(prepared: Prepared, as_json: bool, since: Option<&str>, github: bool)
         .chain(report.days())
         .chain(size(&rows))
         .chain(reds(&rows))
+        .chain(reds_weeks(&rows))
         .chain(review_line)
         .chain(checks_line)
         .chain(merged_prs(&rows))
