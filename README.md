@@ -204,7 +204,7 @@ review = "codex"    # codex | claude | gemini
 Two rules keep the config honest:
 
 - **The config is part of the lock.** It can't change while a lock is open.
-- **A PR is judged by the config on the base branch,** not by its own. A PR can't switch off its own review.
+- **A PR is judged by the config on the base branch,** not by its own. A PR can't switch off its own review. When the base branch has no `.shipcraft.toml` yet (the PR that installs Shipcraft), there is nothing on the base to switch off, so another config judges the PR: `shipcraft ci` uses the one committed at the PR's HEAD, and `shipcraft pr` and `shipcraft merge` use the one in the working tree where they run. Each says so in one line.
 
 **Adding a package with a new suite.** Once the base branch has a `.shipcraft.toml`, a `[[suite]]` added in the same PR as its first tests doesn't run in CI, and `shipcraft ci` refuses its locked cases as missing. Bring the suite first, in a PR of its own: the package, its `[[suite]]` entry and one passing test. Once that's merged, rebase and write the RED. `shipcraft red` warns when changed test files match no suite's globs, or when the lock has cases in a suite the base doesn't have.
 

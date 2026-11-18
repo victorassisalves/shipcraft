@@ -266,3 +266,41 @@ fn review_after_defaults_to_ci_and_any_explicit_value_needs_2_46() {
         assert!(matches!(refused, Err(crate::refusal::Stop::Refused(r)) if r.code == "config-invalid"), "{bad}");
     }
 }
+
+#[test]
+fn of_base_says_why_the_working_tree_judges() {
+    let dir = crate::git::TempDir::new("shipcraft-test-item128").unwrap();
+    let root = dir.path();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@example.invalid")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@example.invalid")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}");
+    };
+    git(&["init", "-q", "-b", "main"]);
+    std::fs::write(root.join("a"), "a").unwrap();
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "-m", "no config"]);
+    std::fs::write(root.join(".shipcraft.toml"), suite("a", "t/**")).unwrap();
+    let repo = crate::git::Repo::at_root(root);
+    let why = |base: &str| Config::of_base_why(&repo, base).map(|(_, why)| why).ok().flatten();
+    assert_eq!(why("main").as_deref(), Some("shipcraft: origin/main is not in this clone, so this PR is judged by the working tree's .shipcraft.toml (fetch origin/main if it has one)."));
+    git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    assert_eq!(why("main").as_deref(), Some("shipcraft: origin/main has no .shipcraft.toml, so this PR is judged by the working tree's (a first install is judged by the config it adds)."));
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "-m", "config"]);
+    git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    assert!(Config::of_base_why(&repo, "main").unwrap().1.is_none());
+    std::fs::remove_file(root.join(".shipcraft.toml")).unwrap();
+    git(&["update-ref", "-d", "refs/remotes/origin/main"]);
+    assert!(Config::of_base_why(&repo, "main").is_err());
+}
