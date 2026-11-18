@@ -32,7 +32,7 @@ use evidence::{Evidence, Facts};
 use flow::{read, Report};
 pub(crate) use git::{Git, REPOSITORY_VARS};
 use github::{ask_github, blocking, checks};
-use prs::merged_prs;
+use prs::{markers_of, merged_prs, red_parents};
 use quality::{reds, reds_weeks, review, size};
 use rows::locks_of;
 pub(crate) use rows::num;
@@ -136,6 +136,19 @@ pub fn run(
             std::process::exit(2);
         }
     }
+    // Item 127: one read of the RED commits, after `--since`'s checks and
+    // before any `--github` call; its failure reads no markers.
+    let parents = red_parents(&rows);
+    let messages = match &evidence {
+        Ok(_) if !parents.is_empty() => git.red_commits(&parents.values().cloned().collect()).unwrap_or_default(),
+        _ => Default::default(),
+    };
+    let red = parents.iter().filter_map(|(pr, key)| messages.get(key).map(|m| (*pr, markers_of(m)))).collect();
+    let start = |ev: &Evidence, value: &str| match ev.releases.iter().find(|r| r.name == value) {
+        Some(release) => Some(release.time),
+        None => ev.merges.as_deref().and_then(|m| merge_named(m, value).map(|i| m[i].time)),
+    };
+    let window = since.map(|value| (value, evidence.as_ref().ok().and_then(|ev| start(ev, value))));
     let facts = evidence.as_ref().ok().map(|ev| Facts::of(ev, &rows, &ids));
     let mut report = Report::of(&rows, &ids, facts.as_ref());
     let evidence_facts = evidence.as_ref().map(|ev| (ev, facts.as_ref().expect("facts with evidence")));
@@ -171,7 +184,7 @@ pub fn run(
         .chain(reds_weeks(&rows))
         .chain(review_line)
         .chain(checks_line)
-        .chain(merged_prs(&rows))
+        .chain(merged_prs(&rows, &red, window))
         .chain([dora])
         .chain(summary)
         .chain(gaps)

@@ -262,6 +262,19 @@ pub(super) fn text(lines: &[Value]) -> String {
                     ),
                 };
             }
+            // Item 127: item 120's week numbers per marker group.
+            "marker" => {
+                let since = line["since"].as_str().map_or(String::new(), |s| format!("; since {s}"));
+                out += &format!(
+                    "marker {} cases {}: {} merged PR(s), {}, 3 or more rounds {} ({}){since}\n",
+                    line["marker"].as_str().unwrap_or_default(),
+                    line["group"].as_str().unwrap_or_default(),
+                    line["merged_prs"],
+                    rated(line),
+                    line["three_rounds"],
+                    show_with(&line["three_rounds_share"], percent)
+                );
+            }
             "dora" => out += &dora_text(meta, line),
             "github" => {
                 let missing = line["missing"].as_object().filter(|m| !m.is_empty()).map_or("none".to_string(), |m| {
