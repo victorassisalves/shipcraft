@@ -61,6 +61,15 @@ pub(super) fn text(lines: &[Value]) -> String {
     let stat = |s: &Value| {
         format!("{} (p50 {}, p90 {}, refusals {})", s["count"], latency(&s["p50"]), latency(&s["p90"]), s["refusals"])
     };
+    // Item 120: a group's reviewed PRs, as the week and size lines print them.
+    let rated = |line: &Value| {
+        format!(
+            "{} reviewed, approved on round 1 {}, {} change requests per PR",
+            line["reviewed_prs"],
+            show_with(&line["round1_approved_share"], percent),
+            show_with(&line["changes_requested_per_pr"], |x| format!("{x:.2}"))
+        )
+    };
     let mut out = String::new();
     let mut meta = &Value::Null;
     for line in lines {
@@ -198,6 +207,58 @@ pub(super) fn text(lines: &[Value]) -> String {
                     out += &format!("; not read: {}", reasons.join(", "));
                 }
                 out += "\n";
+            }
+            // Item 120: each merged PR, by week and by size, and the suggested limit.
+            "merged_pr" => {
+                let locks = line["locks"]
+                    .as_array()
+                    .filter(|l| !l.is_empty())
+                    .map_or("none".to_string(), |l| l.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", "));
+                let approved = match line["first_round_approved"].as_bool() {
+                    Some(true) => "yes",
+                    Some(false) => "no",
+                    None => "-",
+                };
+                out += &format!(
+                    "pr #{}: merged at {} ({}); locks {locks}; {} product lines; {} review round(s), {} requested changes, approved on round 1 {approved}; red to merge {}\n",
+                    line["pr"],
+                    time(&line["merge_at"]),
+                    line["week"].as_str().unwrap_or("-"),
+                    show(&line["product_lines"]),
+                    line["rounds"],
+                    line["changes_requested"],
+                    span(&line["red_to_merge"])
+                );
+            }
+            "week" => {
+                out += &format!(
+                    "week {}: {} merged PR(s), median red to merge {}; {}, 3 or more rounds {} ({})\n",
+                    line["week"].as_str().unwrap_or_default(),
+                    line["merged_prs"],
+                    span(&line["red_to_merge_median"]),
+                    rated(line),
+                    line["three_rounds"],
+                    show_with(&line["three_rounds_share"], percent)
+                );
+            }
+            "size_bucket" => {
+                let to = line["to"].as_u64().map_or("+".to_string(), |to| format!("-{to}"));
+                out += &format!("size {}{to}: {} merged PR(s), {}\n", line["from"], line["merged_prs"], rated(line));
+            }
+            "limit" => {
+                let n = &line["sample"];
+                out += &match line["basis"].as_str().unwrap_or_default() {
+                    "data" => format!(
+                        "suggested limit: {} product lines, from {n} reviewed merged PR(s): the largest supported edge (30 or more PRs up to it, one in its interval) whose PRs up to it average under 1 change request each with at least 50% approved on round 1\n",
+                        line["limit"]
+                    ),
+                    "default" => format!(
+                        "suggested limit: 600 product lines (the default): {n} reviewed merged PR(s), no supported edge (30 or more PRs up to it, one in its interval)\n"
+                    ),
+                    _ => format!(
+                        "suggested limit: none: at no supported edge (30 or more PRs up to it, one in its interval) do the PRs up to it average under 1 change request each with at least 50% approved on round 1 ({n} reviewed merged PR(s))\n"
+                    ),
+                };
             }
             "dora" => out += &dora_text(meta, line),
             "github" => {

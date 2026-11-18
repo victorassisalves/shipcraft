@@ -173,9 +173,9 @@ elif case=='v1-112.text-quarter':
 elif case=='v1-112.order-reds':
  rs=[row(layer='red',lock='A',at=1),row(layer='pr',product_lines=9,warn_lines=2),row(layer='merge',lock='A',locks=['A'],at=2,base='main',default_branch='main'),row(layer='ci',result='refused',code='suite-red'),row()]
  raw=wire(rs)+b'{broken112\n';s=report(raw);t=report(raw,args=())
- assert [r['kind'] for r in map(json.loads,s.splitlines())]==['meta','lock','day','size','reds','review','dora','gap'],s
+ assert [r['kind'] for r in map(json.loads,s.splitlines())]==['meta','lock','day','size','reds','review','merged_pr','week','size_bucket','size_bucket','size_bucket','size_bucket','size_bucket','size_bucket','size_bucket','size_bucket','limit','dora','gap'],s
  ls=t.splitlines();i=next((i for i,l in enumerate(ls) if l.startswith('review:')),None)
- assert i is not None and ls[i-1].startswith('reds:') and ls[i+1]=='DORA',t
+ assert i is not None and ls[i-1].startswith('reds:') and ls[i+1].startswith('pr #7:'),t
 elif case=='v1-112.order-size':
  rs=[row(layer='pr',product_lines=9,warn_lines=2),row()];s=report(rs);t=report(rs,args=())
  assert [r['kind'] for r in map(json.loads,s.splitlines())]==['meta','size','review','dora'],s
@@ -183,9 +183,9 @@ elif case=='v1-112.order-size':
  assert i is not None and ls[i-1].startswith('size:') and ls[i+1]=='DORA',t
 elif case=='v1-112.order-day':
  rs=[row(layer='merge',lock='A',at=100,base='main',default_branch='main'),row(layer='merge',lock='B',at=86400,base='main',default_branch='main'),row()];s=report(rs);t=report(rs,args=())
- assert [r['kind'] for r in map(json.loads,s.splitlines())]==['meta','lock','lock','day','day','review','dora'],s
+ assert [r['kind'] for r in map(json.loads,s.splitlines())]==['meta','lock','lock','day','day','review','merged_pr','week','dora'],s
  ls=t.splitlines();i=next((i for i,l in enumerate(ls) if l.startswith('review:')),None)
- assert i is not None and ls[i-1].startswith('day ') and ls[i+1]=='DORA',t
+ assert i is not None and ls[i-1].startswith('day ') and ls[i+1].startswith('pr #7:'),t
 elif case=='v1-112.since':
  rs=[row(at=1),row(at=2),row(pr=9,at=3)];s=report(rs,args=('--since','v2.0.0','--json'));t=report(rs,args=('--since','v2.0.0'))
  assert objects(s,'dora')[0]['deploys']['n']==1 and objects(s,'dora')[0]['git']['releases']==2,s

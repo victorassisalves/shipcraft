@@ -13,6 +13,7 @@ mod evidence;
 mod flow;
 mod git;
 mod github;
+mod prs;
 mod quality;
 mod rows;
 mod selection;
@@ -29,6 +30,7 @@ use evidence::{Evidence, Facts};
 use flow::{read, Report};
 pub(crate) use git::{Git, REPOSITORY_VARS};
 use github::{ask_github, blocking, checks};
+use prs::merged_prs;
 use quality::{reds, review, size};
 use rows::locks_of;
 pub(crate) use rows::num;
@@ -128,6 +130,7 @@ pub fn run(prepared: Prepared, as_json: bool, since: Option<&str>, github: bool)
         .chain(reds(&rows))
         .chain(review_line)
         .chain(checks_line)
+        .chain(merged_prs(&rows))
         .chain([dora])
         .chain(summary)
         .chain(gaps)
