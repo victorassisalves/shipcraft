@@ -12,19 +12,8 @@ use std::collections::{BTreeMap, BTreeSet};
 /// integer `pr` above 0, `product_lines` and `warn_lines` JSON integers) before
 /// the first counting `merge` row of the same number.
 pub(super) fn size(rows: &[Row]) -> Option<Value> {
-    let int = |r: &Row, key: &str| r.get(key).and_then(Value::as_u64);
-    let mut measured: BTreeMap<u64, bool> = BTreeMap::new();
-    let mut merged: BTreeSet<u64> = BTreeSet::new();
-    for row in rows {
-        let Some(pr) = int(row, "pr").filter(|n| *n > 0) else { continue };
-        if merge_counts(row) {
-            merged.insert(pr);
-        } else if str_of(row, "layer") == "pr" && !merged.contains(&pr) {
-            if let Some((lines, limit)) = int(row, "product_lines").zip(int(row, "warn_lines")) {
-                measured.insert(pr, lines > limit);
-            }
-        }
-    }
+    let (sizes, merged) = measured(rows);
+    let measured: BTreeMap<u64, bool> = sizes.into_iter().map(|(pr, (lines, limit))| (pr, lines > limit)).collect();
     if measured.is_empty() {
         return None;
     }
@@ -38,6 +27,26 @@ pub(super) fn size(rows: &[Row]) -> Option<Value> {
         "merged_prs": merged_prs, "merged_above": merged_above,
         "merged_above_share": share(merged_above, merged_prs),
     }))
+}
+
+/// Item 107's reading: per PR, the `product_lines` and `warn_lines` of its
+/// last measured `pr` row before its first counting `merge` row, and the PRs
+/// with a counting `merge` row.
+pub(super) fn measured(rows: &[Row]) -> (BTreeMap<u64, (u64, u64)>, BTreeSet<u64>) {
+    let int = |r: &Row, key: &str| r.get(key).and_then(Value::as_u64);
+    let mut measured = BTreeMap::new();
+    let mut merged: BTreeSet<u64> = BTreeSet::new();
+    for row in rows {
+        let Some(pr) = int(row, "pr").filter(|n| *n > 0) else { continue };
+        if merge_counts(row) {
+            merged.insert(pr);
+        } else if str_of(row, "layer") == "pr" && !merged.contains(&pr) {
+            if let Some(size) = int(row, "product_lines").zip(int(row, "warn_lines")) {
+                measured.insert(pr, size);
+            }
+        }
+    }
+    (measured, merged)
 }
 
 /// Item 109: the `reds` line, the `suite-red` rows of `ci` and those a later
