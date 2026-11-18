@@ -1,8 +1,10 @@
 //! Item 121: `report --findings [--json] [--since <pr>]`, the ledger of the
 //! Blocking findings the review comments of merged PRs raised, grouped by
 //! class. A reading only: `gh` through `report --github`'s asker, the root by
-//! `report`'s discovery, no git, no file written, exit 0.
+//! `report`'s discovery, no git, no file written, exit 0. Item 122: the
+//! project's own classes from `[findings]`, before the built-in ones.
 
+use crate::config::CONFIG_FILE;
 use crate::refusal::Result;
 use crate::relatorio::discover;
 use crate::relatorio_gh::Asker;
@@ -59,6 +61,122 @@ const OTHER: &str = "Other";
 const REVIEW: &str = "**shipcraft: review executed by ";
 const LOCATIONS: [&str; 4] = ["Location:", "Locations:", "**Location:**", "**Locations:**"];
 
+/// Item 122: one class of the table in effect; `Other` is not one.
+pub struct Class {
+    name: String,
+    keywords: Vec<Regex>,
+    source: &'static str,
+}
+
+/// Item 121's options: case-insensitive, Unicode, the crate's default limits.
+fn pattern(text: &str) -> Option<Regex> {
+    RegexBuilder::new(text).case_insensitive(true).build().ok()
+}
+
+/// Item 122: the reason an invalid `[findings]` gives, in the refusal and in
+/// `report --findings`'s not-read line.
+pub fn invalid(problem: &str) -> String {
+    format!("[findings] in {CONFIG_FILE} is invalid: {problem}")
+}
+
+/// A key as a problem names it: as written when plain, else a JSON string.
+fn key_name(key: &str) -> String {
+    match !key.is_empty() && key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
+        true => key.to_string(),
+        false => Value::from(key).to_string(),
+    }
+}
+
+/// The first key of a table outside `known`, in byte order.
+fn unknown_key(table: &toml::Table, known: &[&str]) -> Option<String> {
+    let mut keys: Vec<&String> = table.keys().filter(|k| !known.contains(&k.as_str())).collect();
+    keys.sort();
+    keys.first().map(|k| key_name(k))
+}
+
+/// Item 122 point 2: the class table in effect (without `Other`) from the
+/// config parsed as TOML, or the first problem in the spec's order.
+pub fn classes(config: &toml::Table) -> std::result::Result<Vec<Class>, String> {
+    let builtin = || {
+        CLASSES.iter().map(|(name, p)| Class {
+            name: name.to_string(),
+            keywords: vec![pattern(p).expect("a class pattern")],
+            source: "builtin",
+        })
+    };
+    let Some(findings) = config.get("findings") else { return Ok(builtin().collect()) };
+    let findings = findings.as_table().ok_or("[findings] is not a table")?;
+    if let Some(key) = unknown_key(findings, &["builtin_classes", "class"]) {
+        return Err(format!("unknown key {key}"));
+    }
+    let with_builtin = match findings.get("builtin_classes") {
+        None => true,
+        Some(value) => value.as_bool().ok_or("builtin_classes is not a boolean")?,
+    };
+    let declared = match findings.get("class") {
+        None => Vec::new(),
+        Some(value) => value
+            .as_array()
+            .and_then(|a| a.iter().map(toml::Value::as_table).collect::<Option<Vec<_>>>())
+            .ok_or("class is not an array of tables")?,
+    };
+    let mut table: Vec<Class> = Vec::new();
+    for (i, class) in declared.into_iter().enumerate() {
+        let i = i + 1;
+        table.push(declared_class(class, &table, with_builtin).map_err(|p| format!("class {i}: {p}"))?);
+    }
+    if with_builtin {
+        table.extend(builtin());
+    }
+    Ok(table)
+}
+
+/// One `[[findings.class]]`, checked after the classes declared before it.
+fn declared_class(class: &toml::Table, earlier: &[Class], with_builtin: bool) -> std::result::Result<Class, String> {
+    if let Some(key) = unknown_key(class, &["name", "keywords"]) {
+        return Err(format!("unknown key {key}"));
+    }
+    let name = class.get("name").ok_or("name is missing")?.as_str().ok_or("name is not a string")?;
+    if name.trim_matches([' ', '\t']).is_empty() {
+        return Err("name is empty".to_string());
+    }
+    if name.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}') {
+        return Err("name has a control character".to_string());
+    }
+    let taken = name == OTHER
+        || earlier.iter().any(|c| c.name == name)
+        || (with_builtin && CLASSES.iter().any(|(n, _)| *n == name));
+    if taken {
+        return Err(format!("name {name} is already a class"));
+    }
+    let keywords = class.get("keywords").ok_or("keywords is missing")?.as_array().ok_or("keywords is not an array")?;
+    if keywords.is_empty() {
+        return Err("keywords is empty".to_string());
+    }
+    let mut built = Vec::new();
+    for (j, keyword) in keywords.iter().enumerate() {
+        let j = j + 1;
+        let text = keyword.as_str().ok_or_else(|| format!("keyword {j} is not a string"))?;
+        if text.is_empty() {
+            return Err(format!("keyword {j} is empty"));
+        }
+        built.push(pattern(text).ok_or_else(|| format!("keyword {j} is not a valid pattern"))?);
+    }
+    Ok(Class { name: name.to_string(), keywords: built, source: "project" })
+}
+
+/// Item 122 point 3: `<root>/.shipcraft.toml` from the working tree, as item
+/// 99's reader reads `[report]`; a file it does not read is the built-in table.
+fn read_classes(root: &std::path::Path) -> std::result::Result<Vec<Class>, String> {
+    let path = root.join(CONFIG_FILE);
+    let text = std::fs::metadata(&path)
+        .is_ok_and(|m| m.is_file())
+        .then(|| std::fs::read(&path).ok().and_then(|b| String::from_utf8(b).ok()))
+        .flatten();
+    let table = text.and_then(|t| t.parse::<toml::Table>().ok()).unwrap_or_default();
+    classes(&table)
+}
+
 struct Finding {
     pr: u64,
     title: String,
@@ -74,7 +192,10 @@ pub fn since(value: &str) -> Option<u64> {
 pub fn run(as_json: bool, since: Option<u64>) -> Result<()> {
     let out = match discover() {
         None => not_read("no git repository found", as_json),
-        Some((root, _)) => ledger(&mut Asker::new(&root, None), as_json, since),
+        Some((root, _)) => match read_classes(&root) {
+            Ok(classes) => ledger(&mut Asker::new(&root, None), &classes, as_json, since),
+            Err(problem) => not_read(&invalid(&problem), as_json),
+        },
     };
     print!("{out}");
     Ok(())
@@ -87,7 +208,7 @@ fn not_read(reason: &str, as_json: bool) -> String {
     }
 }
 
-fn ledger(asker: &mut Asker, as_json: bool, since: Option<u64>) -> String {
+fn ledger(asker: &mut Asker, classes: &[Class], as_json: bool, since: Option<u64>) -> String {
     let list = ["pr", "list", "--state", "merged", "--limit", "1000", "--json", "number"];
     let mut prs = match asker.ask(&list, merged) {
         Ok(prs) => prs,
@@ -96,11 +217,7 @@ fn ledger(asker: &mut Asker, as_json: bool, since: Option<u64>) -> String {
     prs.retain(|n| *n >= since.unwrap_or(1));
     prs.sort_unstable_by(|a, b| b.cmp(a));
     prs.dedup();
-    let classes: Vec<Regex> = CLASSES
-        .iter()
-        .map(|(_, p)| RegexBuilder::new(p).case_insensitive(true).build().expect("a class pattern"))
-        .collect();
-    let mut groups: Vec<Vec<Finding>> = (0..=CLASSES.len()).map(|_| Vec::new()).collect();
+    let mut groups: Vec<Vec<Finding>> = (0..=classes.len()).map(|_| Vec::new()).collect();
     let mut unread: Vec<(u64, String)> = Vec::new();
     for pr in prs {
         let path = format!("repos/{{owner}}/{{repo}}/issues/{pr}/comments?per_page=100");
@@ -118,21 +235,20 @@ fn ledger(asker: &mut Asker, as_json: bool, since: Option<u64>) -> String {
                 eprintln!("report: PR {pr}: {warning}");
             }
             for (title, location) in found {
-                let class = classes.iter().position(|c| c.is_match(&title)).unwrap_or(CLASSES.len());
-                groups[class].push(Finding { pr, title, location });
+                groups[class_of(classes, &title)].push(Finding { pr, title, location });
             }
         }
     }
-    let names = CLASSES.iter().map(|(name, _)| *name).chain([OTHER]);
+    let names = classes.iter().map(|c| (c.name.as_str(), Some(c.source))).chain([(OTHER, None)]);
     let mut out = String::new();
     if as_json {
         for (pr, reason) in &unread {
             out += &format!("{}\n", json!({"kind": "pr_not_read", "pr": pr, "reason": reason}));
         }
-        for (name, list) in names.zip(&groups) {
+        for ((name, source), list) in names.zip(&groups) {
             for f in list {
-                let line =
-                    json!({"kind": "finding", "pr": f.pr, "class": name, "title": f.title, "location": f.location});
+                let line = json!({"kind": "finding", "pr": f.pr, "class": name, "class_source": source,
+                    "title": f.title, "location": f.location});
                 out += &format!("{line}\n");
             }
         }
@@ -145,7 +261,7 @@ fn ledger(asker: &mut Asker, as_json: bool, since: Option<u64>) -> String {
         let prs: Vec<String> = unread.iter().map(|(pr, reason)| format!("PR {pr} ({reason})")).collect();
         out += &format!("Not read: {}.\n\n", prs.join(", "));
     }
-    for (name, list) in names.zip(&groups).filter(|(_, list)| !list.is_empty()) {
+    for ((name, _), list) in names.zip(&groups).filter(|(_, list)| !list.is_empty()) {
         out += &format!("## {name} ({})\n\n", list.len());
         for f in list {
             let at = f.location.as_ref().map_or(String::new(), |l| format!(" ({l})"));
@@ -154,6 +270,11 @@ fn ledger(asker: &mut Asker, as_json: bool, since: Option<u64>) -> String {
         out += "\n";
     }
     out
+}
+
+/// The first class of the table whose keyword matches, else `Other`'s index.
+fn class_of(classes: &[Class], title: &str) -> usize {
+    classes.iter().position(|c| c.keywords.iter().any(|k| k.is_match(title))).unwrap_or(classes.len())
 }
 
 /// The merged-PR list: an array of objects, each a `number` above 0.
@@ -315,11 +436,19 @@ mod tests {
         assert_eq!(comment("Blocking: 1x\nBlocking:  1\n").1, None);
     }
 
+    fn table(text: &str) -> std::result::Result<Vec<Class>, String> {
+        classes(&text.parse::<toml::Table>().unwrap())
+    }
+
+    fn class(table: &[Class], title: &str) -> (String, Option<&'static str>) {
+        let i = class_of(table, title);
+        table.get(i).map_or((OTHER.to_string(), None), |c| (c.name.clone(), Some(c.source)))
+    }
+
     #[test]
     fn class_table_order() {
-        let classes: Vec<Regex> =
-            CLASSES.iter().map(|(_, p)| RegexBuilder::new(p).case_insensitive(true).build().unwrap()).collect();
-        let class = |t: &str| classes.iter().position(|c| c.is_match(t)).map_or(OTHER, |i| CLASSES[i].0);
+        let classes = table("").unwrap();
+        let class = |t: &str| class(&classes, t).0;
         assert_eq!(class("Secrets cross workspace boundaries when project slugs match"), CLASSES[1].0);
         assert_eq!(class("Delayed approval overwrites a newer, confirmed answer"), CLASSES[2].0);
         assert_eq!(class("Numeric deadlines escape citation checks"), CLASSES[8].0);
@@ -327,6 +456,82 @@ mod tests {
         assert_eq!(class("TYPED text vanishes"), CLASSES[0].0);
         assert_eq!(class("Âncora quebrada"), CLASSES[6].0);
         assert_eq!(class("Nothing here"), OTHER);
+    }
+
+    #[test]
+    fn table_in_effect_and_class_source() {
+        let text = "[[findings.class]]\nname = \"Money\"\nkeywords = ['round', '\\bBRL\\b']\n\
+                    [[findings.class]]\nname = \"Ações\"\nkeywords = ['ÇÃO', 'round']\n";
+        let t = table(text).unwrap();
+        let names: Vec<&str> = t.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names[..2], ["Money", "Ações"]);
+        assert_eq!(names[2..], CLASSES.map(|c| c.0));
+        assert_eq!(class(&t, "Rounding of typed input"), ("Money".to_string(), Some("project")));
+        assert_eq!(class(&t, "Totals in brl drift"), ("Money".to_string(), Some("project")));
+        assert_eq!(class(&t, "Validação quebra"), ("Ações".to_string(), Some("project")));
+        assert_eq!(class(&t, "Typed text lost"), (CLASSES[0].0.to_string(), Some("builtin")));
+        assert_eq!(class(&t, "Nothing here"), (OTHER.to_string(), None));
+        let t = table(&format!("[findings]\nbuiltin_classes = false\n{text}")).unwrap();
+        assert_eq!(t.len(), 2);
+        assert_eq!(class(&t, "Typed text lost").1, None);
+        assert!(table("[findings]\nbuiltin_classes = false\n").unwrap().is_empty());
+        assert_eq!(table("[findings]\nclass = []\n").unwrap().len(), CLASSES.len());
+        assert_eq!(table("[findings]\nbuiltin_classes = true\n").unwrap().len(), CLASSES.len());
+        // A built-in name is free once the built-in table is left out.
+        let own = format!(
+            "[findings]\nbuiltin_classes = false\n[[findings.class]]\nname = \"{}\"\nkeywords = ['x']\n",
+            CLASSES[0].0
+        );
+        assert_eq!(table(&own).unwrap()[0].name, CLASSES[0].0);
+    }
+
+    #[test]
+    fn problems_in_order() {
+        let c = |body: &str| format!("[[findings.class]]\n{body}\n");
+        let ok = "name = \"A\"\nkeywords = ['a']";
+        let cases = [
+            ("findings = 1".to_string(), "[findings] is not a table"),
+            ("[[findings]]\nx = 1".to_string(), "[findings] is not a table"),
+            ("[findings]\nzz = 1\nbuiltin_classes = 3\nb = 2".to_string(), "unknown key b"),
+            ("[findings]\nbuiltin_classes = \"no\"\nclass = 1".to_string(), "builtin_classes is not a boolean"),
+            ("[findings]\nclass = 1".to_string(), "class is not an array of tables"),
+            ("[findings]\nclass = [{name = \"A\", keywords = ['a']}, 2]".to_string(), "class is not an array of tables"),
+            (c("x = 1\nkeywords = 2"), "class 1: unknown key x"),
+            (c("keywords = ['a']"), "class 1: name is missing"),
+            (c("name = 1"), "class 1: name is not a string"),
+            (c("name = \" \\t \""), "class 1: name is empty"),
+            (c("name = \"\""), "class 1: name is empty"),
+            (c("name = \"a\\u007fb\""), "class 1: name has a control character"),
+            (c("name = \"Other\""), "class 1: name Other is already a class"),
+            (format!("{}{}", c(ok), c(ok)), "class 2: name A is already a class"),
+            (c(&format!("name = \"{}\"", CLASSES[6].0)), "class 1: name Markdown, MDX and link handling (a syntax form that slips past a check) is already a class"),
+            (c("name = \"A\""), "class 1: keywords is missing"),
+            (c("name = \"A\"\nkeywords = 'a'"), "class 1: keywords is not an array"),
+            (c("name = \"A\"\nkeywords = []"), "class 1: keywords is empty"),
+            (c("name = \"A\"\nkeywords = ['a', 1, '']"), "class 1: keyword 2 is not a string"),
+            (c("name = \"A\"\nkeywords = ['a', '', 1]"), "class 1: keyword 2 is empty"),
+            (c("name = \"A\"\nkeywords = ['a', '(', 1]"), "class 1: keyword 2 is not a valid pattern"),
+            (c("name = \"A\"\nkeywords = ['a{100000}{100000}']"), "class 1: keyword 1 is not a valid pattern"),
+            (format!("{}{}", c("name = \"A\"\nkeywords = ['(']"), c("name = 1")), "class 1: keyword 1 is not a valid pattern"),
+            (format!("{}{}", c(ok), c("name = \"B\"\nkeywords = ['[']")), "class 2: keyword 1 is not a valid pattern"),
+        ];
+        for (text, want) in cases {
+            assert_eq!(table(&text).err().as_deref(), Some(want), "{text}");
+        }
+        assert_eq!(invalid("x"), "[findings] in .shipcraft.toml is invalid: x");
+    }
+
+    #[test]
+    fn key_escaping() {
+        assert_eq!(key_name("a-B_9"), "a-B_9");
+        assert_eq!(key_name("a b"), "\"a b\"");
+        assert_eq!(key_name("a\nb\u{1b}"), "\"a\\nb\\u001b\"");
+        assert_eq!(key_name("ção"), "\"ção\"");
+        assert_eq!(key_name(""), "\"\"");
+        let t = "[findings]\n\"z\\n\" = 1\n\"a.b\" = 2\n";
+        assert_eq!(table(t).err().as_deref(), Some("unknown key \"a.b\""));
+        let t = "[[findings.class]]\n\"\\u001b\" = 1\n";
+        assert_eq!(table(t).err().as_deref(), Some("class 1: unknown key \"\\u001b\""));
     }
 
     #[test]

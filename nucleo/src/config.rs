@@ -23,7 +23,7 @@ use paths::{normal_globs, normal_path};
 pub use pr::NewDependencies;
 use pr::Pr;
 use reading::{check_legacy_keys, not_toml};
-use report::check_report;
+use report::{check_findings, check_report};
 pub use report::{report_invalid, report_release_tags};
 use review::{check_retry_wait, Revisao};
 pub use review::{check_review_after, check_review_guide};
@@ -128,6 +128,8 @@ impl Config {
         let mut config = Config::parse_before_guide(text)?;
         // Item 102: after every check that refused before it.
         config.revisao.guide = crate::review_guide::check(text)?;
+        // Item 122: last, after the guide.
+        check_findings(text)?;
         Ok(config)
     }
 
