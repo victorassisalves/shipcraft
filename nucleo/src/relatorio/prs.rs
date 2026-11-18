@@ -150,7 +150,7 @@ fn limit(sized: &[(u64, &MergedPr)]) -> Value {
 
 /// The ISO 8601 week (`YYYY-Www`) of the UTC day of a Unix time; none
 /// outside `[0, 10000-01-01T00:00:00Z)`.
-fn iso_week(t: f64) -> Option<String> {
+pub(super) fn iso_week(t: f64) -> Option<String> {
     if !(0.0..253_402_300_800.0).contains(&t) {
         return None;
     }

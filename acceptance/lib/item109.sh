@@ -162,13 +162,13 @@ elif case=='v1-109.text-escape':
 elif case=='v1-109.order-size':
  rs=[row(layer='red',lock='A',result='passed',at=1),row(layer='close',lock='A',result='passed',at=2),row(layer='pr',lock='A',locks=['A'],pr=97,product_lines=501,warn_lines=500),row(layer='merge',lock='A',locks=['A'],result='passed',base='main',default_branch='main'),row(),green()]
  raw=wire(rs)+b'{broken109\n';s=report(raw);t=report(raw,args=())
- assert [r['kind'] for r in map(json.loads,s.split('\n')[:-1])]==['meta','lock','day','size','reds','dora','gap'],s
- ls=t.split('\n');i=next(i for i,l in enumerate(ls) if l.startswith('reds:'));assert ls[i-1].startswith('size:') and ls[i+1]=='DORA',t
+ assert [r['kind'] for r in map(json.loads,s.split('\n')[:-1])]==['meta','lock','day','size','reds','reds_week','dora','gap'],s
+ ls=t.split('\n');i=next(i for i,l in enumerate(ls) if l.startswith('reds:'));assert ls[i-1].startswith('size:') and ls[i+1].startswith('reds 1970-W01:') and ls[i+2]=='DORA',t
 elif case=='v1-109.order-day':
  rs=[row(layer='red',lock='A',result='passed',at=1),row(layer='merge',lock='A',locks=['A'],result='passed',base='main',default_branch='main'),row(),green()]
  s=report(rs);t=report(rs,args=())
- assert [r['kind'] for r in map(json.loads,s.split('\n')[:-1])]==['meta','lock','day','reds','dora'],s
- ls=t.split('\n');i=next(i for i,l in enumerate(ls) if l.startswith('reds:'));assert ls[i-1].startswith('day ') and ls[i+1]=='DORA',t
+ assert [r['kind'] for r in map(json.loads,s.split('\n')[:-1])]==['meta','lock','day','reds','reds_week','dora'],s
+ ls=t.split('\n');i=next(i for i,l in enumerate(ls) if l.startswith('reds:'));assert ls[i-1].startswith('day ') and ls[i+1].startswith('reds 1970-W01:') and ls[i+2]=='DORA',t
 elif case=='v1-109.since':
  rs=[row(at=1),green(at=2)];s=report(rs,args=('--json','--since','v2.0.0'));t=report(rs,args=('--since','v2.0.0'))
  assert objects(s,'dora')[0]['deploys']['n']==1,s

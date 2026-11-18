@@ -1,7 +1,8 @@
-//! The size, reds and review lines from the run log (items 107, 109, 112).
+//! The size, reds and review lines from the run log (items 107, 109, 112, 123).
 
 use super::flow::merge_counts;
-use super::rows::{is, num, str_of};
+use super::prs::iso_week;
+use super::rows::{at, is, num, str_of};
 use super::Row;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -53,6 +54,30 @@ pub(super) fn measured(rows: &[Row]) -> (BTreeMap<u64, (u64, u64)>, BTreeSet<u64
 /// green `ci` row on the same commit followed, in the file's order; None when
 /// no red row exists. `at`, `branch`, `lock`, `locks` and `failed_count` are not read.
 pub(super) fn reds(rows: &[Row]) -> Option<Value> {
+    tally("reds", &red_rows(rows))
+}
+
+/// Item 123: the `reds_week` lines, item 109's reading over the red rows of
+/// each ISO week of their `at` (item 120's rule), earliest week first; a red
+/// row without a week is in none.
+pub(super) fn reds_weeks(rows: &[Row]) -> Vec<Value> {
+    let mut weeks: BTreeMap<String, Vec<(&Row, bool)>> = BTreeMap::new();
+    for red in red_rows(rows) {
+        if let Some(week) = at(red.0).and_then(iso_week) {
+            weeks.entry(week).or_default().push(red);
+        }
+    }
+    let mut lines = Vec::new();
+    for (week, reds) in weeks {
+        let mut line = tally("reds_week", &reds).expect("a week has a red row");
+        line["week"] = json!(week);
+        lines.push(line);
+    }
+    lines
+}
+
+/// Item 109's red rows, in the file's order, each with whether it is green again.
+fn red_rows(rows: &[Row]) -> Vec<(&Row, bool)> {
     fn commit(r: &Row) -> Option<&str> {
         r.get("commit").and_then(Value::as_str).filter(|c| !c.is_empty())
     }
@@ -70,14 +95,20 @@ pub(super) fn reds(rows: &[Row]) -> Option<Value> {
             last_green.insert(commit(row).expect("green rows have a commit"), i);
         }
     }
-    let (mut suite_red, mut green_again, mut named) = (0usize, 0usize, 0usize);
+    let again =
+        |i: usize, row: &Row| last_green.get(commit(row).expect("red rows have a commit")).is_some_and(|g| *g > i);
+    rows.iter().enumerate().filter(|(_, r)| red(r)).map(|(i, row)| (row, again(i, row))).collect()
+}
+
+/// Item 109's counts over some red rows; None when there are none.
+fn tally(kind: &str, reds: &[(&Row, bool)]) -> Option<Value> {
+    if reds.is_empty() {
+        return None;
+    }
+    let (mut green_again, mut named) = (0usize, 0usize);
     let mut secs = 0.0f64;
     let mut cases: BTreeMap<&str, usize> = BTreeMap::new();
-    for (i, row) in rows.iter().enumerate().filter(|(_, r)| red(r)) {
-        suite_red += 1;
-        if !last_green.get(commit(row).expect("red rows have a commit")).is_some_and(|g| *g > i) {
-            continue;
-        }
+    for (row, _) in reds.iter().filter(|(_, again)| *again) {
         green_again += 1;
         secs += row.get("secs").and_then(Value::as_f64).filter(|s| *s >= 0.0).unwrap_or(0.0);
         if let Some(failed) = row.get("failed").and_then(Value::as_array) {
@@ -88,16 +119,13 @@ pub(super) fn reds(rows: &[Row]) -> Option<Value> {
             }
         }
     }
-    if suite_red == 0 {
-        return None;
-    }
     let mut top: Vec<(&str, usize)> = cases.into_iter().collect();
     // Most rows first; the map gave byte order, and the sort is stable.
     top.sort_by_key(|a| std::cmp::Reverse(a.1));
     let cases: Vec<Value> = top.into_iter().take(5).map(|(id, n)| json!({"id": id, "rows": n})).collect();
     Some(json!({
-        "kind": "reds", "suite_red": suite_red, "green_again": green_again,
-        "green_again_share": num(green_again as f64 / suite_red as f64),
+        "kind": kind, "suite_red": reds.len(), "green_again": green_again,
+        "green_again_share": num(green_again as f64 / reds.len() as f64),
         "green_again_secs": num(secs), "named": named, "cases": cases,
     }))
 }
@@ -139,4 +167,70 @@ pub(super) fn round_pr(row: &Row) -> Option<u64> {
         return None;
     }
     row.get("pr").and_then(Value::as_u64).filter(|n| *n > 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn log(lines: &[Value]) -> Vec<Row> {
+        lines.iter().map(|v| v.as_object().cloned().expect("an object")).collect()
+    }
+
+    fn red(at: Value, commit: &str, secs: f64, failed: &[&str]) -> Value {
+        json!({"layer": "ci", "result": "refused", "code": "suite-red", "commit": commit, "at": at,
+               "secs": secs, "failed": failed})
+    }
+
+    fn green(commit: &str) -> Value {
+        json!({"layer": "ci", "result": "passed", "commit": commit, "at": 0})
+    }
+
+    #[test]
+    fn reds_weeks_split_item_109s_reading_by_the_red_rows_iso_week() {
+        // 2026-11-16 (Monday, W47) and 2026-11-15 (Sunday, W46); 1970-01-01 is W01.
+        let (w46, w47) = (1_794_787_199.0, 1_794_787_200.0);
+        let rows = log(&[
+            red(json!(w47), "a", 10.0, &["t1", "t2"]),
+            red(json!(w46), "b", 2.5, &[]),
+            red(json!(100), "c", 4.0, &["t1"]),
+            red(json!("x"), "a", 7.0, &["t9"]),
+            red(json!(-1), "a", 1.0, &[]),
+            red(json!(253_402_300_800u64), "a", 1.0, &[]),
+            json!({"layer": "ci", "result": "refused", "code": "suite-red", "commit": "a", "secs": 1}),
+            green("a"),
+            green("b"),
+        ]);
+        let weeks = reds_weeks(&rows);
+        let names: Vec<&str> = weeks.iter().map(|w| w["week"].as_str().unwrap()).collect();
+        assert_eq!(names, ["1970-W01", "2026-W46", "2026-W47"]);
+        assert_eq!(
+            weeks[0],
+            json!({"kind": "reds_week", "week": "1970-W01", "suite_red": 1, "green_again": 0,
+                   "green_again_share": 0, "green_again_secs": 0, "named": 0, "cases": []})
+        );
+        assert_eq!(weeks[1]["green_again_secs"], json!(2.5));
+        assert_eq!(weeks[1]["named"], 1);
+        assert_eq!(weeks[2]["cases"], json!([{"id": "t1", "rows": 1}, {"id": "t2", "rows": 1}]));
+        // Rows without a week count in `reds` only.
+        let total = reds(&rows).unwrap();
+        assert_eq!(total["suite_red"], 7);
+        let sum = |key: &str| weeks.iter().map(|w| w[key].as_u64().unwrap()).sum::<u64>();
+        assert_eq!((sum("suite_red"), sum("green_again")), (3, 2));
+        assert_eq!(total["green_again"], 6);
+        // No red row, or none with a week: no week line.
+        assert!(reds_weeks(&log(&[green("a")])).is_empty());
+        assert!(reds_weeks(&log(&[red(json!(null), "a", 1.0, &[])])).is_empty());
+    }
+
+    #[test]
+    fn reds_week_text_is_the_reds_line_with_its_week() {
+        let rows = log(&[red(json!(100), "a", 3723.0, &["a\"b"]), green("a")]);
+        let lines: Vec<Value> = reds(&rows).into_iter().chain(reds_weeks(&rows)).collect();
+        assert_eq!(
+            super::super::text::text(&lines),
+            "reds: 1 suite-red, 1 green again on the same commit (100%), 1 h 2 min 3 s of CI; cases named in 1: \"a\\\"b\" (1)\n\
+             reds 1970-W01: 1 suite-red, 1 green again on the same commit (100%), 1 h 2 min 3 s of CI; cases named in 1: \"a\\\"b\" (1)\n"
+        );
+    }
 }
