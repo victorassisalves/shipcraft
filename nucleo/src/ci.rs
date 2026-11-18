@@ -36,7 +36,12 @@ pub fn run(repo: &Repo, base: &str, pr: bool, row: &mut medicao::CiRow) -> Resul
     let head_config = Config::at(repo, &head)?;
     // Item 1, rule 3: the range is judged by the config of its base (the PR's
     // base branch); a change to `.shipcraft.toml` counts only once it is in the base.
-    let Some(config) = Config::at(repo, &Snapshot::Commit(base.clone()))?.or(head_config) else {
+    let base_config = Config::at(repo, &Snapshot::Commit(base.clone()))?;
+    // Item 128: a base with no config is judged by HEAD's, and `ci` says so.
+    if base_config.is_none() && head_config.is_some() {
+        println!("shipcraft: the base {} has no {CONFIG_FILE}, so this range is judged by HEAD's (a first install is judged by the config it adds).", short(&base));
+    }
+    let Some(config) = base_config.or(head_config) else {
         return crate::config::no_config();
     };
     let commits = repo.commits_since(&base)?;
