@@ -58,7 +58,7 @@ def state(expected=1):
  for name,root in current:
   prefix=(name+':') if name else ''
   for p in Path(root+'/tests').glob('test_*.py'):
-   if narrowed and str(p)!='core/tests/test_core.py': continue
+   if narrowed and (str(p)=='core/tests/test_keep.py' if mode=='suites-base-missing' else str(p)!='core/tests/test_core.py'): continue
    if mode=='ci-longest' and root=='api': continue
    for function in re.findall(r'^def (test_\w+)\(',p.read_text(),re.M):
     suffixes=['[%02d]'%i for i in range(40)] if mode=='files-many' and function=='test_anchor' else ['']
@@ -251,6 +251,7 @@ else:
   assert (r['selection'],r['selected_files'],r['fallback'])==('changed',1,None),r
  if mode=='files-all': assert (r['selection'],r['selected_files'],r['fallback'])==('all',0,'--all'),r
  if mode=='files-config': assert (r['selection'],r['selected_files'],r['fallback'])==('all',0,'config changed'),r
+ if mode=='suites-base-missing': assert r['selection']=='changed' and r['fallback'] is None,r
  if mode=='suites-no-base': assert (r['selection'],r['selected_files'],r['fallback'])==('all',0,'config changed'),r
  if mode!='stderr-closed' and not ci: warnings(p,paths,() if mode=='suites-redo-same' else absent,ref,many=mode=='files-many')
 
