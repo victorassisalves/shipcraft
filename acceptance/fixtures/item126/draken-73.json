@@ -1,0 +1,19 @@
+[
+ [
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nCHANGES REQUESTED at 0000000000000000000000000000000000000000\n\nBlocking: 1\n\n### Comandos e códigos de saída\n\n### Bloqueante 1 — caminho com espaços aborta o globalSetup\n\n**Local:** `src/editorial-mcp/tests/helpers/firestore-emulator.ts:59–60`.\n\n### Notas não bloqueantes\n\n### Cenários próprios\n"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nAPPROVE at 0000000000000000000000000000000000000000\n\nBlocking: 0\n"
+  },
+  {
+   "body": "(other comment)"
+  }
+ ]
+]

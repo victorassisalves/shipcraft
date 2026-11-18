@@ -1,0 +1,37 @@
+[
+ [
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nCHANGES REQUESTED at 0000000000000000000000000000000000000000\n\nBlocking: 3\n\n**Reproduction setup**\n\n**1. Search results cross the live identity boundary**\n\nLocation: `app/packages/web/src/app.tsx:193`, interacting with the unkeyed `Palette` at line 222.\n\n**2. Live guest demotion silently destroys settings drafts**\n\nLocation: `app/packages/web/src/app.tsx:156–158`, interacting with:\n\n**3. Live demotion triggers the guest redirect and discards New project input**\n\nLocation: `app/packages/web/src/app.tsx:158`, interacting with `screens/S15-projects/Projects.tsx:86–91`.\n\n**Notes:** No additional non-blocking findings.\n\n**Own checks**\n"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nCHANGES REQUESTED at 0000000000000000000000000000000000000000\n\nBlocking: 3\n\n## Reproduction setup\n\n## Blocking 1 — A previous person’s creation response destroys the current person’s draft\n\n**Location:** `app/packages/web/src/app.tsx:193`, interacting with `screens/S15-projects/NewProject.tsx:57` and `screens/S21-onboarding/ProjectForm.tsx:23`.\n\n**Observed:**\n\n## Blocking 2 — A save response erases the newer Appearance draft promised by the demotion notice\n\n**Location:** `app/packages/web/src/screens/S20-settings/Appearance.tsx:93`, interacting with the unconditional `setName` at line 109 and retained-form rendering at line 35.\n\n**Observed:**\n\n## Blocking 3 — Live demotion silently discards a Default Approval edit\n\n**Location:** `app/packages/web/src/screens/S18-members/Members.tsx:36` and `:45`.\n\n**Observed:**\n\n## Notes — non-blocking\n\n## Own checks\n"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nCHANGES REQUESTED at 0000000000000000000000000000000000000000\n\nBlocking: 2\n\n### Commands and exit codes\n\n### Reproduction setup\n\n### Blocking 1 — A previous person’s self-removal response destroys the current person’s draft\n\n**Location:** `app/packages/web/src/app.tsx:55,193`, interacting with `app/packages/web/src/screens/S18-members/Members.tsx:115–120`.\n\n**Reproduction:**\n\n**Observed, exit 1:**\n\n### Blocking 2 — A late tag rename exposes workspace data to the next person\n\n**Location:** `app/packages/web/src/app.tsx:55,193,224`, interacting with `app/packages/web/src/screens/S20-settings/Tags.tsx:57–59,152`.\n\n**Reproduction:**\n\n**Observed, exit 1:**\n\n### Notes — non-blocking\n\n### Own checks\n"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nCHANGES REQUESTED at 0000000000000000000000000000000000000000\n\nBlocking: 2\n\n## 1. Live demotion permanently deletes a paragraph being typed\n\n**Location:** `app/packages/web/src/app.tsx:158`, propagating the changed permission at line 199 to `screens/S02-page/PageEditor.tsx:192`.\n\n**Observed output:**\n\n## 2. A completed-write toast exposes the previous account’s project name\n\n**Location:** `app/packages/web/src/app.tsx:55`; the surviving toast is rendered outside the identity boundary at line 224.\n\n**Observed output:**\n\n## Notes — non-blocking\n\n## Own checks\n"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nAPPROVE at 0000000000000000000000000000000000000000\n\nBlocking: 0\n\n### Commands and exit codes\n\n### Notes — non-blocking\n\n### Own checks\n"
+  },
+  {
+   "body": "(other comment)"
+  }
+ ]
+]

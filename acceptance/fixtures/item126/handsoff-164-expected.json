@@ -1,0 +1,82 @@
+[
+  {
+    "kind": "finding",
+    "pr": 164,
+    "class": "Typed input lost (leave, reload, refresh over a dirty form)",
+    "class_source": "builtin",
+    "title": "Live demotion triggers the guest redirect and discards New project input",
+    "location": "`app/packages/web/src/app.tsx:158`, interacting with `screens/S15-projects/Projects.tsx:86–91`."
+  },
+  {
+    "kind": "finding",
+    "pr": 164,
+    "class": "Typed input lost (leave, reload, refresh over a dirty form)",
+    "class_source": "builtin",
+    "title": "Live demotion silently discards a Default Approval edit",
+    "location": "`app/packages/web/src/screens/S18-members/Members.tsx:36` and `:45`."
+  },
+  {
+    "kind": "finding",
+    "pr": 164,
+    "class": "Typed input lost (leave, reload, refresh over a dirty form)",
+    "class_source": "builtin",
+    "title": "Live demotion permanently deletes a paragraph being typed",
+    "location": "`app/packages/web/src/app.tsx:158`, propagating the changed permission at line 199 to `screens/S02-page/PageEditor.tsx:192`."
+  },
+  {
+    "kind": "finding",
+    "pr": 164,
+    "class": "Session, workspace or project boundary (sign-out, another user, slug, tenant)",
+    "class_source": "builtin",
+    "title": "Search results cross the live identity boundary",
+    "location": "`app/packages/web/src/app.tsx:193`, interacting with the unkeyed `Palette` at line 222."
+  },
+  {
+    "kind": "finding",
+    "pr": 164,
+    "class": "Session, workspace or project boundary (sign-out, another user, slug, tenant)",
+    "class_source": "builtin",
+    "title": "A late tag rename exposes workspace data to the next person",
+    "location": "`app/packages/web/src/app.tsx:55,193,224`, interacting with `app/packages/web/src/screens/S20-settings/Tags.tsx:57–59,152`."
+  },
+  {
+    "kind": "finding",
+    "pr": 164,
+    "class": "Order and overlap (late or out-of-order response, overlapping saves, retry, during a refresh)",
+    "class_source": "builtin",
+    "title": "A save response erases the newer Appearance draft promised by the demotion notice",
+    "location": "`app/packages/web/src/screens/S20-settings/Appearance.tsx:93`, interacting with the unconditional `setName` at line 109 and retained-form rendering at line 35."
+  },
+  {
+    "kind": "finding",
+    "pr": 164,
+    "class": "Signature, review and publish state (draft, live, export, deploy)",
+    "class_source": "builtin",
+    "title": "Live guest demotion silently destroys settings drafts",
+    "location": "`app/packages/web/src/app.tsx:156–158`, interacting with:"
+  },
+  {
+    "kind": "finding",
+    "pr": 164,
+    "class": "Signature, review and publish state (draft, live, export, deploy)",
+    "class_source": "builtin",
+    "title": "A previous person’s creation response destroys the current person’s draft",
+    "location": "`app/packages/web/src/app.tsx:193`, interacting with `screens/S15-projects/NewProject.tsx:57` and `screens/S21-onboarding/ProjectForm.tsx:23`."
+  },
+  {
+    "kind": "finding",
+    "pr": 164,
+    "class": "Signature, review and publish state (draft, live, export, deploy)",
+    "class_source": "builtin",
+    "title": "A previous person’s self-removal response destroys the current person’s draft",
+    "location": "`app/packages/web/src/app.tsx:55,193`, interacting with `app/packages/web/src/screens/S18-members/Members.tsx:115–120`."
+  },
+  {
+    "kind": "finding",
+    "pr": 164,
+    "class": "Other",
+    "class_source": null,
+    "title": "A completed-write toast exposes the previous account’s project name",
+    "location": "`app/packages/web/src/app.tsx:55`; the surviving toast is rendered outside the identity boundary at line 224."
+  }
+]

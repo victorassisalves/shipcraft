@@ -59,7 +59,7 @@ const CLASSES: [(&str, &str); 11] = [
 const OTHER: &str = "Other";
 /// The comment `pr` and `review --pr` post with a verdict (item 38).
 const REVIEW: &str = "**shipcraft: review executed by ";
-const LOCATIONS: [&str; 4] = ["Location:", "Locations:", "**Location:**", "**Locations:**"];
+const LOCATIONS: [&str; 6] = ["Location:", "Locations:", "**Location:**", "**Locations:**", "Local:", "**Local:**"];
 
 /// Item 122: one class of the table in effect; `Other` is not one.
 pub struct Class {
@@ -219,6 +219,7 @@ fn ledger(asker: &mut Asker, classes: &[Class], as_json: bool, since: Option<u64
     prs.dedup();
     let mut groups: Vec<Vec<Finding>> = (0..=classes.len()).map(|_| Vec::new()).collect();
     let mut unread: Vec<(u64, String)> = Vec::new();
+    let mut mismatches: Vec<(u64, Mismatch)> = Vec::new();
     for pr in prs {
         let path = format!("repos/{{owner}}/{{repo}}/issues/{pr}/comments?per_page=100");
         let bodies = match asker.ask(&["api", "--paginate", "--slurp", &path], bodies) {
@@ -230,9 +231,10 @@ fn ledger(asker: &mut Asker, classes: &[Class], as_json: bool, since: Option<u64
             }
         };
         for body in bodies.iter().filter(|b| b.starts_with(REVIEW)) {
-            let (found, warning) = comment(body);
-            if let Some(warning) = warning {
-                eprintln!("report: PR {pr}: {warning}");
+            let (found, mismatch) = comment(body);
+            if let Some((d, k)) = mismatch {
+                eprintln!("report: PR {pr}: the review says Blocking: {d}, {k} Blocking heading(s) read");
+                mismatches.push((pr, (d, k)));
             }
             for (title, location) in found {
                 groups[class_of(classes, &title)].push(Finding { pr, title, location });
@@ -260,6 +262,11 @@ fn ledger(asker: &mut Asker, classes: &[Class], as_json: bool, since: Option<u64
     if !unread.is_empty() {
         let prs: Vec<String> = unread.iter().map(|(pr, reason)| format!("PR {pr} ({reason})")).collect();
         out += &format!("Not read: {}.\n\n", prs.join(", "));
+    }
+    if !mismatches.is_empty() {
+        let prs: Vec<String> =
+            mismatches.iter().map(|(pr, (d, k))| format!("PR {pr} (Blocking: {d}, {k} read)")).collect();
+        out += &format!("Count mismatch: {}.\n\n", prs.join(", "));
     }
     for ((name, _), list) in names.zip(&groups).filter(|(_, list)| !list.is_empty()) {
         out += &format!("## {name} ({})\n\n", list.len());
@@ -295,40 +302,62 @@ fn bodies(answer: &Value) -> Option<Vec<String>> {
     Some(out)
 }
 
+/// Item 126 point 2: the end line; no line from it on is a candidate.
+const END: &str = r"(?i)^(?:#{2,4} +(?:Notes\b|Notas\b|Own checks\b|Non-blocking\b|Não bloqueante)|\*\*(?:Notes\b|Notas\b|Own checks\b|Non-blocking\b|Não bloqueante)[^*]*\*\*)";
+/// A count check that warns: the declared `<d>` as written, the findings kept.
+type Mismatch = (String, usize);
+
 /// A review comment's findings (title, location), in order, and the count
-/// warning when its first `Blocking: <d>` line differs from the headings read.
-fn comment(body: &str) -> (Vec<(String, Option<String>)>, Option<String>) {
+/// mismatch when its first `Blocking: <d>` line differs from the findings kept.
+fn comment(body: &str) -> (Vec<(String, Option<String>)>, Option<Mismatch>) {
+    static END_LINE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    let end_line = END_LINE.get_or_init(|| Regex::new(END).expect("the end-line pattern"));
     let lines: Vec<&str> =
         body.split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l).trim_end_matches([' ', '\t'])).collect();
-    let heads: Vec<(usize, &str)> = lines.iter().enumerate().filter_map(|(i, l)| Some((i, heading(l)?))).collect();
-    let found: Vec<(String, Option<String>)> = heads
-        .iter()
-        .enumerate()
-        .map(|(j, &(i, rest))| {
-            let end = heads.get(j + 1).map_or(lines.len(), |h| h.0);
-            (title(rest), location(&lines[i + 1..end]))
-        })
-        .collect();
+    let end = lines.iter().position(|l| end_line.is_match(l)).unwrap_or(lines.len());
+    let heads: Vec<(usize, bool, &str)> =
+        lines[..end].iter().enumerate().filter_map(|(i, l)| heading(l).map(|(k, r)| (i, k, r))).collect();
     let declared = lines.iter().find_map(|l| {
         let d = l.strip_prefix("Blocking: ")?;
         ((1..=19).contains(&d.len()) && d.bytes().all(|b| b.is_ascii_digit())).then_some(d)
     });
-    let warning = declared
-        .filter(|d| d.parse::<u64>().ok() != Some(found.len() as u64))
-        .map(|d| format!("the review says Blocking: {d}, {} Blocking heading(s) read", found.len()));
-    (found, warning)
+    let numbered =
+        heads.iter().all(|h| !h.1) && declared.and_then(|d| d.parse::<u64>().ok()) == Some(heads.len() as u64);
+    let found: Vec<(String, Option<String>)> = heads
+        .iter()
+        .enumerate()
+        .filter(|(_, h)| h.1 || numbered)
+        .map(|(j, &(i, _, rest))| {
+            let stop = heads.get(j + 1).map_or(end, |h| h.0);
+            (title(rest), location(&lines[i + 1..stop]))
+        })
+        .collect();
+    let mismatch =
+        declared.filter(|d| d.parse::<u64>().ok() != Some(found.len() as u64)).map(|d| (d.to_string(), found.len()));
+    (found, mismatch)
 }
 
-/// A Blocking heading's `<rest>`: `##`-`####`, spaces, `Blocking`, spaces,
-/// digits, rest; or `**Blocking`, spaces, digits, a rest with no `*`, `**`.
-fn heading(line: &str) -> Option<&str> {
+const WORDS: [&str; 3] = ["Blocking", "Bloqueante", "Bloqueio"];
+const SEPARATORS: [char; 4] = [':', '-', '—', '–'];
+
+/// A candidate heading (`##`-`####` and spaces, or `**`, a rest with no `*`
+/// and `**`): whether it is named, and the text its title is read from.
+fn heading(line: &str) -> Option<(bool, &str)> {
     let hashes = line.bytes().take_while(|&b| b == b'#').count();
     if (2..=4).contains(&hashes) {
-        let after = line[hashes..].strip_prefix(' ')?.trim_start_matches(' ');
-        return number(after.strip_prefix("Blocking")?);
+        return form(line[hashes..].strip_prefix(' ')?.trim_start_matches(' '));
     }
-    let inner = line.strip_prefix("**Blocking")?.strip_suffix("**")?;
-    number(inner).filter(|rest| !rest.contains('*'))
+    form(line.strip_prefix("**")?.strip_suffix("**")?).filter(|(_, rest)| !rest.contains('*'))
+}
+
+/// `<word> <n><rest>`, `<word><sep><rest>` with a title, or `<n>. <rest>`.
+fn form(text: &str) -> Option<(bool, &str)> {
+    let Some(after) = WORDS.iter().find_map(|w| text.strip_prefix(w)) else {
+        let rest = text.trim_start_matches(|c: char| c.is_ascii_digit());
+        return Some((false, rest.strip_prefix(". ").filter(|_| rest.len() < text.len())?));
+    };
+    let sep = Some(after.trim_start_matches(' ')).filter(|r| r.starts_with(SEPARATORS) && !stripped(r).is_empty());
+    Some((true, number(after).or(sep)?))
 }
 
 /// One or more spaces, then one or more digits: what follows them.
@@ -338,12 +367,12 @@ fn number(text: &str) -> Option<&str> {
     (rest.len() < text.len()).then_some(rest)
 }
 
+fn stripped(rest: &str) -> &str {
+    rest.trim_start_matches([' ', '\t', ':', '.', '-', '—', '–']).trim_end_matches([' ', '\t'])
+}
+
 fn title(rest: &str) -> String {
-    let title = rest.trim_start_matches([' ', '\t', ':', '.', '-', '—', '–']).trim_end_matches([' ', '\t']);
-    match title {
-        "" => "(no title)".to_string(),
-        title => title.to_string(),
-    }
+    Some(stripped(rest)).filter(|t| !t.is_empty()).unwrap_or("(no title)").to_string()
 }
 
 /// The rest of the first location line, when not empty.
@@ -367,34 +396,24 @@ mod tests {
 
     #[test]
     fn heading_grammar() {
-        let yes = [
-            ("## Blocking 1 — Title", " — Title"),
-            ("### Blocking 2: Title", ": Title"),
-            ("#### Blocking 3", ""),
-            ("##   Blocking   12x", "x"),
-            ("**Blocking 1 — Title**", " — Title"),
-            ("**Blocking 4**", ""),
-        ];
-        for (line, rest) in yes {
-            assert_eq!(heading(line), Some(rest), "{line}");
+        // `<line>|<kind><rest>`: N named, D numbered.
+        let yes = "## Blocking 1 — Title|N — Title\n### Blocking 2: Title|N: Title\n#### Blocking 3|N\n\
+                   ##   Blocking   12x|Nx\n**Blocking 1 — Title**|N — Title\n**Blocking 4**|N\n\
+                   ### Bloqueio 1 — Prévia|N — Prévia\n## Bloqueante 2: Título|N: Título\n**Bloqueio 3**|N\n\
+                   ## Blocking: concurrent discard|N: concurrent discard\n**Bloqueante– x**|N– x\n\
+                   ### Blocking — Guest can pin|N— Guest can pin\n## Bloqueio-x|N-x\n## 1. Live demotion|DLive demotion\n\
+                   ####  12.  x|D x\n**1. Search results**|DSearch results\n**1. **|D";
+        for case in yes.split('\n') {
+            let (line, want) = case.split_once('|').unwrap();
+            let got = heading(line).map(|(k, r)| format!("{}{r}", if k { 'N' } else { 'D' }));
+            assert_eq!(got.as_deref(), Some(want), "{line}");
         }
-        let no = [
-            "## Blocking findings",
-            "**Blocking:**",
-            " ## Blocking 1 — x",
-            "- **Blocking 1** — x",
-            "Blocking: 4",
-            "# Blocking 1",
-            "##### Blocking 1",
-            "##Blocking 1",
-            "## blocking 1",
-            "##\tBlocking 1",
-            "## Blocking\t1",
-            "**Blocking 1 *bold* x**",
-            "**Blocking 1**x",
-            "**Blocking**",
-        ];
-        for line in no {
+        let no = "## Blocking findings\n**Blocking:**\n ## Blocking 1 — x\n- **Blocking 1** — x\nBlocking: 4\n\
+                  # Blocking 1\n##### Blocking 1\n##Blocking 1\n## blocking 1\n##\tBlocking 1\n## Blocking\t1\n\
+                  **Blocking 1 *bold* x**\n**Blocking 1**x\n**Blocking**\n## Blocking :\n**Blocking: - **\n\
+                  ## Bloqueios 1\n## bloqueio 1\n**Blocking: a *b***\n## 1.Title\n**1)** x\n1. Title\n# 1. x\n\
+                  ##1. x\n## 1 . x\n**1. *x***";
+        for line in no.split('\n') {
             assert_eq!(heading(line), None, "{line}");
         }
     }
@@ -417,6 +436,9 @@ mod tests {
         ] {
             assert_eq!(location(&["text", line, "Location: later"]), Some(at.to_string()), "{line}");
         }
+        assert_eq!(location(&["Local: d.rs", "Location: later"]), Some("d.rs".to_string()));
+        assert_eq!(location(&["x", "**Local:** `e.ts`"]), Some("`e.ts`".to_string()));
+        assert_eq!(location(&["**Localização:** f", "local: g"]), None);
         assert_eq!(location(&["Location:", "Location: later"]), None);
         assert_eq!(location(&[" Location: x", "location: y", "**Location**: z"]), None);
     }
@@ -425,15 +447,45 @@ mod tests {
     fn comment_reads_findings_and_checks_the_count() {
         let body = "**shipcraft: review executed by x**\r\nBlocking: 3\n## Blocking 1 — A \r\nLocation: one\n\
                     **Blocking 2 — B**\ntext\n### Blocking 3: C\n**Locations:** three\nBlocking: 9\n";
-        let (found, warning) = comment(body);
+        let (found, mismatch) = comment(body);
         let want = [("A", Some("one")), ("B", None), ("C", Some("three"))];
         let want: Vec<_> = want.iter().map(|(t, l)| (t.to_string(), l.map(str::to_string))).collect();
         assert_eq!(found, want);
-        assert_eq!(warning, None);
-        let (found, warning) = comment("Blocking: 02\n## Blocking 1 — A\nBlocking: 1");
+        assert_eq!(mismatch, None);
+        let (found, mismatch) = comment("Blocking: 02\n## Blocking 1 — A\nBlocking: 1");
         assert_eq!(found.len(), 1);
-        assert_eq!(warning.as_deref(), Some("the review says Blocking: 02, 1 Blocking heading(s) read"));
+        assert_eq!(mismatch, Some(("02".to_string(), 1)));
         assert_eq!(comment("Blocking: 1x\nBlocking:  1\n").1, None);
+    }
+
+    fn titles(body: &str) -> (Vec<String>, Option<Mismatch>) {
+        let (found, mismatch) = comment(body);
+        (found.into_iter().map(|(t, l)| format!("{t}@{}", l.unwrap_or_default())).collect(), mismatch)
+    }
+
+    #[test]
+    fn end_line_and_cap() {
+        let ends = "## Notes — non-blocking\n### Notas não bloqueantes\n**Own checks**\n#### NON-BLOCKING\n\
+                    **Notes:** No additional non-blocking findings.\n### Notes — não bloqueantes\n\
+                    ## NÃO BLOQUEANTE x\n**Notes** x **y**";
+        for end in ends.split('\n') {
+            let body = format!("## Blocking 1 — A\nLocal: a\n{end}\nLocal: late\n## Blocking 2 — B\nBlocking: 2");
+            assert_eq!(titles(&body), (vec!["A@a".into()], Some(("2".into(), 1))), "{end}");
+        }
+        for not_end in ["**Notes service down", "## Notesy", "# Notes", " ## Notes", "**Notes *x* y**"] {
+            let body = format!("## Blocking 1 — A\n{not_end}\n## Blocking 2 — B\n");
+            assert_eq!(titles(&body).0.len(), 2, "{not_end}");
+        }
+        let numbered = "## 1. A\nLocal: a\n**2. B**\n**Location:** b\n";
+        assert_eq!(titles(&format!("Blocking: 2\n{numbered}")), (vec!["A@a".into(), "B@b".into()], None));
+        assert_eq!(titles(&format!("{numbered}## Notes\nBlocking: 02")).0, ["A@a", "B@b"]);
+        assert_eq!(titles(numbered), (vec![], None));
+        assert_eq!(titles(&format!("Blocking: 3\n{numbered}")), (vec![], Some(("3".into(), 0))));
+        assert_eq!(titles(&format!("Blocking: 1\n{numbered}")), (vec![], Some(("1".into(), 0))));
+        let mixed = format!("Blocking: 3\n### Bloqueante 1 — N\n{numbered}Local: n\n");
+        assert_eq!(titles(&mixed), (vec!["N@".into()], Some(("3".into(), 1))));
+        let named = "Blocking: 1\n## Blocking: x\n**Bloqueio 4**\n**Local:** l\n";
+        assert_eq!(titles(named), (vec!["x@".into(), "(no title)@l".into()], Some(("1".into(), 2))));
     }
 
     fn table(text: &str) -> std::result::Result<Vec<Class>, String> {

@@ -1,0 +1,26 @@
+[
+  {
+    "kind": "finding",
+    "pr": 62,
+    "class": "Markdown, MDX and link handling (a syntax form that slips past a check)",
+    "class_source": "builtin",
+    "title": "Prévia ativa link para destino impedido de sair no build",
+    "location": "`src/editorial-mcp/src/mcp/server.ts:831–833`."
+  },
+  {
+    "kind": "finding",
+    "pr": 62,
+    "class": "Markdown, MDX and link handling (a syntax form that slips past a check)",
+    "class_source": "builtin",
+    "title": "Validação não cumpre o contrato de links malformados",
+    "location": "`src/editorial-mcp/src/publish/article-links.ts:8–10`, usado por `src/editorial-mcp/src/mcp/server.ts:815`."
+  },
+  {
+    "kind": "finding",
+    "pr": 62,
+    "class": "Markdown, MDX and link handling (a syntax form that slips past a check)",
+    "class_source": "builtin",
+    "title": "Âncora com parênteses deixa pontuação sobrando quando o destino não está publicado",
+    "location": "`src/editorial-mcp/src/publish/article-links.ts:8–16`."
+  }
+]
