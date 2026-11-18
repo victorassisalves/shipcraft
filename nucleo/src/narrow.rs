@@ -3,8 +3,8 @@
 //! suite instead when it cannot narrow safely. Item 60: `red --redo` adds
 //! the files that hold HEAD's lock cases.
 
-use crate::config::{self, Config, CONFIG_FILE};
-use crate::git::{git_in, Repo};
+use crate::config::{self, Config, CONFIG_FILE, LEGACY_FILE};
+use crate::git::{git_in, short, Repo};
 use crate::lock::Lock;
 use crate::refusal::short_list;
 use crate::suite;
@@ -66,23 +66,29 @@ pub struct Chosen {
     /// Item 65: the selected files (repository paths) that hold no case in
     /// their suite's own report, when the narrowed run stood. Not logged.
     pub support: BTreeSet<String>,
+    /// Item 129: the merge base's short id, which the `config changed` line names.
+    merge_base: Option<String>,
 }
 
 impl Chosen {
-    pub fn new(plan: &Plan, locked: usize) -> Chosen {
-        match plan {
-            Plan::All(why) => Chosen { selected: 0, locked, fallback: Some(*why), support: BTreeSet::new() },
-            Plan::Changed { files, .. } => {
-                Chosen { selected: *files, locked, fallback: None, support: BTreeSet::new() }
-            }
-        }
+    pub fn new(plan: &Plan, locked: usize, merge_base: Option<&str>) -> Chosen {
+        let (selected, fallback) = match plan {
+            Plan::All(why) => (0, Some(*why)),
+            Plan::Changed { files, .. } => (*files, None),
+        };
+        let merge_base = merge_base.map(|id| short(id).to_string());
+        Chosen { selected, locked, fallback, support: BTreeSet::new(), merge_base }
     }
 
     /// The line `red` prints before its usual lines.
     pub fn notice(&self) -> String {
-        match self.fallback {
-            Some(why) => format!("shipcraft: red ran every suite: {}", why.text()),
-            None => format!("shipcraft: red ran the changed test files: {} of {}", self.selected, self.locked),
+        match (self.fallback, &self.merge_base) {
+            // Item 129: the line names the file and the merge base it differs from.
+            (Some(Fallback::ConfigChanged), Some(id)) => format!(
+                "shipcraft: red ran every suite: config changed ({CONFIG_FILE} differs from the merge base {id})"
+            ),
+            (Some(why), _) => format!("shipcraft: red ran every suite: {}", why.text()),
+            (None, _) => format!("shipcraft: red ran the changed test files: {} of {}", self.selected, self.locked),
         }
     }
 
@@ -240,7 +246,7 @@ pub fn plan(
     if all {
         return Plan::All(Fallback::All);
     }
-    let chosen = changed.as_ref().map_err(|why| *why).and_then(|changed| select(repo, config, &changed.paths));
+    let chosen = changed.as_ref().map_err(|why| *why).and_then(|changed| select(repo, config, changed));
     let (mut selected, mut files) = match chosen {
         Ok(chosen) => chosen,
         Err(why) => return Plan::All(why),
@@ -341,19 +347,21 @@ type Selection = (Vec<BTreeSet<String>>, BTreeSet<String>);
 
 /// The selection among the changed paths, or the first reason to run every
 /// suite instead; the emptiness test is the caller's.
-fn select(repo: &Repo, config: &Config, changed: &[ChangedPath]) -> std::result::Result<Selection, Fallback> {
+fn select(repo: &Repo, config: &Config, changed: &Changed) -> std::result::Result<Selection, Fallback> {
     let suites = config.suites();
     let mut selected = vec![BTreeSet::new(); suites.len()];
     let mut files = BTreeSet::new();
     let mut why: Option<Fallback> = None;
     let mut fall = |reason: Fallback| why = Some(why.map_or(reason, |first| first.min(reason)));
-    for (at_base, path) in changed {
+    for (at_base, path) in &changed.paths {
         let Ok(path) = String::from_utf8(path.clone()) else {
             fall(Fallback::UnreadablePath);
             continue;
         };
         if path == CONFIG_FILE {
-            fall(Fallback::ConfigChanged);
+            if *at_base || legacy_at_base(repo, &changed.merge_base) {
+                fall(Fallback::ConfigChanged);
+            }
             continue;
         }
         let holders: Vec<usize> = (0..suites.len()).filter(|&i| suites[i].matches(&path)).collect();
@@ -378,5 +386,91 @@ fn select(repo: &Repo, config: &Config, changed: &[ChangedPath]) -> std::result:
     match why {
         Some(why) => Err(why),
         None => Ok((selected, files)),
+    }
+}
+
+/// Item 129: an added `.shipcraft.toml` installs Shipcraft unless the merge
+/// base holds the legacy `.sc2.toml`; a failed read counts as holding it.
+fn legacy_at_base(repo: &Repo, merge_base: &str) -> bool {
+    in_base_tree(repo, merge_base, &[LEGACY_FILE]).map_or(true, |held| !held.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::git::TempDir;
+    use std::process::Command;
+
+    fn git(root: &std::path::Path, args: &[&str]) -> String {
+        let out = Command::new("git")
+            .current_dir(root)
+            .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap().trim_end().to_string()
+    }
+
+    /// A repository whose one commit holds `files`; its id.
+    fn repo_with(dir: &TempDir, files: &[&str]) -> (Repo, String) {
+        let root = dir.path();
+        git(root, &["init", "-q"]);
+        for file in files {
+            fs::write(root.join(file), "x\n").unwrap();
+        }
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-q", "--allow-empty", "-m", "base"]);
+        (Repo::at_root(root), git(root, &["rev-parse", "HEAD"]))
+    }
+
+    fn config() -> Config {
+        Config::parse("[[suite]]\ncommand = \"true\"\nglobs = [\"tests/*.t\"]\n").unwrap()
+    }
+
+    fn added_config(merge_base: &str) -> Changed {
+        Changed {
+            merge_base: merge_base.to_string(),
+            paths: vec![(false, CONFIG_FILE.as_bytes().to_vec()), (false, b"tests/new.t".to_vec())],
+        }
+    }
+
+    #[test]
+    fn an_added_config_narrows_unless_the_merge_base_holds_the_legacy_file() {
+        let dir = TempDir::new("shipcraft-narrow").unwrap();
+        let (repo, base) = repo_with(&dir, &["a.t"]);
+        fs::create_dir_all(dir.path().join("tests")).unwrap();
+        fs::write(dir.path().join("tests/new.t"), "x\n").unwrap();
+        let (_, files) = select(&repo, &config(), &added_config(&base)).expect("an install narrows");
+        assert_eq!(files.into_iter().collect::<Vec<_>>(), ["tests/new.t"], "the config is never selected");
+
+        // At the merge base (modified), it is `config changed` with no read.
+        let modified = Changed { merge_base: "not-a-commit".to_string(), paths: vec![(true, CONFIG_FILE.into())] };
+        assert_eq!(select(&repo, &config(), &modified).err(), Some(Fallback::ConfigChanged));
+        // A failed read of the legacy file keeps the full run.
+        assert_eq!(select(&repo, &config(), &added_config("not-a-commit")).err(), Some(Fallback::ConfigChanged));
+
+        let legacy = TempDir::new("shipcraft-narrow").unwrap();
+        let (repo, base) = repo_with(&legacy, &[LEGACY_FILE]);
+        fs::create_dir_all(legacy.path().join("tests")).unwrap();
+        fs::write(legacy.path().join("tests/new.t"), "x\n").unwrap();
+        assert_eq!(select(&repo, &config(), &added_config(&base)).err(), Some(Fallback::ConfigChanged));
+    }
+
+    #[test]
+    fn the_config_changed_line_names_the_file_and_the_merge_base() {
+        let id = "0123456789abcdef0123456789abcdef01234567";
+        let chosen = Chosen::new(&Plan::All(Fallback::ConfigChanged), 4, Some(id));
+        assert_eq!(
+            chosen.notice(),
+            "shipcraft: red ran every suite: config changed (.shipcraft.toml differs from the merge base 0123456)"
+        );
+        let mut row = json!({});
+        chosen.record(&mut row);
+        assert_eq!(row["fallback"], "config changed");
+        let other = Chosen::new(&Plan::All(Fallback::NothingSelected), 4, Some(id));
+        assert_eq!(other.notice(), "shipcraft: red ran every suite: nothing selected");
+        let narrowed = Chosen::new(&Plan::Changed { selected: Vec::new(), files: 1 }, 4, Some(id));
+        assert_eq!(narrowed.notice(), "shipcraft: red ran the changed test files: 1 of 4");
     }
 }

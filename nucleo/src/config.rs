@@ -36,6 +36,8 @@ pub use suites::{owner, suite_names, Filtra, Suite};
 pub use version::{check_min, min_reaches, minimum_version, version_parts};
 
 pub const CONFIG_FILE: &str = ".shipcraft.toml";
+/// The configuration's name before Shipcraft 2.x.
+pub const LEGACY_FILE: &str = ".sc2.toml";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Refuse the old filename only in the content the command judges.
@@ -46,7 +48,7 @@ pub fn reject_legacy_file(repo: &Repo, snapshot: &Snapshot) -> Result<()> {
             _ => repo.read(snapshot, path).map(|bytes| bytes.is_some()),
         }
     };
-    if !exists(CONFIG_FILE)? && exists(".sc2.toml")? {
+    if !exists(CONFIG_FILE)? && exists(LEGACY_FILE)? {
         return refuse(
             "config-invalid",
             "the project has .sc2.toml but no .shipcraft.toml",

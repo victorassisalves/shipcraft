@@ -155,6 +155,7 @@ if not early:
   protected|={str(f) for f in Path('tests' if lang=='python' else 'src' if lang=='node' else '.').glob('*.py' if lang=='python' else '*.test.ts' if lang=='node' else '*_test.go') if f.name!='__init__.py'}
  n=0 if reason else len(selected)
  selection='shipcraft: red ran every suite: '+reason if reason else f'shipcraft: red ran the changed test files: {n} of {len(protected)}'
+ if warning: selection+=' (.shipcraft.toml differs from the merge base '+git('merge-base','HEAD',chosen)[:7]+')'
  want(combined.count(selection)==1,'missing/duplicate exact selection notice: '+selection)
  expected_notice=None if chosen in (None,'origin/HEAD') else f'shipcraft: red compared with {chosen} (origin/HEAD is missing)'
  if expected_notice:

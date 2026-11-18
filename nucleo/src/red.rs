@@ -67,7 +67,7 @@ pub fn run(
     let changed = narrow::changed(repo, &base);
     warn_outside_globs(repo, &config, &changed);
     let plan = narrow::plan(repo, &config, &changed, all, None);
-    let report = red_report(repo, &config, "shipcraft red", &base, plan, chosen)?;
+    let report = red_report(repo, &config, "shipcraft red", &base, &changed, plan, chosen)?;
     let failing = failing_at_red(&report, "shipcraft red")?;
     let left = leave_out(repo, &config, &changed, all, None, &failing)?;
     let (cases, failing) = without(&left.cases, report.cases_run(), failing);
@@ -141,7 +141,7 @@ pub fn redo(
     let changed = narrow::changed(repo, &base);
     warn_outside_globs(repo, &config, &changed);
     let plan = narrow::plan(repo, &config, &changed, all, Some(&old));
-    let report = red_report(repo, &config, "shipcraft red --redo", &base, plan, chosen)?;
+    let report = red_report(repo, &config, "shipcraft red --redo", &base, &changed, plan, chosen)?;
     let run = report.cases_run();
     let dropped: Vec<&String> = old.cases.iter().filter(|case| !run.contains(case)).collect();
     if !dropped.is_empty() {
@@ -313,11 +313,13 @@ fn red_report(
     config: &Config,
     again: &str,
     base: &narrow::Base,
+    changed: &std::result::Result<narrow::Changed, narrow::Fallback>,
     plan: Plan,
     chosen: &mut Option<Chosen>,
 ) -> Result<Report> {
     let locked: BTreeSet<String> = config.test_files(repo)?.into_iter().chain([CONFIG_FILE.to_string()]).collect();
-    let first = chosen.insert(Chosen::new(&plan, locked.len()));
+    let merge_base = changed.as_ref().ok().map(|changed| changed.merge_base.as_str());
+    let first = chosen.insert(Chosen::new(&plan, locked.len(), merge_base));
     let ran = first_run(repo, config, plan, first);
     if let Some(compared) = base.as_ref().ok().and_then(narrow::Compared::notice) {
         println!("{compared}");
