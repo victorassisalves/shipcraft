@@ -1,0 +1,49 @@
+[
+ [
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nCHANGES REQUESTED at 0000000000000000000000000000000000000000\n\nBlocking: 1\n\n### Bloqueio 1 — Prévia ativa link para destino impedido de sair no build\n\n**Local:** `src/editorial-mcp/src/mcp/server.ts:831–833`.\n\n### Notas não bloqueantes\n\n### Verificações próprias\n"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nCHANGES REQUESTED at 0000000000000000000000000000000000000000\n\nBlocking: 1\n\n### Blocking 1 — Validação não cumpre o contrato de links malformados\n\n**Local:** `src/editorial-mcp/src/publish/article-links.ts:8–10`, usado por `src/editorial-mcp/src/mcp/server.ts:815`.\n\n### Notes — não bloqueantes\n\n### Checks próprios\n"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nCHANGES REQUESTED at 0000000000000000000000000000000000000000\n\nBlocking: 1\n\n### Blocking 1 — Âncora com parênteses deixa pontuação sobrando quando o destino não está publicado\n\n**Local:** `src/editorial-mcp/src/publish/article-links.ts:8–16`.\n\n### Notas não bloqueantes\n\n### Checks próprios\n"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nAPPROVE at 0000000000000000000000000000000000000000\n\nBlocking: 0\n\n### Comandos executados\n\n### Notas não bloqueantes\n\n### Checks próprios\n"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nAPPROVE at 0000000000000000000000000000000000000000\n\nBlocking: 0\n\n**Notas não bloqueantes**\n\n**Checks próprios**\n"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "(other comment)"
+  }
+ ]
+]

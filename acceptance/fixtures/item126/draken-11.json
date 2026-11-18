@@ -1,0 +1,25 @@
+[
+ [
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nCHANGES REQUESTED at 0000000000000000000000000000000000000000\n\nBlocking: 1\n\n### Blocking 1 — Valid JSON overflows the canonical serializer\n\n**Location:** `src/editorial-mcp/src/store/repository.ts:137`\n\n**Observed, exit 1:**\n\n### Notes\n\n### Additional checks\n"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nCHANGES REQUESTED at 0000000000000000000000000000000000000000\n\nBlocking: 1\n\n## Suíte\n\n## Bloqueio 1 — revisão pendente impede arquivar a versão publicada\n\n**Local:** `src/editorial-mcp/src/store/state.ts:42`.\n\n**Resultado observado:**\n\n## Notas não bloqueantes\n\n## Checks próprios\n"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nAPPROVE at 0000000000000000000000000000000000000000\n\nBlocking: 0\n"
+  },
+  {
+   "body": "(other comment)"
+  }
+ ]
+]
