@@ -63,7 +63,7 @@ if case=='v1-123.basic':
  calls.unlink();report([dict(r,code='other') for r in rs])
  assert data(calls)==observed and not ghcalls.exists(),'new Git/network read'
  assert reds(s)==[dict(kind='reds_week',week='1970-W01',suite_red=1,green_again=1,green_again_share=1,green_again_secs=45,named=1,cases=[dict(id='tests.db::insert',rows=1)])],s
- t=report(None,args=());assert lines(t),t
+ t=report(rs,args=());assert lines(t),t
 elif case=='v1-123.repeated':
  s=report([row(failed=['a']),row(failed=['a'],secs=5),green(),green(),row(failed=['later'])])
  assert reds(s)==[dict(kind='reds_week',week='1970-W01',suite_red=3,green_again=2,green_again_share=2/3,green_again_secs=50,named=2,cases=[dict(id='a',rows=2)])],s
