@@ -3,15 +3,50 @@
 use super::CONFIG_FILE;
 use crate::refusal::{refuse, Result};
 
+/// Item 124: `[report] deploy`, what `report` counts as a deploy.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Deploy {
+    Merge,
+    Release,
+}
+
+impl Deploy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Deploy::Merge => "merge",
+            Deploy::Release => "release",
+        }
+    }
+}
+
 /// Item 99: `[report] release_tags`, the pattern `report` reads releases by.
-/// `Ok(None)` when there is no `[report]` table or it has no keys; `Err` names
-/// the first problem, in the spec's order.
+/// `Ok(None)` when there is no `[report]` table or it has no pattern; `Err`
+/// names the first problem, in the spec's order, item 124's `deploy` last.
 pub fn report_release_tags(table: &toml::Table) -> std::result::Result<Option<String>, String> {
+    let pattern = release_tags(table)?;
+    report_deploy(table)?;
+    Ok(pattern)
+}
+
+/// Item 124: the `deploy` key, `Ok(None)` when absent. Its problem is
+/// checked after item 99's (`report_release_tags` names the first).
+pub fn report_deploy(table: &toml::Table) -> std::result::Result<Option<Deploy>, String> {
+    let Some(value) = table.get("report").and_then(toml::Value::as_table).and_then(|r| r.get("deploy")) else {
+        return Ok(None);
+    };
+    match value.as_str() {
+        Some("merge") => Ok(Some(Deploy::Merge)),
+        Some("release") => Ok(Some(Deploy::Release)),
+        _ => Err("deploy is not \"merge\" or \"release\"".to_string()),
+    }
+}
+
+fn release_tags(table: &toml::Table) -> std::result::Result<Option<String>, String> {
     let Some(report) = table.get("report") else { return Ok(None) };
     let Some(report) = report.as_table() else { return Err("[report] is not a table".to_string()) };
     let mut keys: Vec<&String> = report.keys().collect();
     keys.sort();
-    if let Some(key) = keys.into_iter().find(|k| k.as_str() != "release_tags") {
+    if let Some(key) = keys.into_iter().find(|k| !matches!(k.as_str(), "release_tags" | "deploy")) {
         return Err(format!("unknown key {key}"));
     }
     let Some(value) = report.get("release_tags") else { return Ok(None) };

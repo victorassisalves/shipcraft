@@ -186,6 +186,7 @@ if case=='signed':
  git('config','log.showSignature','true');git('config','gpg.program',str(verifier));git('config','gpg.ssh.program',str(verifier))
 if case=='removed-no-log':rs=[r for r in rs if r['lock']!='A']
 if case=='no-releases':
+ write(Path('.shipcraft.toml'),'[report]\ndeploy = "release"\n')
  for t in ('v1.0.0','v1.1.0','v2.0.0'):git('tag','-d',t)
 if case=='since-partial':args+=['--since','v99.0.0']
 if case.startswith('unavailable-red-kind'):

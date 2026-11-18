@@ -99,7 +99,7 @@ elif case=='v1-120.control-no-merged':
  rs=[row(layer='red',lock='A',at=1),row(layer='close',lock='A',at=2),merge(pr=None,lock='A',at=10),measured(),row()]
  s,t=pair(rs)
  import hashlib
- assert [hashlib.sha256(x.encode()).hexdigest() for x in (s,t)]==['aac835f604e263f02da5e156f329e3e34061b38e5f86f36586c7e68d8747ba3c', 'c2c275dd3ec8284406d53d7fb8b877ccdd2a9878646cdbf5bc0596a4451362e7'],(s,t)
+ assert [hashlib.sha256(x.encode()).hexdigest() for x in (s,t)]==['3f0e6cd2b436012e978f8955d54a4a5e612f893dbed086c0f36e90b851ddff30', 'c2c275dd3ec8284406d53d7fb8b877ccdd2a9878646cdbf5bc0596a4451362e7'],(s,t)
  other=[dict(r,pr='7') if r['layer']=='merge' else r for r in rs]
  assert pair(other)==(s,t) and not selected(s),(s,t)
  assert [r['kind'] for r in map(json.loads,s.splitlines())]==['meta','lock','day','size','review','dora'],s

@@ -1,16 +1,17 @@
-//! Which tags are releases (items 99, 105).
+//! Which tags are releases (items 99, 105), and what a deploy is (item 124).
 
-use crate::config::{self, CONFIG_FILE};
+use crate::config::{self, Deploy, CONFIG_FILE};
 use crate::lock;
 use std::fs;
 use std::path::Path;
 
-/// Item 99: which tags are releases, from the `[report]` table alone.
+/// Item 99: which tags are releases, from the `[report]` table alone, with
+/// item 124's valid `deploy` key when set.
 pub(super) enum Selection {
     /// Item 76's `vX.Y.Z` tags: no key, or a file this reader does not read.
-    Default,
+    Default(Option<Deploy>),
     /// A valid `release_tags`.
-    Pattern(String),
+    Pattern(String, Option<Deploy>),
     /// An invalid `[report]`: the problem, and no git evidence.
     Invalid(String),
 }
@@ -20,15 +21,17 @@ impl Selection {
     pub(super) fn read(root: &Path) -> Selection {
         let path = root.join(CONFIG_FILE);
         if !fs::metadata(&path).is_ok_and(|m| m.is_file()) {
-            return Selection::Default;
+            return Selection::Default(None);
         }
         let Some(text) = fs::read(&path).ok().and_then(|b| String::from_utf8(b).ok()) else {
-            return Selection::Default;
+            return Selection::Default(None);
         };
-        let Ok(table) = text.parse::<toml::Table>() else { return Selection::Default };
+        let Ok(table) = text.parse::<toml::Table>() else { return Selection::Default(None) };
+        // A valid `release_tags` holds a valid `deploy` (checked last).
+        let deploy = config::report_deploy(&table).ok().flatten();
         match config::report_release_tags(&table) {
-            Ok(None) => Selection::Default,
-            Ok(Some(pattern)) => Selection::Pattern(pattern),
+            Ok(None) => Selection::Default(deploy),
+            Ok(Some(pattern)) => Selection::Pattern(pattern, deploy),
             Err(problem) => Selection::Invalid(problem),
         }
     }
@@ -36,7 +39,7 @@ impl Selection {
     /// Whether a tag name is of the releases' grammar.
     pub(super) fn names(&self, tag: &str) -> bool {
         match self {
-            Selection::Pattern(pattern) => matches(pattern.as_bytes(), tag.as_bytes()),
+            Selection::Pattern(pattern, _) => matches(pattern.as_bytes(), tag.as_bytes()),
             _ => lock::valid_tag(tag),
         }
     }
@@ -46,15 +49,23 @@ impl Selection {
     pub(super) fn release_name_problem(&self, tag: &str) -> Option<String> {
         match self {
             Selection::Invalid(problem) => Some(format!("invalid: {}", config::report_invalid(problem))),
-            Selection::Pattern(pattern) => (!self.names(tag)).then(|| pattern.clone()),
-            Selection::Default => (!self.names(tag)).then(|| "vX.Y.Z".to_string()),
+            Selection::Pattern(pattern, _) => (!self.names(tag)).then(|| pattern.clone()),
+            Selection::Default(_) => (!self.names(tag)).then(|| "vX.Y.Z".to_string()),
         }
     }
 
     pub(super) fn pattern(&self) -> Option<&str> {
         match self {
-            Selection::Pattern(pattern) => Some(pattern),
+            Selection::Pattern(pattern, _) => Some(pattern),
             _ => None,
+        }
+    }
+
+    /// Item 124: the valid `[report] deploy`, None when absent or invalid.
+    pub(super) fn deploy(&self) -> Option<Deploy> {
+        match self {
+            Selection::Default(deploy) | Selection::Pattern(_, deploy) => *deploy,
+            Selection::Invalid(_) => None,
         }
     }
 }
