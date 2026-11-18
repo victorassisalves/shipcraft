@@ -182,6 +182,12 @@ impl<'a> Asker<'a> {
         Ok(tally(&runs, names.len()))
     }
 
+    /// Item 121: `gh <args>` through the same cache, limit and timeout, its
+    /// answer taken by `read`; a shape `read` rejects is an unreadable answer.
+    pub fn ask<T>(&mut self, args: &[&str], read: impl FnOnce(&Value) -> Option<T>) -> Result<T, String> {
+        read(&self.call(args)?).ok_or_else(|| UNREADABLE.to_string())
+    }
+
     /// `<root>/.shipcraft.toml` read once, directly, by `Config::parse`.
     fn config(&mut self) -> Option<(String, Vec<String>)> {
         if self.config.is_none() {
