@@ -160,7 +160,7 @@ elif case=='v1-121.pages':
  for bad in ({'body':None},{},[],7):
   scenarios.append(dict(comments=[[body('Blocking: 99\n## Blocking 1 Lost')],[bad]],rows=[dict(kind='pr_not_read',pr=7,reason='unreadable answer from gh')],stderr='report: PR 7: review comments not read: unreadable answer from gh\n'))
 elif case=='v1-121.classes':
- titles=['TYPED','tenant','delayed','falha','permission','cookie','MDX','assinatura','número','symlink','provision','Quartz']
+ titles=['TYPED','tenant','delayed','falha','permission','cookie','MDX','assinatura','número','slash','provision','Quartz']
  scenarios.append(dict(comments=[[body('\n'.join(f'## Blocking {i+1} {t}' for i,t in enumerate(reversed(titles))))]],rows=[finding(t,c) for t,c in zip(titles,classes)]))
 elif case=='v1-121.priority':
  titles=['dirty secret retry error admin cookie link publish date path image','cross retry error admin cookie link publish date path image','retry error admin cookie link publish date path image','error admin cookie link publish date path image','admin cookie link publish date path image','cookie link publish date path image','link publish date path image','publish date path image','date path image','path image','image']
