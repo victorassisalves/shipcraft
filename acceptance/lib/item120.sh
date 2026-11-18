@@ -275,7 +275,7 @@ elif case=='v1-120.order':
  rs=[row(layer='red',lock='A',at=1),row(layer='close',lock='A',at=2),measured(97,100),row(pr=97),row(layer='ci',result='refused',code='suite-red'),merge(97,lock='A')]
  s,t=pair(wire(rs)+b'{bad\n',('--github',))
  kinds=[r['kind'] for r in map(json.loads,s.splitlines())]
- assert kinds==['meta','lock','day','size','reds','review','checks','merged_pr','week']+['size_bucket']*8+['limit','dora','github','gap'],s
+ assert kinds==['meta','lock','day','size','reds','reds_week','review','checks','merged_pr','week']+['size_bucket']*8+['limit','dora','github','gap'],s
  ls=t.split('\n');i=next(i for i,l in enumerate(ls) if l.startswith('pr #97:'))
  assert ls[i-1].startswith('checks:') and ls[i+1].startswith('week ') and all(l.startswith('size ') for l in ls[i+2:i+10]) and ls[i+10].startswith('suggested limit:') and ls[i+11]=='DORA',t
 elif case=='v1-120.since':
