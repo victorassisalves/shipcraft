@@ -122,7 +122,12 @@ from pathlib import Path
 st=Path(__file__).parent/'state';a=sys.argv[1:]
 with (st/'git130.jsonl').open('a') as f:f.write(json.dumps(a)+'\n')
 fault=json.loads((st/'gitfault130').read_text())
-if a==['remote','get-url','--push','--all','origin'] and fault:
+# Match the subcommand after Git's global options; preserve argv for forwarding.
+i=0
+while i<len(a) and a[i].startswith('-'):
+ if a[i] in ('-C','-c','--git-dir','--work-tree','--namespace','--config-env','--super-prefix'):i+=2
+ else:i+=1
+if a[i:]==['remote','get-url','--push','--all','origin'] and fault:
  if 'output_hex' in fault:sys.stdout.buffer.write(bytes.fromhex(fault['output_hex']));sys.exit(0)
  print('git130 lookup failed',file=sys.stderr,flush=True)
  if 'signal' in fault:os.kill(os.getpid(),fault['signal'])
@@ -131,10 +136,14 @@ os.execv(REAL,[REAL,*a])
 '''.replace('REAL',repr(realgit)));(cb/'git').chmod(0o755)
 if case=='stub-control':
  assert git('rev-parse','HEAD')==head
- put(st/'gitfault130',json.dumps({'exit':128}));probe=run('git','remote','get-url','--push','--all','origin');assert probe.returncode==128 and probe.stderr=='git130 lookup failed\n'
- put(st/'gitfault130',json.dumps({'output_hex':b'\n  byte-\xff  \r\n'.hex()}));probe=subprocess.run(['git','remote','get-url','--push','--all','origin'],capture_output=True);assert probe.returncode==0 and probe.stdout==b'\n  byte-\xff  \r\n'
- put(st/'gitfault130',json.dumps({'signal':15}));probe=run('git','remote','get-url','--push','--all','origin');assert probe.returncode==-15 and probe.stderr=='git130 lookup failed\n'
- put(st/'gitfault130','{}');assert git('remote','get-url','--push','--all','origin')==str(origin)
+ for prefix in ([],['-C',str(root),'--literal-pathspecs'],['-c','probe130.value=remote','--no-pager'],['--git-dir='+str(root/'.git'),'--no-pager'],['--git-dir',str(root/'.git'),'--work-tree',str(root)]):
+  lookup=['git',*prefix,'remote','get-url','--push','--all','origin']
+  for code in (1,128):
+   put(st/'gitfault130',json.dumps({'exit':code}));probe=run(*lookup);assert probe.returncode==code and probe.stderr=='git130 lookup failed\n'
+  put(st/'gitfault130',json.dumps({'output_hex':b'\n  byte-\xff  \r\n'.hex()}));probe=subprocess.run(lookup,capture_output=True);assert probe.returncode==0 and probe.stdout==b'\n  byte-\xff  \r\n'
+  put(st/'gitfault130',json.dumps({'signal':15}));probe=run(*lookup);assert probe.returncode==-15 and probe.stderr=='git130 lookup failed\n'
+  assert git(*prefix,'rev-parse','HEAD')==head
+  put(st/'gitfault130','{}');probe=run(*lookup);assert probe.returncode==0 and probe.stdout==str(origin)+'\n'
 log=root/'.git/shipcraft/runs.jsonl';before=content(log);before_refs=git('--git-dir='+str(origin),'show-ref');before_fetch=content(root/'.git/FETCH_HEAD')
 for variant in (variants or [None]):
  if variant is not None:
