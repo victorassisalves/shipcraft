@@ -1,0 +1,28 @@
+[
+ [
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nCHANGES REQUESTED at 0000000000000000000000000000000000000000\n\nBlocking: 2\n\n**Blocking 1 — Secrets cross workspace boundaries when project slugs match**\n\nLocation: `app/packages/web/src/screens/S20-settings/Integrations.tsx:44–61`.\n\n**Blocking 2 — Leaving the form silently discards typed input**\n\nLocation: `app/packages/web/src/live-form.ts:51–62`, integrated at `app/packages/web/src/app.tsx:170`.\n"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nCHANGES REQUESTED at 0000000000000000000000000000000000000000\n\nBlocking: 2\n\n### Reproduction setup\n\n### Blocking 1 — Leaving during creation loses the secret and permits duplicate submission\n\n**Location:** `app/packages/web/src/live-form.ts:53,83`; `app/packages/web/src/screens/S20-settings/Integrations.tsx:64`.\n\n### Blocking 2 — Retained secrets cross sign-out/sign-in boundaries\n\n**Location:** `app/packages/web/src/screens/S20-settings/Integrations.tsx:48,58`; `app/packages/web/src/live-dirty.ts:48`. The authentication transition is at `app/packages/web/src/app.tsx:143–145`.\n\n### Notes\n\n### Own checks\n"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nCHANGES REQUESTED at 0000000000000000000000000000000000000000\n\nBlocking: 1\n\n### Blocking 1 — A previous user’s signing secret survives sign-out during the create reload\n\n**Location:** `app/packages/web/src/live-form.ts:141–144`, consumed by `app/packages/web/src/screens/S20-settings/Integrations.tsx:66–68`.\n\n### Notes — non-blocking\n\n### Own checks\n"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nAPPROVE at 0000000000000000000000000000000000000000\n\nBlocking: 0\n\n### Notes (non-blocking)\n\n### Own checks\n"
+  },
+  {
+   "body": "(other comment)"
+  }
+ ]
+]

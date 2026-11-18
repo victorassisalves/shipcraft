@@ -1,0 +1,61 @@
+[
+ [
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nCHANGES REQUESTED at 0000000000000000000000000000000000000000\n\nBlocking: 2\n\n### Blocking 1: Numeric deadlines escape citation checks\n\nLocation: `src/editorial-mcp/src/review/checks.ts:249–251`.\n\n### Blocking 2: Bold formatting bypasses monetary-value verification\n\nLocation: `src/editorial-mcp/src/review/checks.ts:524–526`.\n\n### Notes (non-blocking)\n\n### Own checks\n"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nCHANGES REQUESTED at 0000000000000000000000000000000000000000\n\nBlocking: 2\n\n## Blocking 1: Legal years and count limits bypass number verification\n\nLocation: `src/editorial-mcp/src/review/checks.ts:265`\n\n## Blocking 2: Single-quoted Markdown link titles suppress source verification\n\nLocation: `src/editorial-mcp/src/review/checks.ts:75`\n\n## Notes\n\n## Own checks\n"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nCHANGES REQUESTED at 0000000000000000000000000000000000000000\n\nBlocking: 2\n\n### Comandos e códigos de saída\n\n### Blocking 1 — O sinal do percentual desaparece na comparação\n\n### Blocking 2 — Parênteses no destino do link impedem a conferência do valor\n\n### Notas não bloqueantes\n\n### Verificações próprias\n"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nCHANGES REQUESTED at 0000000000000000000000000000000000000000\n\nBlocking: 2\n\n### Blocking 1 — Reference links cause false cross-locale failures\n\nLocation: [checks.ts:632](arvore/src/editorial-mcp/src/review/checks.ts#L632), `checkCrossLocale` signature construction.\n\n## Próximo passo\n\n## Next step\n\n## Próximo paso\n\n### Blocking 2 — Nested URL parentheses bypass linked-number verification\n\nLocation: [checks.ts:80](arvore/src/editorial-mcp/src/review/checks.ts#L80), `LINK`, consumed at lines 567–579.\n\n### Notes — non-blocking\n\n### Own checks\n"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nCHANGES REQUESTED at 0000000000000000000000000000000000000000\n\nBlocking: 2\n\n## Commands and exit codes\n\n## Blocking 1: Markdown entities produce incorrect numeric failures\n\n**Location:** `src/editorial-mcp/src/review/checks.ts:124`\n\n## Blocking 2: Setext H1 bypasses the prohibition on body H1\n\n**Location:** `src/editorial-mcp/src/review/checks.ts:50`\n\n## Notes\n\n## Own checks\n"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nCHANGES REQUESTED at 0000000000000000000000000000000000000000\n\nBlocking: 2\n\n## Blocking 1: Autolinks bypass source-value verification\n\nLocation: `src/editorial-mcp/src/review/checks.ts:135`.\n\n## Blocking 2: Hidden HTML comments create false numeric failures\n\nLocation: `src/editorial-mcp/src/review/checks.ts:158`.\n\n## Notes\n\n## Own checks\n"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nCHANGES REQUESTED at 0000000000000000000000000000000000000000\n\nBlocking: 2\n\n## Blocking 1 — Emphasis changes the value being verified\n\n**Location:** `src/editorial-mcp/src/review/checks.ts:218`\n\n## Blocking 2 — Unlinked statutory thresholds are silently excluded\n\n**Location:** `src/editorial-mcp/src/review/checks.ts:375`\n\n## Notes — non-blocking\n\n## Own checks\n"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "**shipcraft: review executed by codex, on this machine**\n\nCHANGES REQUESTED at 0000000000000000000000000000000000000000\n\nBlocking: 1\n\n### Commands and exit codes\n\n### Blocking 1: Markdown emphasis changes the facts being reviewed\n\n**Locations:** `src/editorial-mcp/src/review/checks.ts:218` and `:713`.\n\n### Notes\n\n### Own checks\n"
+  },
+  {
+   "body": "(other comment)"
+  },
+  {
+   "body": "(other comment)"
+  }
+ ]
+]
