@@ -200,8 +200,8 @@ else:
  elif case=='v1-107.order':
   rs=[row('red',lock='A',at=1),row('close',lock='A',at=2),row(lock='A',locks=['A'],at=3),row('merge',lock='A',locks=['A'],at=4)]
   s=report(wire(rs)+b'{broken107\n')
-  assert [r['kind'] for r in map(json.loads,s.splitlines())]==['meta','lock','day','size','dora','gap'],s
-  text=report(wire(rs)+b'{broken107\n',args=());lines=text.splitlines();i=next(i for i,l in enumerate(lines) if l.startswith('size:'));assert lines[i-1].startswith('day ') and lines[i+1]=='DORA',text
+  assert [r['kind'] for r in map(json.loads,s.splitlines())]==['meta','lock','day','size','merged_pr','week']+['size_bucket']*8+['limit','dora','gap'],s
+  text=report(wire(rs)+b'{broken107\n',args=());lines=text.splitlines();i=next(i for i,l in enumerate(lines) if l.startswith('size:'));assert lines[i-1].startswith('day ') and lines[i+1].startswith('pr #1:'),text
   assert sizes(s)==[{'kind': 'size', 'prs': 1, 'above': 1, 'above_share': 1.0, 'merged_prs': 1, 'merged_above': 1, 'merged_above_share': 1.0}],s
  elif case=='v1-107.text-fraction':
   rs=[row(pr=1),row(pr=2,product_lines=0),row(pr=3),row('merge',pr=1),row('merge',pr=2)]
