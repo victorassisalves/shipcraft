@@ -1,0 +1,10 @@
+[
+  {
+    "kind": "finding",
+    "pr": 73,
+    "class": "Paths, files and locks (symlink, slash, backup, directory)",
+    "class_source": "builtin",
+    "title": "caminho com espaços aborta o globalSetup",
+    "location": "`src/editorial-mcp/tests/helpers/firestore-emulator.ts:59–60`."
+  }
+]

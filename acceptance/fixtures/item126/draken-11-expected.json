@@ -1,0 +1,18 @@
+[
+  {
+    "kind": "finding",
+    "pr": 11,
+    "class": "Signature, review and publish state (draft, live, export, deploy)",
+    "class_source": "builtin",
+    "title": "revisão pendente impede arquivar a versão publicada",
+    "location": "`src/editorial-mcp/src/store/state.ts:42`."
+  },
+  {
+    "kind": "finding",
+    "pr": 11,
+    "class": "Other",
+    "class_source": null,
+    "title": "Valid JSON overflows the canonical serializer",
+    "location": "`src/editorial-mcp/src/store/repository.ts:137`"
+  }
+]
