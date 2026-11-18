@@ -36,7 +36,7 @@ pub fn merge(repo: &Repo, number: &str, sem_revisao: Option<&str>) -> Result<()>
         );
     }
     repo.run(&["fetch", "-q", "origin", &format!("+refs/heads/{base}:refs/remotes/origin/{base}")])?;
-    let config = Config::of_base(repo, &base)?;
+    let config = Config::of_base_told(repo, &base)?;
     let (ci, revisao) = config.camadas()?;
     let statuses = gh::statuses(repo, &head)?;
     let state = |context: &str| statuses.get(context).map_or("no status", |(s, _)| s.as_str());
