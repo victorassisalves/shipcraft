@@ -72,8 +72,12 @@ EOF
   mkdir -p .git/shipcraft
   printf 'sentinela\n' > .git/shipcraft/preservar
   cp -R .git/shipcraft "$CW/state-before"
-  if [ "$mode" = workspace-json ]; then run_cmd shipcraft init --lang node
-  else run_cmd shipcraft init; fi
+  case "$mode" in
+    build-type|build-reference|build-signal|build-signal-output)
+      run_cmd b16b_probe_capture shipcraft init ;;
+    workspace-json) run_cmd shipcraft init --lang node ;;
+    *) run_cmd shipcraft init ;;
+  esac
   chk 'init exits zero even without inference' rc_zero
   chk 'build is written only after compiling' test ! -e "$CW/too-early"
   chk 'init does not change run state' diff -r "$CW/state-before" .git/shipcraft
@@ -106,7 +110,7 @@ EOF
       chk 'no signal, no build run' test ! -s "$CW/tsc-calls"
     elif [ "$why" = build ]; then
       chk 'real build was tried once' eq "$(wc -l < "$CW/tsc-calls" | tr -d ' ')" 1
-      b16b_diagnostic
+      b16b_probe_diagnostic
       chk 'diagnostic names the command' grep -F -q 'npx --no -- tsc -b .' "$OUT.last3"
       case "$mode" in
         build-signal*) chk 'diagnostic names the signal or shell exit' grep -E -q '(143|signal.*(15|TERM))' "$OUT.last3" ;;
@@ -128,3 +132,11 @@ b16b_diagnostic() {
   chk 'suggests a manual build' grep -F -q '[build]' "$OUT.last3"
 }
 item16b_langs() { echo node; }
+
+# Only failed probes change format; JSONC/glob/manifest notices keep b16b_diagnostic.
+b16b_probe_diagnostic() {
+  grep -E '^(shipcraft: skipped the optional \[build\] step:|Why:|Next:)' "$OUT" > "$OUT.last3"
+  chk 'optional build diagnostic has three lines' "$PY" -c 'import pathlib,sys; a=pathlib.Path(sys.argv[1]).read_text().splitlines(); assert len(a)==3 and all(l.startswith(p) for l,p in zip(a,["shipcraft: skipped the optional [build] step:","Why:","Next:"])); assert "add a [build] section" in a[-1] and "init again" not in a[-1]' "$OUT.last3"
+  chk 'compiler output is not forwarded to stderr' test ! -s "$CW/probe-stderr"
+}
+b16b_probe_capture() { "$@" 2> "$CW/probe-stderr"; }
