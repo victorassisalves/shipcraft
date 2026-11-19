@@ -373,6 +373,17 @@ pub fn run_build(command: &str, dir: &Path) -> Result<std::result::Result<(), St
     Ok(if ran.status.success() { Ok(()) } else { Err(ended(ran.status)) })
 }
 
+/// Item 131: `init`'s quiet `[build]` probe. Runs as `run_build` does, writes
+/// neither stream anywhere, and keeps only the first non-blank line of stderr,
+/// else of stdout; on failure, how it ended and that line.
+pub fn probe_build(command: &str, dir: &Path) -> Result<std::result::Result<(), (String, Option<String>)>> {
+    let ran = shell_with(command, dir, false, &[], false)?;
+    if ran.status.success() {
+        return Ok(Ok(()));
+    }
+    Ok(Err((ended(ran.status), ran.first_err.or(ran.first_out))))
+}
+
 fn ended(status: ExitStatus) -> String {
     match (status.code(), status.signal()) {
         (Some(code), _) => format!("exited with {code}"),
@@ -398,6 +409,12 @@ struct Shell {
 /// the lists of item 22. Both streams pass through and the start of each is
 /// kept.
 fn shell(command: &str, dir: &Path, clean: bool, vars: &[(&str, PathBuf)]) -> Result<Shell> {
+    shell_with(command, dir, clean, vars, true)
+}
+
+/// `shell`, with `pass` whether both streams go to shipcraft's stderr (item
+/// 131: `init`'s probe captures them instead).
+fn shell_with(command: &str, dir: &Path, clean: bool, vars: &[(&str, PathBuf)], pass: bool) -> Result<Shell> {
     let mut sh = Command::new("sh");
     sh.arg("-c").arg(command).current_dir(dir).stdout(Stdio::piped()).stderr(Stdio::piped());
     sh.envs(vars.iter().map(|(var, path)| (var, path)));
@@ -422,10 +439,11 @@ fn shell(command: &str, dir: &Path, clean: bool, vars: &[(&str, PathBuf)]) -> Re
         thread::spawn(move || {
             let mut buf = [0u8; 8192];
             while let Ok(n @ 1..) = pipe.read(&mut buf) {
-                let mut open = open.lock().unwrap_or_else(|e| e.into_inner());
-                let _ = io::stderr().write_all(&buf[..n]);
-                *open = buf[n - 1] != b'\n';
-                drop(open);
+                if pass {
+                    let mut open = open.lock().unwrap_or_else(|e| e.into_inner());
+                    let _ = io::stderr().write_all(&buf[..n]);
+                    *open = buf[n - 1] != b'\n';
+                }
                 scan.lock().unwrap_or_else(|e| e.into_inner()).feed(&buf[..n]);
             }
             let _ = done.send(());

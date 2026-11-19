@@ -13,13 +13,14 @@ pub(super) struct Custom {
 /// Item 67: `--command` and `--glob` belong to `--lang other`, which needs both;
 /// the command (step 3) is judged before the globs (step 4, the first invalid
 /// one in argument order). Kept configs do not skip this.
-pub(super) fn custom(options: &Options) -> Result<Option<Custom>> {
+pub(super) fn custom(options: &Options, inv: &str) -> Result<Option<Custom>> {
+    let other_form = format!("{inv} {OTHER_FORM}");
     let other_refusal = |what: String| {
         refuse(
             "lang-unknown",
             what,
             "shipcraft runs a test command it does not know as written: it needs the command, {junit} where it writes its JUnit report, and the test files",
-            OTHER_FORM,
+            other_form.clone(),
         )
     };
     if options.lang != Some("other") {
@@ -50,7 +51,7 @@ pub(super) fn custom(options: &Options) -> Result<Option<Custom>> {
                     "config-invalid",
                     format!("--glob {} {problem}", shell_quote(&crate::red::one_line(glob))),
                     "the lock covers test files by their path within the project, and shipcraft does not guess another",
-                    OTHER_FORM,
+                    other_form,
                 )
             }
         }

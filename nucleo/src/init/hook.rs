@@ -1,6 +1,6 @@
 //! Which hook route a commit takes, the install's form, and shipcraft's own hooks (items 15a, 15b, 20, 25, 58).
 
-use super::files::{is_executable, make_executable, write};
+use super::files::{is_executable, make_executable, on_path, write};
 use super::lefthook::single_source;
 use crate::git::{git_in, text, Repo};
 use crate::init_hooks;
@@ -86,6 +86,62 @@ pub(crate) fn install_at(root: &Path) -> Install {
         }
     }
     Install::Machine
+}
+
+/// Items 69 and 131: how this project runs shipcraft, by the install's form:
+/// the project's install gets `pnpm exec` when a regular `pnpm-lock.yaml` sits
+/// at the root and `pnpm` is on `PATH`, `npx --` otherwise; any other is `shipcraft`.
+pub(crate) fn invocation(root: &Path, install: &Install) -> &'static str {
+    if !matches!(install, Install::Project) {
+        return "shipcraft";
+    }
+    if regular(&root.join("pnpm-lock.yaml")) && on_path("pnpm") {
+        "pnpm exec shipcraft"
+    } else {
+        "npx -- shipcraft"
+    }
+}
+
+fn regular(path: &Path) -> bool {
+    path.symlink_metadata().is_ok_and(|m| m.file_type().is_file())
+}
+
+/// Item 131: the command that installs vitest, by the first regular lockfile at the root.
+pub(super) fn install_vitest(root: &Path) -> &'static str {
+    if regular(&root.join("pnpm-lock.yaml")) {
+        return if root.join("pnpm-workspace.yaml").symlink_metadata().is_ok() {
+            "pnpm add -D -w vitest"
+        } else {
+            "pnpm add -D vitest"
+        };
+    }
+    if regular(&root.join("yarn.lock")) {
+        return "yarn add -D vitest";
+    }
+    if regular(&root.join("bun.lock")) || regular(&root.join("bun.lockb")) {
+        return "bun add -d vitest";
+    }
+    "npm install -D vitest"
+}
+
+/// Item 131: the root manifest and lockfiles, regular files that git reports as
+/// not committed, each as `, <file>` for the `ready` line.
+pub(super) fn uncommitted_manifests(root: &Path) -> String {
+    let files = ["package.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb", "package-lock.json"];
+    let changed = |file: &str| {
+        regular(&root.join(file))
+            && git_in(root, &["status", "--porcelain=v1", "-z", "--", file])
+                .is_ok_and(|out| out.status.success() && !out.stdout.is_empty())
+    };
+    files.into_iter().filter(|file| changed(file)).map(|file| format!(", {file}")).collect()
+}
+
+/// Item 131: whether git says `node_modules` is not ignored (exit 1 only).
+pub(super) fn modules_not_ignored(root: &Path) -> bool {
+    // Without `--literal-pathspecs`, which `check-ignore` refuses.
+    let mut git = std::process::Command::new("git");
+    git.arg("-C").arg(root).args(["check-ignore", "-q", "--", "node_modules"]);
+    git.output().is_ok_and(|out| out.status.code() == Some(1))
 }
 
 fn own_hook(path: &Path) -> bool {

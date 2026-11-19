@@ -32,14 +32,14 @@ use agents::agents_block;
 use config_file::{config_text, reviewer};
 use custom::custom;
 use files::{keep_config, write_once};
-use hook::{decide_hook, install, install_hooks, Hook};
+use hook::{decide_hook, install, install_hooks, install_vitest, modules_not_ignored, uncommitted_manifests, Hook};
 use suites::{drop_empty_checks, plan};
 
 pub use agents::agents_block_status;
 pub use config_file::AGENTS;
-pub use files::{is_executable, on_path};
+pub use files::is_executable;
 pub use hook::{hook_status, LEFTHOOK_FILES, LOCAL};
-pub(crate) use hook::{install_at, Install};
+pub(crate) use hook::{install_at, invocation, Install};
 pub use lefthook::{block_layout, insert_text, layout, lefthook_source, single_source};
 
 const LOCAL_NOTICE: &str =
@@ -69,19 +69,21 @@ pub struct Options<'a> {
     pub github: bool,
 }
 
-/// Item 67: the full form of `init --lang other`, in the `Next:` of its refusals.
-const OTHER_FORM: &str =
-    "shipcraft init --lang other --command '<test command writing JUnit to {junit}>' --glob '<test files>'";
+/// Item 67: the full form of `init --lang other`, in the `Next:` of its refusals,
+/// after the project's invocation (item 131).
+const OTHER_FORM: &str = "init --lang other --command '<test command writing JUnit to {junit}>' --glob '<test files>'";
 const SEED_NOTICE: &str = "shipcraft: .shipcraft.toml exists and was kept; --command and --glob only seed a new config";
 
 pub fn run(repo: &Repo, options: &Options) -> Result<()> {
     crate::config::reject_legacy_file(repo, &Snapshot::Tree)?;
-    let custom = custom(options)?;
+    let install = install(repo);
+    // Item 131: the lines that name a command name it as this install runs.
+    let inv = invocation(repo.root(), &install);
+    let custom = custom(options, inv)?;
     let (lang, mut suites) = match &custom {
         Some(_) => (None, Vec::new()),
-        None => plan(repo, options.lang)?,
+        None => plan(repo, options.lang, inv)?,
     };
-    let install = install(repo);
     let local = matches!(install, Install::Project);
     let hook = decide_hook(repo, local)?;
     let raise = init_msg::raise_min(repo)?;
@@ -185,14 +187,20 @@ pub fn run(repo: &Repo, options: &Options) -> Result<()> {
         Hook::Tool(tool) => tool.writes.iter().map(|(file, ..)| format!(", {file}")).collect(),
         Hook::Own(_) => String::new(),
     };
+    // Item 131: the project's install, whose packages a `git add -A` would stage.
+    if local && modules_not_ignored(repo.root()) {
+        println!("shipcraft: node_modules is not ignored by git: add it to .gitignore before committing, or `git add -A` stages the installed packages");
+    }
     // Item 91: a new config whose root suite got vitest only by default.
     if !kept && lang == Some(Lang::Node) && !workspace && lang::node_runner(repo.root()).is_none() {
         println!(
-            "shipcraft: warning: found neither vitest nor jest in package.json, so the test command assumes vitest. Install it, or for another runner, from the repository root, remove {CONFIG_FILE} and run: {OTHER_FORM}"
+            "shipcraft: warning: found neither vitest nor jest in package.json, so the test command assumes vitest. Install it with `{}`, or for another runner, from the repository root, remove {CONFIG_FILE} and run: {inv} {OTHER_FORM}",
+            install_vitest(repo.root())
         );
     }
-    println!("shipcraft: ready. Commit {CONFIG_FILE}{lefthook}{agents}{briefs} and {LOCK_DIR}/;");
-    println!("shipcraft: then write the failing test and stub, and run `shipcraft red`.");
+    let manifests = if local { uncommitted_manifests(repo.root()) } else { String::new() };
+    println!("shipcraft: ready. Commit {CONFIG_FILE}{lefthook}{agents}{briefs}{manifests} and {LOCK_DIR}/;");
+    println!("shipcraft: then write the failing test and stub, and run `{inv} red`.");
     // 27.1, read raw: a `shipcraft_min` above this binary keeps the file's real `ci`.
     let table = fs::read_to_string(repo.path(CONFIG_FILE)).ok().and_then(|t| t.parse::<toml::Table>().ok());
     let ci = table.as_ref().and_then(|t| t.get("execution")?.get("ci")?.as_str()).unwrap_or("local");

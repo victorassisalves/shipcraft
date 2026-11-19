@@ -7,7 +7,7 @@ use crate::config::CONFIG_FILE;
 use crate::git::{Repo, Snapshot};
 use crate::glob;
 use crate::jsonc;
-use crate::refusal::{warn, Result};
+use crate::refusal::{short_list, warn, Result};
 use crate::suite;
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -39,13 +39,65 @@ pub fn infer(repo: &Repo) -> Result<Option<(String, Vec<String>)>> {
     dirs.sort();
     let targets: Vec<String> = dirs.iter().map(|dir| shell_word(dir)).collect();
     let command = format!("npx --no -- tsc -b {}", targets.join(" "));
-    let Err(how) = suite::run_build(&command, repo.root())? else { return Ok(Some((command, dirs))) };
-    warn(
-        format!("did not write [build]: `{command}` {how}"),
-        "init proves the build in the tree before writing it; a failing [build] would refuse every shipcraft ci and shipcraft red",
-        format!("fix the build and run shipcraft init again, or {}", by_hand(&command)),
-    );
-    Ok(None)
+    // Item 131: the probe is quiet; a failure is a skipped step, and what it
+    // left untracked is named.
+    let before = untracked(repo);
+    let probed = suite::probe_build(&command, repo.root())?;
+    if let Err((how, line)) = &probed {
+        let line = line.as_ref().map(|l| format!(": {}", fold(l))).unwrap_or_default();
+        println!("shipcraft: skipped the optional [build] step: `{command}` {how}{line}");
+        println!("Why: init writes [build] only after it passes in the tree; a failing [build] would refuse every shipcraft ci and shipcraft red, so init goes on without it");
+        println!(
+            "Next: when `{command}` passes (run it to see the errors), add a [build] section to {CONFIG_FILE} with command = {}",
+            basic_string(&command)
+        );
+    }
+    if let (Some(before), Some(after)) = (before, untracked(repo)) {
+        let left: Vec<String> = after.difference(&before).map(|path| fold(&String::from_utf8_lossy(path))).collect();
+        if !left.is_empty() {
+            println!(
+                "shipcraft: the build left files git does not ignore: {}; add them to .gitignore before committing",
+                short_list(&left)
+            );
+        }
+    }
+    Ok(probed.is_ok().then_some((command, dirs)))
+}
+
+/// Item 131: one line for the probe's lines: each run of whitespace and control
+/// characters becomes one space, with no other escaping.
+fn fold(text: &str) -> String {
+    let parts = text.split(|c: char| c.is_whitespace() || c.is_control()).filter(|part| !part.is_empty());
+    parts.collect::<Vec<_>>().join(" ")
+}
+
+/// Item 131: a TOML basic string on one line, `"` and `\` escaped (the `toml`
+/// crate would write a `"` in a multi-line string instead).
+fn basic_string(text: &str) -> String {
+    let mut out = String::from("\"");
+    for c in text.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\u{8}' => out.push_str("\\b"),
+            '\t' => out.push_str("\\t"),
+            '\n' => out.push_str("\\n"),
+            '\u{c}' => out.push_str("\\f"),
+            '\r' => out.push_str("\\r"),
+            c if c.is_control() => out.push_str(&format!("\\u{:04X}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// The untracked files git does not ignore, as git gives them; None when git
+/// fails or does not start.
+fn untracked(repo: &Repo) -> Option<BTreeSet<Vec<u8>>> {
+    let out = crate::git::git_in(repo.root(), &["ls-files", "-z", "--others", "--exclude-standard"]).ok()?;
+    let paths = out.stdout.split(|b| *b == 0).filter(|p| !p.is_empty()).map(<[u8]>::to_vec);
+    out.status.success().then(|| paths.collect())
 }
 
 /// The workspace packages: folders with a tracked `package.json` that a glob
@@ -141,4 +193,24 @@ fn left_out<T>(what: String, why: &str) -> Option<T> {
 
 fn by_hand(command: &str) -> String {
     format!("manually add a [build] section to {CONFIG_FILE} with command = \"{command}\"")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{basic_string, fold};
+
+    #[test]
+    fn fold_turns_whitespace_and_control_runs_into_one_space() {
+        assert_eq!(fold("b\nname\t \u{1}x\u{2028}y"), "b name x y");
+    }
+
+    #[test]
+    fn basic_string_reads_back_as_the_same_command() {
+        for command in ["npx --no -- tsc -b .", "npx --no -- tsc -b 'p\"q' 'a\\b'", "x\ty\u{1}"] {
+            let line = format!("command = {}", basic_string(command));
+            assert!(!line.contains("\"\"\""), "{line}");
+            let table: toml::Table = line.parse().unwrap();
+            assert_eq!(table["command"].as_str(), Some(command), "{line}");
+        }
+    }
 }
