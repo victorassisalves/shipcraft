@@ -126,8 +126,21 @@ fn entries(bytes: &[u8]) -> Result<Vec<Entry>> {
     Ok(out)
 }
 
-/// Git as export runs it: no hook (an empty hooks folder), no lazy fetch, no
-/// replace refs, and a temporary index outside the repository's.
+/// Settings for every git call of export, over the repository's config: no
+/// fsmonitor hook or daemon (the temporary index runs it), and no index
+/// extension that writes into the repository (`sharedindex.*` of a split
+/// index) or reads the working tree (untracked cache, sparse index).
+const SETTINGS: [&str; 6] = [
+    "core.fsmonitor=false",
+    "core.splitIndex=false",
+    "core.untrackedCache=false",
+    "core.sparseCheckout=false",
+    "index.sparse=false",
+    "gc.auto=0",
+];
+
+/// Git as export runs it: no hook (an empty hooks folder, `SETTINGS`), no lazy
+/// fetch, no replace refs or grafts, and a temporary index outside the repository's.
 struct Git {
     root: PathBuf,
     hooks: TempDir,
@@ -155,8 +168,12 @@ impl Git {
         let mut hooks = OsString::from("core.hooksPath=");
         hooks.push(self.hooks.path());
         let mut cmd = Command::new("git");
-        cmd.arg("-C").arg(&self.root).arg("--literal-pathspecs").arg("-c").arg(hooks).args(args);
-        cmd.env("GIT_NO_LAZY_FETCH", "1").env("GIT_NO_REPLACE_OBJECTS", "1");
+        cmd.arg("-C").arg(&self.root).arg("--literal-pathspecs").arg("-c").arg(hooks);
+        for setting in SETTINGS {
+            cmd.arg("-c").arg(setting);
+        }
+        cmd.args(args);
+        cmd.env("GIT_NO_LAZY_FETCH", "1").env("GIT_NO_REPLACE_OBJECTS", "1").env("GIT_GRAFT_FILE", "/dev/null");
         if index {
             cmd.env("GIT_INDEX_FILE", self.index_file());
         }
@@ -349,10 +366,21 @@ fn replay(git: &Git, range: &[String], fork: &str) -> Result<(Option<String>, Ve
     for commit in range {
         let raw = git.raw(commit)?;
         let parent = raw.parent.as_deref().map(git::text).unwrap_or_else(|| fork.to_string());
-        let diff_args: Vec<&str> = ["diff-tree", "-r", "-z", "--no-renames", "--name-only", &parent, commit, "--"]
-            .into_iter()
-            .chain(NAMES)
-            .collect();
+        let diff_args: Vec<&str> = [
+            "diff-tree",
+            "-r",
+            "-z",
+            "--no-renames",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--name-only",
+            &parent,
+            commit,
+            "--",
+        ]
+        .into_iter()
+        .chain(NAMES)
+        .collect();
         for path in git.run(&diff_args)?.split(|b| *b == 0).filter(|p| !p.is_empty()) {
             kept.extend(shipcraft_name(path));
         }
@@ -370,7 +398,8 @@ fn replay(git: &Git, range: &[String], fork: &str) -> Result<(Option<String>, Ve
             &raw.message,
         ]
         .concat();
-        let written = git.checked(&["hash-object", "-t", "commit", "-w", "--stdin"], false, Some(&object))?;
+        let written =
+            git.checked(&["hash-object", "-t", "commit", "-w", "--no-filters", "--stdin"], false, Some(&object))?;
         previous = git::text(&written).trim().to_string();
         previous_tree = tree;
         tip = Some(previous.clone());
