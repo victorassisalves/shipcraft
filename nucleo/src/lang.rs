@@ -61,7 +61,7 @@ impl Lang {
         match self {
             Lang::Python => Profile {
                 runner: "pytest",
-                command: "python3 -m pytest -p no:cacheprovider --junitxml={junit}".to_string(),
+                command: format!("python3 {}", crate::python_env::PYTEST_ARGS),
                 check: None,
                 globs: strings(&[
                     "**/test_*.py",

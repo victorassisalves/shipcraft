@@ -29,7 +29,7 @@ assert len(bs)==1, r
 s=bs[0]; sha=sys.argv[2]; after=sys.argv[3]=='true'
 for marker in ('SPEC-MARKER-5e1','- feat: shout' if sys.argv[5]=='review' else 'PR-BODY-MARKER-91b','test_bateria_marker_2c7','Titulo-PR-6d1' if after else '- Title:'):
  assert marker in s,marker
-assert sha in s and 'python3 -m pytest' in s and '{junit}' in s,s
+assert sha in s and ' -m pytest' in s and '{junit}' in s,s
 assert ('docs63-marker' if sys.argv[4]=='docs' else 'diff-marker-4f9a') in s,s
 if after:
  opening=s.split('## What you are reviewing',1)[0]
@@ -66,7 +66,7 @@ else:
   s=s.replace(root,'SCRATCH')
   s=re.sub(r'## The intent \(the PR body\)\n.*?\n## Steps\n', 'PAYLOAD\n## Steps\n',s,flags=re.S)
   s=re.sub(r'(APPROVE at |CHANGES REQUESTED at )[0-9a-f]{40}',r'\1HEAD',s)
-  return s
+  return s.replace('.venv/bin/python -m pytest','python3 -m pytest')
  assert hashlib.sha256(normalize(s).encode()).hexdigest()=='7b4e46d5346a968de2db5be396987bf35de813f21b0d3796ef9be1b53f0dc1da',normalize(s)
 PY
 }

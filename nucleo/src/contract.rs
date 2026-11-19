@@ -411,6 +411,9 @@ pub fn no_report<T>(missing: Missing) -> Result<T> {
     if let Some(check) = &missing.check {
         return refuse("no-report", missing.reason, FailedCheck::WHY, format!("{}, and try again", check.next()));
     }
+    if let Some(advice) = missing.advice {
+        return refuse("no-report", missing.reason, advice.why, advice.next);
+    }
     refuse(
         "no-report",
         missing.reason,

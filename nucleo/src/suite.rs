@@ -5,6 +5,7 @@ use crate::git::HOOK_GIT_ENV;
 use crate::glob;
 use crate::junit::{Outcome, Report};
 use crate::narrow::Fallback;
+use crate::python_env;
 use crate::refusal::{failed, refuse, Result};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -22,6 +23,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 pub struct Missing {
     pub reason: String,
     pub check: Option<FailedCheck>,
+    /// Item 134: the suite's interpreter is missing.
+    pub advice: Option<python_env::Advice>,
 }
 
 /// A suite's check that failed: the suite's root as messages show it, and the
@@ -46,7 +49,7 @@ impl FailedCheck {
 
 impl Missing {
     fn report(reason: String) -> Missing {
-        Missing { reason, check: None }
+        Missing { reason, check: None, advice: None }
     }
 }
 
@@ -125,6 +128,7 @@ pub fn run_changed(
         if suite.filtra == Filtra::Shipcraft {
             command = chosen.command(command, dir, &suite, present, &[]);
         }
+        let (command, _) = python_env::borrow(command, &suite, &root);
         eprintln!("shipcraft: running the suite ({label})");
         let vars = write_lists(tmp, [BTreeSet::new(), chosen.named(&root, &[]).unwrap_or_default()]);
         let ran = shell(&command, &root, false, &vars);
@@ -302,6 +306,7 @@ fn run_suites(
                 return Ok(Err(check_failed(&name, suite.shown_root(), check, &ran)));
             }
         }
+        let (command, borrowed) = python_env::borrow(command, &suite, &dir.join(&suite.raiz));
         eprintln!("shipcraft: running the suite ({label})");
         let vars = lists.map_or_else(Vec::new, |(tmp, lists)| write_lists(tmp, lists));
         let ran = shell(&command, &dir.join(&suite.raiz), clean, &vars);
@@ -311,7 +316,19 @@ fn run_suites(
         let ran = ran?;
         let report = fs::read_to_string(&report_path).ok().and_then(|xml| Report::parse(&xml));
         let _ = fs::remove_file(&report_path);
-        let Some(report) = report else { return Ok(Err(missing(&name, &suite.comando, &ran))) };
+        let Some(report) = report else {
+            let mut missing = missing(&name, &suite.comando, &ran);
+            // Item 134: an interpreter borrowed from the main worktree was there.
+            let key = python_env::key(config, &suite);
+            let root = dir.join(&suite.raiz);
+            if let Some((tail, advice)) =
+                python_env::missing_interpreter(&suite.comando, &root, suite.shown_root(), &key).filter(|_| !borrowed)
+            {
+                missing.reason.push_str(&tail);
+                missing.advice = Some(advice);
+            }
+            return Ok(Err(missing));
+        };
         if let Some(selection) = &selection {
             let mut failures = report.cases_with(Outcome::Failed);
             failures.extend(report.cases_with(Outcome::Error));
@@ -341,7 +358,7 @@ fn check_failed(name: &str, root: &str, check: &str, ran: &Shell) -> Missing {
     if let Some(line) = ran.first_err.as_ref().or(ran.first_out.as_ref()) {
         reason.push_str(&format!(": {line}"));
     }
-    Missing { reason, check: Some(FailedCheck { root: root.to_string(), command }) }
+    Missing { reason, check: Some(FailedCheck { root: root.to_string(), command }), advice: None }
 }
 
 /// Item 22.1: each list that has an entry in its own file in `tmp`, every

@@ -352,11 +352,29 @@ Python:
       - name: Install dependencies
         if: steps.layer.outputs.run == 'true'
         run: |
-          python3 -m pip install pytest
+          python3 -m venv .venv
+          .venv/bin/python -m pip install pytest
           for f in requirements*.txt; do
-            if [ -f "$f" ]; then python3 -m pip install -r "$f"; fi
+            if [ -f "$f" ]; then .venv/bin/python -m pip install -r "$f"; fi
           done
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 ```
+
+The folder must be the one the committed test command names: a project whose command starts with `venv/bin/python` replaces `.venv` with `venv` in the block. With `.venv/bin` on `PATH`, an older config whose command starts with `python3` runs in the same environment.
+
+Python with uv (instead of the block above, for a project with `uv.lock`):
+
+```yaml
+      - uses: astral-sh/setup-uv@v6
+        if: steps.layer.outputs.run == 'true'
+      - name: Install dependencies
+        if: steps.layer.outputs.run == 'true'
+        run: |
+          uv sync --frozen
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+```
+
+`uv sync --frozen` installs the default groups, `dev` included (a project whose pytest is in another group adds `--group <name>`), and creates `.venv` where the command `init` writes looks for it, unless `UV_PROJECT_ENVIRONMENT` moves it.
 
 Node:
 

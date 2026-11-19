@@ -334,13 +334,17 @@ fn red_report(
     let report = match ran? {
         Ok(report) => report,
         // Item 45: a failing check names itself, and says to fix what it reports.
-        Err(suite::Missing { reason, check: Some(check) }) => {
+        Err(suite::Missing { reason, check: Some(check), .. }) => {
             return refuse(
                 "no-report",
                 reason,
                 suite::FailedCheck::WHY,
                 format!("{}; then run `{again}` again", check.next()),
             )
+        }
+        // Item 134: a missing interpreter is not a missing stub.
+        Err(suite::Missing { reason, advice: Some(advice), .. }) => {
+            return refuse("no-report", reason, advice.why, advice.next)
         }
         Err(missing) => {
             return refuse(

@@ -284,6 +284,7 @@ else:
   scratch=re.search(r'working directory: (.+)/arvore\n',b).group(1);b=b.replace(scratch,'SCRATCH')
   b=re.sub(r'## The intent \(the PR body\)\n.*?\n## Steps\n','PAYLOAD\n## Steps\n',b,flags=re.S)
   b=re.sub(r'(APPROVE at |CHANGES REQUESTED at )[0-9a-f]{40}',r'\1HEAD',b);b=re.sub(r'(CI is green at this commit \()[0-9a-f]{7}(\))',r'\1HEAD7\2',b);b=re.sub(r'(CI green at )[0-9a-f]{7}(\))',r'\1HEAD7\2',b)
+  b=b.replace('.venv/bin/python -m pytest','python3 -m pytest')
   assert hashlib.sha256(b.encode()).hexdigest()=='773a99d73de349ea8f13e93fcf3f8ee86bbd61a8a7b805e59219a5fb0e151c16',b
   announces=[l for l in o.splitlines() if l.startswith('shipcraft: review by ')]
   assert len(announces)==1 and announces[0].endswith('; CI is running at '+sha[:7]+', so the suite is not rerun'),announces

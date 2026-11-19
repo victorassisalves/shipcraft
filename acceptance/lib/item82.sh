@@ -30,6 +30,7 @@ s=re.sub(r'(CI is green at this commit \()[0-9a-f]{7}(\))',r'\1HEAD7\2',s)
 s=re.sub(r'(CI green at )[0-9a-f]{7}(\))',r'\1HEAD7\2',s)
 expected=('773a99d73de349ea8f13e93fcf3f8ee86bbd61a8a7b805e59219a5fb0e151c16' if sys.argv[2]=='true'
           else '7b4e46d5346a968de2db5be396987bf35de813f21b0d3796ef9be1b53f0dc1da')
+s=s.replace('.venv/bin/python -m pytest','python3 -m pytest')
 assert hashlib.sha256(s.encode()).hexdigest()==expected,('other brief bytes changed',s)
 PY
 }

@@ -275,6 +275,7 @@ s=re.sub(r'(?m)^- Title: .*$', '- Title: TITLE',s);s=re.sub(r'(?m)^- Head commit
 s=s.replace(re.search(r'working directory: (.+)/arvore\n',s).group(1),'SCRATCH')
 s=re.sub(r'## The intent \(the PR body\)\n.*?\n## Steps\n','PAYLOAD\n## Steps\n',s,flags=re.S)
 s=re.sub(r'(APPROVE at |CHANGES REQUESTED at )[0-9a-f]{40}',r'\1HEAD',s);s=re.sub(r'(CI is green at this commit \()[0-9a-f]{7}(\))',r'\1HEAD7\2',s);s=re.sub(r'(CI green at )[0-9a-f]{7}(\))',r'\1HEAD7\2',s)
+s=s.replace('.venv/bin/python -m pytest','python3 -m pytest')
 assert hashlib.sha256(s.encode()).hexdigest()=='773a99d73de349ea8f13e93fcf3f8ee86bbd61a8a7b805e59219a5fb0e151c16',s
 PYHASH
       ;;
