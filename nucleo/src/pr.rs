@@ -31,6 +31,7 @@ enum Gate {
 
 pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>, merge: bool) -> Result<()> {
     let started = Instant::now();
+    crate::origin::check_pr(repo)?; // item 130: before any fetch, push or other gh call
     let base = repo.default_branch();
     repo.run(&["fetch", "-q", "origin"])?;
     let config = Config::of_base_told(repo, &base)?;

@@ -70,7 +70,7 @@ What you need:
 
 - **macOS** (Apple silicon or Intel) for the npm package and `install.sh`. On Linux, build from source (below). Windows is not supported.
 - **git**, and a project with tests: Python with pytest, TypeScript/JavaScript with vitest or jest, Go with [gotestsum](https://github.com/gotestyourself/gotestsum) (`go install gotest.tools/gotestsum@latest`), or any runner that writes JUnit XML (see [Configuration](#configuration)).
-- Optional, for `shipcraft pr` and `shipcraft merge`: a GitHub remote named `origin` and `gh` logged in.
+- Optional, for `shipcraft pr` and `shipcraft merge`: a GitHub remote named `origin` and `gh` logged in; for `shipcraft pr`, also write access to `origin` for the `gh` account, which `pr` checks before it pushes anything. Without a remote, the work stays local and `shipcraft ci --base <base>` is its finish line.
 - Optional, for the review: the `codex`, `claude` or `gemini` CLI. The review sends the diff to that agent's provider; without one, `init` turns the review off.
 
 Installing is two steps, and step 2 is required: add the package (or the binary), then run `init` at the repository root. `init` sets up Shipcraft and wires its hooks; until it runs, Shipcraft checks none of your commits. From the npm package, step 2 is `pnpm exec shipcraft init` or `npx -- shipcraft init`.

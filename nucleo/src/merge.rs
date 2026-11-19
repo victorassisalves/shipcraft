@@ -23,6 +23,7 @@ pub fn merge(repo: &Repo, number: &str, sem_revisao: Option<&str>) -> Result<()>
             format!("give the reason: shipcraft merge {number} --no-review \"<reason>\""),
         );
     }
+    crate::origin::check_merge(repo)?; // item 130
     let pr = gh::json(repo, &["pr", "view", number, "--json", "number,state,headRefOid,headRefName,baseRefName"])?;
     let field = |k: &str| pr[k].as_str().unwrap_or_default().to_string();
     let (head, base) = (field("headRefOid"), field("baseRefName"));

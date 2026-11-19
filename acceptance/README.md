@@ -39,7 +39,7 @@ The following surface is part of the contract. Unsupported calls exit 1 with `ac
 | Command | Contract |
 |---|---|
 | `gh auth status` | Authenticated. |
-| `gh repo view [--json F] [-q JQ]` | `acme/proj`, private, default branch `main`. |
+| `gh repo view [URL] [--json F] [-q JQ]` | `acme/proj`, private, default branch `main`, permission `ADMIN`. Optional `state/repo-view.json` maps exact URL (or `*` fallback) to `fields` overrides, `omit` keys, verbatim `raw`, or nonzero `exit` with verbatim `stdout`/`stderr`; other calls and absent overrides are unchanged. |
 | `gh pr create --title T (--body B \| --body-file F\|-) [--base B] [--head H]` | Branch must be on origin; duplicate open PRs fail. |
 | `gh pr list [--head H] [--base B] [--state open\|closed\|merged\|all] [--search S] [--json F] [-q JQ]` | Lists matching PRs. |
 | `gh pr view [N\|BRANCH\|URL] [--json F] [-q JQ]` | Number, title, body, state, URL, head/base refs and SHA, cross-repository flag, repositories/owner/author, merge commit/time, comments, status rollup. |
