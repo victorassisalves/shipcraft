@@ -2850,7 +2850,13 @@ SH
     EXPECT="husky without v9 layout refuses; block-style pre-commit integrates without launcher"
     v1_start codex claude
     mkdir -p .husky && printf 'npx lint-staged\n' > .husky/pre-commit
-    init_must_refuse_hook ".husky/ at root without installed hook"
+    run_cmd_stdin /dev/null shipcraft init
+    [ "$RC" -ne 0 ] || fail ".husky/ at root without installed hook: accepted (rc=0)"
+    msg_check || fail ".husky/ at root without installed hook: refused, but $MSGERR"
+    chk ".husky/ at root without installed hook: exactly three refusal lines" awk 'NR == 1 && !/^shipcraft refused:/ { exit 1 } NR == 2 && !/^Why:/ { exit 1 } NR == 3 && !/^Next:/ { exit 1 } END { if (NR != 3) exit 1 }' "$OUT"
+    chk ".husky/ at root without installed hook: last 3 lines mention npx husky" last3_has 'npx husky'
+    chk ".husky/ at root without installed hook: did not create .shipcraft.toml, .github or .shipcraft" init_untouched
+    chk ".husky/ at root without installed hook: did not ask the reviewer before refusing" out_hasnt '(who reviews|provider|Which reviewer|created \.shipcraft\.toml)'
     chk "no hook installed in .git/hooks" test ! -e .git/hooks/commit-msg
     rm -rf .husky
     printf 'repos:\n  - repo: local\n    hooks: []\n' > .pre-commit-config.yaml
@@ -2864,7 +2870,13 @@ SH
     EXPECT="empty .husky/ and coexistence with lefthook.yml refused"
     v1_start codex claude
     mkdir -p .husky
-    init_must_refuse_hook "empty .husky/ directory at root"
+    run_cmd_stdin /dev/null shipcraft init
+    [ "$RC" -ne 0 ] || fail "empty .husky/ directory at root: accepted (rc=0)"
+    msg_check || fail "empty .husky/ directory at root: refused, but $MSGERR"
+    chk "empty .husky/ directory at root: exactly three refusal lines" awk 'NR == 1 && !/^shipcraft refused:/ { exit 1 } NR == 2 && !/^Why:/ { exit 1 } NR == 3 && !/^Next:/ { exit 1 } END { if (NR != 3) exit 1 }' "$OUT"
+    chk "empty .husky/ directory at root: last 3 lines mention npx husky" last3_has 'npx husky'
+    chk "empty .husky/ directory at root: did not create .shipcraft.toml, .github or .shipcraft" init_untouched
+    chk "empty .husky/ directory at root: did not ask the reviewer before refusing" out_hasnt '(who reviews|provider|Which reviewer|created \.shipcraft\.toml)'
     rm -rf .husky
     printf 'pre-commit:\n  commands:\n    lint:\n      run: echo ok\n' > lefthook.yml
     cp lefthook.yml "$CW/lh.orig"
