@@ -10,6 +10,7 @@ mod config;
 mod contract;
 mod deps;
 mod docs;
+mod export;
 mod fecha;
 mod fila;
 mod findings;
@@ -58,7 +59,7 @@ const USAGE: &str =
      | shipcraft init --lang other --command <cmd> --glob <glob>... [--github]
      | shipcraft red [--redo] [--base <ref>] [--all] [--fix [--reported-at <time>] [--fixes-release <tag>]]
      | shipcraft check [--commit-msg <file>] | shipcraft close
-     | shipcraft ci --base <ref> [--pr]
+     | shipcraft ci --base <ref> [--pr] | shipcraft export --base <ref> <branch>
      | shipcraft pr [--title <t>] [--body <file>] [--merge] | shipcraft review [--pr <n>]
      | shipcraft merge <pr> [--no-review \"<reason>\"] | shipcraft status | shipcraft report [--json] [--since <tag>] [--github] | shipcraft report --findings [--json] [--since <pr>]";
 
@@ -203,6 +204,24 @@ fn run(args: &[&str]) -> Result<()> {
         // Item 40: only `--pr` allows the docs-only path.
         ["ci", "--base", base] => measured("ci", |repo, row| ci::run(repo, base, false, row)),
         ["ci", "--base", base, "--pr"] => measured("ci", |repo, row| ci::run(repo, base, true, row)),
+        // Item 135: `--base <ref>` and one branch, in either order; no row.
+        ["export", rest @ ..] => {
+            let (mut base, mut branch) = (None, None);
+            let mut rest = rest.iter();
+            while let Some(arg) = rest.next() {
+                match *arg {
+                    "--base" if base.is_none() => {
+                        base = Some(*rest.next().filter(|v| !v.starts_with("--")).ok_or_else(|| invalid(args))?)
+                    }
+                    v if !v.starts_with("--") && branch.is_none() => branch = Some(v),
+                    _ => return Err(invalid(args)),
+                }
+            }
+            match (base, branch) {
+                (Some(base), Some(branch)) => export::run(base, branch),
+                _ => Err(invalid(args)),
+            }
+        }
         ["pr", rest @ ..] => {
             // Item 110: `--merge` once, with no value, in an option position;
             // `--title` and `--body` still take the next argument whatever it is.
