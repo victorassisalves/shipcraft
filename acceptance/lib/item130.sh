@@ -190,7 +190,7 @@ for variant in (variants or [None]):
   elif kind=='deny':
    what=f'origin is {name}, where your GitHub permission is {permission}, so shipcraft pr cannot push to it'
    why="pr pushes the branch to origin before anything else, and a branch pushed to a repository that is not yours fails or lands in someone else's project; nothing was fetched, pushed or sent"
-   nxt=f"point origin's push URL at a GitHub repository you can push to, such as your fork (git remote set-url origin <url>; when git remote -v shows other push URLs, git remote set-url --push origin <url>), or keep the work local: `shipcraft ci --base {base_name}` is your finish line"
+   nxt=f"point origin's push URL at a GitHub repository you can push to, such as your fork (git remote set-url origin <url>; when git remote -v shows other push URLs, git remote set-url --push origin <url>), or keep the work local: `shipcraft ci --base {base_name}` is your finish line; for a project that does not use Shipcraft, `shipcraft export --base {base_name} <new branch>` first makes a branch without Shipcraft's files"
   else:
    what='shipcraft pr could not confirm that you can push to origin: '+reason
    why='pr pushes only to a repository GitHub says you can write to, and every later step needs gh too; nothing was fetched, pushed or sent'
