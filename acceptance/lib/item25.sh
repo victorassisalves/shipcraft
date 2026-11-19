@@ -135,7 +135,7 @@ def ok(*args):
     return out
 
 def hook(event):
-    return {'id': 'shipcraft-check' if event == 'commit-msg' else 'shipcraft-fecha',
+    return {'id': 'shipcraft-check' if event == 'commit-msg' else 'shipcraft-close',
             'name': 'shipcraft check' if event == 'commit-msg' else 'shipcraft close',
             'entry': 'shipcraft check --commit-msg' if event == 'commit-msg' else 'shipcraft close',
             'language': 'system', 'always_run': True, 'pass_filenames': False,
@@ -218,7 +218,7 @@ def integrated(tool, before, out):
         raw = before[str(CONFIG)][1]
         assert CONFIG.read_bytes().startswith(raw), 'reformatted the existing YAML prefix'
         data = yaml.safe_load(CONFIG.read_bytes())
-        found = [h for repo in data['repos'] for h in repo.get('hooks', []) if h.get('id') in ('shipcraft-check', 'shipcraft-fecha')]
+        found = [h for repo in data['repos'] for h in repo.get('hooks', []) if h.get('id') in ('shipcraft-check', 'shipcraft-close')]
         assert sorted(found, key=lambda h:h['id']) == sorted([hook(e) for e in EVENTS], key=lambda h:h['id']), 'hooks are not the exact seven-key maps'
         # The parser decides style: a string with brackets is not flow.
         node = yaml.compose(CONFIG.read_bytes())
@@ -232,7 +232,7 @@ def integrated(tool, before, out):
                 if k.value == 'hooks':
                     for h in v.value:
                         pairs = {key.value: val for key,val in h.value}
-                        if pairs['id'].value in ('shipcraft-check', 'shipcraft-fecha') and pairs['id'].value not in existing:
+                        if pairs['id'].value in ('shipcraft-check', 'shipcraft-close') and pairs['id'].value not in existing:
                             assert not h.flow_style and not pairs['stages'].flow_style, 'hook or stages written in flow style'
         if CONFIG.read_bytes() != raw: assert str(CONFIG) in commit_line, 'Commit line omits the YAML'
         for name, value in before.items():
@@ -464,6 +464,7 @@ def main(case):
                 data = yaml.safe_load(CONFIG.read_text())
                 CONFIG.write_text(yaml.safe_dump(data, sort_keys=True))
         elif kind == 'diferente':
+            part[2] = hook('post-commit' if part[2] == 'shipcraft-fecha' else 'commit-msg')['id']
             add_pair()
             data = yaml.safe_load(CONFIG.read_text())
             h = next(h for repo in data['repos'] for h in repo['hooks'] if h['id'] == part[2])

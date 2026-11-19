@@ -37,7 +37,7 @@ use suites::{drop_empty_checks, plan};
 
 pub use agents::agents_block_status;
 pub use config_file::AGENTS;
-pub use files::is_executable;
+pub use files::{is_executable, on_path};
 pub use hook::{hook_status, LEFTHOOK_FILES, LOCAL};
 pub(crate) use hook::{install_at, invocation, Install};
 pub use lefthook::{block_layout, insert_text, layout, lefthook_source, single_source};
@@ -170,6 +170,7 @@ pub fn run(repo: &Repo, options: &Options) -> Result<()> {
     }
     if let Hook::Tool(tool) = &hook {
         init_tool::notice(tool);
+        init_tool::stages_notice(tool);
     }
     if options.github {
         protect(repo, reviewer.is_some());

@@ -2850,13 +2850,19 @@ SH
     EXPECT="husky without v9 layout refuses; block-style pre-commit integrates without launcher"
     v1_start codex claude
     mkdir -p .husky && printf 'npx lint-staged\n' > .husky/pre-commit
-    init_must_refuse_hook ".husky/ at root without installed hook"
+    run_cmd_stdin /dev/null shipcraft init
+    [ "$RC" -ne 0 ] || fail ".husky/ at root without installed hook: accepted (rc=0)"
+    msg_check || fail ".husky/ at root without installed hook: refused, but $MSGERR"
+    chk ".husky/ at root without installed hook: exactly three refusal lines" awk 'NR == 1 && !/^shipcraft refused:/ { exit 1 } NR == 2 && !/^Why:/ { exit 1 } NR == 3 && !/^Next:/ { exit 1 } END { if (NR != 3) exit 1 }' "$OUT"
+    chk ".husky/ at root without installed hook: last 3 lines mention npx husky" last3_has 'npx husky'
+    chk ".husky/ at root without installed hook: did not create .shipcraft.toml, .github or .shipcraft" init_untouched
+    chk ".husky/ at root without installed hook: did not ask the reviewer before refusing" out_hasnt '(who reviews|provider|Which reviewer|created \.shipcraft\.toml)'
     chk "no hook installed in .git/hooks" test ! -e .git/hooks/commit-msg
     rm -rf .husky
     printf 'repos:\n  - repo: local\n    hooks: []\n' > .pre-commit-config.yaml
     cp .pre-commit-config.yaml "$CW/pcc.orig"
     must_accept "block-style .pre-commit-config.yaml integrates without launcher (item 25)" cmd shipcraft init
-    chk "prefix kept and the exact local pair of item 25" "$PY" -c 'import pathlib,sys,yaml; p=pathlib.Path(".pre-commit-config.yaml"); assert p.read_bytes().startswith(pathlib.Path(sys.argv[1]).read_bytes()); repos=yaml.safe_load(p.read_bytes())["repos"]; assert repos[0] == {"repo":"local","hooks":[]}; expected=[dict(id=i,name=n,entry=c,language="system",always_run=True,pass_filenames=False,stages=[e]) for i,n,c,e in [("shipcraft-check","shipcraft check","shipcraft check --commit-msg","commit-msg"),("shipcraft-fecha","shipcraft close","shipcraft close","post-commit")]]; assert len(repos)==2 and repos[1]["repo"]=="local" and sorted(repos[1]["hooks"],key=lambda h:h["id"])==sorted(expected,key=lambda h:h["id"])' "$CW/pcc.orig"
+    chk "prefix kept and the exact local pair of item 25" "$PY" -c 'import pathlib,sys,yaml; p=pathlib.Path(".pre-commit-config.yaml"); assert p.read_bytes().startswith(pathlib.Path(sys.argv[1]).read_bytes()); repos=yaml.safe_load(p.read_bytes())["repos"]; assert repos[0] == {"repo":"local","hooks":[]}; expected=[dict(id=i,name=n,entry=c,language="system",always_run=True,pass_filenames=False,stages=[e]) for i,n,c,e in [("shipcraft-check","shipcraft check","shipcraft check --commit-msg","commit-msg"),("shipcraft-close","shipcraft close","shipcraft close","post-commit")]]; assert len(repos)==2 and repos[1]["repo"]=="local" and sorted(repos[1]["hooks"],key=lambda h:h["id"])==sorted(expected,key=lambda h:h["id"])' "$CW/pcc.orig"
     chk "no hook installed in .git/hooks" test ! -e .git/hooks/commit-msg
     pass ;;
   v1-15a.2-husky-vazio-ou-junto-com-lefthook)
@@ -2864,7 +2870,13 @@ SH
     EXPECT="empty .husky/ and coexistence with lefthook.yml refused"
     v1_start codex claude
     mkdir -p .husky
-    init_must_refuse_hook "empty .husky/ directory at root"
+    run_cmd_stdin /dev/null shipcraft init
+    [ "$RC" -ne 0 ] || fail "empty .husky/ directory at root: accepted (rc=0)"
+    msg_check || fail "empty .husky/ directory at root: refused, but $MSGERR"
+    chk "empty .husky/ directory at root: exactly three refusal lines" awk 'NR == 1 && !/^shipcraft refused:/ { exit 1 } NR == 2 && !/^Why:/ { exit 1 } NR == 3 && !/^Next:/ { exit 1 } END { if (NR != 3) exit 1 }' "$OUT"
+    chk "empty .husky/ directory at root: last 3 lines mention npx husky" last3_has 'npx husky'
+    chk "empty .husky/ directory at root: did not create .shipcraft.toml, .github or .shipcraft" init_untouched
+    chk "empty .husky/ directory at root: did not ask the reviewer before refusing" out_hasnt '(who reviews|provider|Which reviewer|created \.shipcraft\.toml)'
     rm -rf .husky
     printf 'pre-commit:\n  commands:\n    lint:\n      run: echo ok\n' > lefthook.yml
     cp lefthook.yml "$CW/lh.orig"

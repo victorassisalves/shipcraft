@@ -20,6 +20,7 @@ mod glob;
 mod init;
 mod init_briefs;
 mod init_hooks;
+mod init_husky;
 mod init_msg;
 mod init_probe;
 mod init_tool;
