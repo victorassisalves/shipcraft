@@ -26,16 +26,33 @@ fn ident(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_' || b == b'$'
 }
 
+/// JavaScript's WhiteSpace (tab, VT, FF, space, U+00A0, U+FEFF, Unicode Zs).
+fn js_space(c: char) -> bool {
+    matches!(c, '\t' | '\u{0B}' | '\u{0C}' | ' ' | '\u{A0}' | '\u{FEFF}' | '\u{1680}' | '\u{2000}'..='\u{200A}')
+        || matches!(c, '\u{202F}' | '\u{205F}' | '\u{3000}')
+}
+
+/// JavaScript's LineTerminators (LF, CR, U+2028, U+2029).
+fn js_line_end(c: char) -> bool {
+    matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}')
+}
+
+/// The char at byte `i`, a char boundary.
+fn char_at(text: &str, i: usize) -> char {
+    text[i..].chars().next().expect("i is inside the text")
+}
+
 fn tokens(text: &str) -> Vec<Tok<'_>> {
     let bytes = text.as_bytes();
     let mut out = Vec::new();
     let mut i = 0;
     while i < bytes.len() {
         let b = bytes[i];
-        if b.is_ascii_whitespace() {
-            i += 1;
+        let c = char_at(text, i);
+        if js_space(c) || js_line_end(c) {
+            i += c.len_utf8();
         } else if bytes[i..].starts_with(b"//") {
-            i = bytes[i..].iter().position(|&c| c == b'\n').map_or(bytes.len(), |n| i + n);
+            i = text[i..].find(js_line_end).map_or(bytes.len(), |n| i + n);
         } else if bytes[i..].starts_with(b"/*") {
             i = bytes[i + 2..].windows(2).position(|w| w == b"*/").map_or(bytes.len(), |n| i + 2 + n + 2);
         } else if matches!(b, b'\'' | b'"' | b'`') {
@@ -60,7 +77,7 @@ fn tokens(text: &str) -> Vec<Tok<'_>> {
             out.push(Tok::Word(&text[start..i]));
         } else {
             out.push(Tok::Punct(b));
-            i += 1;
+            i += c.len_utf8();
         }
     }
     out
@@ -196,6 +213,20 @@ mod tests {
         assert_eq!(scan("{ setupFiles: \"./a\", globalSetup: `./g`, }"), [setup("./a"), setup("./g")]);
         assert_eq!(scan("{ 'setupFiles' /* c */ : [ './a', // x\n \"./b\", ] }"), [setup("./a"), setup("./b")]);
         assert_eq!(scan("{ setupFiles: [] }"), []);
+    }
+
+    #[test]
+    fn whitespace_and_line_ends_are_javascript_s() {
+        let lit = [setup("./src/test-setup.ts")];
+        assert_eq!(scan("export default {test:{setupFiles\u{2028}:\u{2029}\"./src/test-setup.ts\"}};"), lit);
+        assert_eq!(scan("\u{FEFF}{ setupFiles:\u{0B}[\u{A0}'./src/test-setup.ts'\u{3000},\u{2003}]\u{FEFF}}"), lit);
+        assert_eq!(scan("{\u{202F}root\u{205F}:\u{1680}import.meta.dirname\u{2029}}"), []);
+        assert_eq!(scan("require\u{2028}(\u{A0}'./a'\u{2009})"), [Import("./a".into())]);
+        // A `//` comment ends at U+2028 and U+2029 as at LF and CR.
+        assert_eq!(scan("// c\u{2028}{ setupFiles: x }"), [bad("setupFiles is not a string or an array of strings")]);
+        assert_eq!(scan("// c\u{2029}import './b'"), [Import("./b".into())]);
+        // Another non-ASCII character is not whitespace.
+        assert_eq!(scan("{ setupFiles: é'./a' }"), [bad("setupFiles is not a string or an array of strings")]);
     }
 
     #[test]
