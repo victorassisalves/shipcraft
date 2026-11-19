@@ -71,6 +71,7 @@ pub fn run(repo: &Repo, base: &str, pr: bool, row: &mut medicao::CiRow) -> Resul
             // 15c.4: a lefthook change in a commit (made with --no-verify) is the CI's.
             if !matches!(change, Change::Opened(_)) {
                 check_lefthook(repo, &parents, &snapshot, path)?;
+                crate::vitest_files::check_added(repo, &parents, &snapshot, path, lock)?;
             }
         }
         head_changes = changes;

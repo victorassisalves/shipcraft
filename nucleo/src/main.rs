@@ -44,6 +44,7 @@ mod revisao;
 mod size_block;
 mod suite;
 mod tsbuild;
+mod vitest_files;
 
 use git::Repo;
 use refusal::{Result, Stop};
