@@ -37,8 +37,8 @@ pub fn check_pr(repo: &Repo) -> Result<()> {
                     ),
                     "pr pushes the branch to origin before anything else, and a branch pushed to a repository that is not yours fails or lands in someone else's project; nothing was fetched, pushed or sent",
                     format!(
-                        "point origin's push URL at a GitHub repository you can push to, such as your fork (git remote set-url origin <url>; when git remote -v shows other push URLs, git remote set-url --push origin <url>), or keep the work local: `shipcraft ci --base {}` is your finish line",
-                        pr_base(repo)
+                        "point origin's push URL at a GitHub repository you can push to, such as your fork (git remote set-url origin <url>; when git remote -v shows other push URLs, git remote set-url --push origin <url>), or keep the work local: `shipcraft ci --base {base}` is your finish line; for a project that does not use Shipcraft, `shipcraft export --base {base} <new branch>` first makes a branch without Shipcraft's files",
+                        base = pr_base(repo)
                     ),
                 );
             }
