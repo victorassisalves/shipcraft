@@ -267,7 +267,7 @@ if mode=='real':
  lock=json.loads(locks[0].read_text());assert lock['state']=='open'
  assert len(lock['failing_at_red'])==1 and all(x.startswith('api:') for x in lock['failing_at_red']),lock
  assert 'packages/api/src/a.test.ts' in lock['files'] and 'packages/web/src/a.test.ts' in lock['files'],lock
- assert 'vitest.config.ts' not in lock['files'] and 'vitest.workspace.ts' not in lock['files'],lock
+ assert {'vitest.config.ts','vitest.workspace.ts','global71.ts'} <= set(lock['files']),lock
 if mode.startswith('check-fails-'):
  commit('chore: generated init71');base=git('rev-parse','HEAD');put('value71','changed\n');commit('feat: change71')
  if mode.endswith('log-fails'):
