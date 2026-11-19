@@ -45,8 +45,9 @@ def refusal(p,code,layer='hook'):
  lines=(p.stdout+p.stderr).strip().splitlines()[-3:]
  want(len(lines)==3 and all(s.startswith(t) for s,t in zip(lines,('shipcraft refused:','Why:','Next:'))),'three-line refusal: '+repr(lines))
  rs=[r for r in rows() if r['layer']==layer];want(bool(rs) and rs[-1]['code']==code,'expected '+code+' row: '+repr(rs[-1:]));return lines
-def notice(p,count,redo=False):
+def notice(p,count,redo=False,unmapped=0):
  line=f'shipcraft: controls: {count} passing case(s) of the changed test files; the hook runs them too'
+ if unmapped:line+=f'; {unmapped} passing case(s) could not be tied to a single test file, so they are not controls'
  lines=p.stdout.splitlines();want(lines.count(line)==1,'missing exact controls count: '+line)
  marker='shipcraft: RED '+('redone at' if redo else 'locked at')
  i=next((i for i,s in enumerate(lines) if s.startswith(marker)),-1)
@@ -201,9 +202,9 @@ elif mode=='second-run':shape(d,controls);notice(p,2);want(any('flaky98' in c fo
 elif mode=='all':shape(d,[]);notice(p,0)
 elif mode=='no-base':shape(d,[]);notice(p,0)
 elif mode=='unmapped':
- want('own:unknown98::unmapped98' in d['cases'],'unmapped report variant absent');shape(d,[]);notice(p,0)
+ want('own:unknown98::unmapped98' in d['cases'],'unmapped report variant absent');shape(d,[]);notice(p,0,unmapped=3)
 elif mode=='suite-local':
- want('own:unknown98::unmapped98' in d['cases'],'suite-local unmapped variant absent');shape(d,['other:tests.test_other98::test_other98']);notice(p,1)
+ want('own:unknown98::unmapped98' in d['cases'],'suite-local unmapped variant absent');shape(d,['other:tests.test_other98::test_other98']);notice(p,1,unmapped=3)
 elif mode=='red-log-fails':shape(d,controls);notice(p,2);want(Path('.git/shipcraft/runs.jsonl').is_dir(),'log blocker lost')
 # The remaining arms exercise commands past RED, without an early writer-shape gate.
 elif mode in ('redo','redo-head','redo4','redo-unchanged','redo-write-fails','redo-commit'):

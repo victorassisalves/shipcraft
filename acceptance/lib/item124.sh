@@ -57,7 +57,7 @@ for name in ('gh','codex','claude','curl','wget','ssh','verifier124'):
 env['PATH']=str(tools)+os.pathsep+env['PATH']
 if case=='control-release':
  history(reported=utc(T+50));tags();d,ls=decoded()
- assert d['deploys']==dict(value=dict(count=3,first=T,last=T+200,per_day=1296),n=3,missing=0,reason=None),d
+ assert d['deploys']==dict(value=dict(count=3,first=T,last=T+200,per_day=None),n=3,missing=0,reason=None),d
  assert d['lead_time']['value']==dict(median=15,p90=20) and d['rework_rate']['value']==0.5 and d['change_failure_rate']['value']==1/3 and d['time_to_recover']['value']==dict(median=50,p90=50),d
  assert ls['B']['reported_at']==utc(T+50) and ls['B']['fixes_release']=='v1.0.0' and calls.is_file(),ls
 elif case=='control-check':
@@ -72,10 +72,10 @@ elif case=='control-since':
  assert p.returncode==2 and not p.stdout and p.stderr==b'report: --since v9.0.0 is not a release tag on refs/heads/main\n' and not hit.exists(),p
 elif case=='fallback':
  history(reported=utc(T+50));(root/'.shipcraft.toml').unlink();d,_=decoded()
- assert d['deploys']==dict(value=dict(count=3,first=T,last=T+200,per_day=1296),n=3,missing=0,reason=None),d
+ assert d['deploys']==dict(value=dict(count=3,first=T,last=T+200,per_day=None),n=3,missing=0,reason=None),d
  assert d['git']==dict(default_branch='refs/heads/main',deploy='merge',deploy_source='fallback',merges=3,reason=None,release_tags=None,releases=0),d
  s=report().stdout.decode();assert 'git: default branch refs/heads/main; 3 merge(s); lock rows without log times come from the branch tip; release tags: vX.Y.Z; deploys are merges to the default branch (no release tag read)' in s,s
- assert 'deploys: 3 merge(s), first at '+utc(T)+', last at '+utc(T+200)+', per day 1296.00 (n 3, missing 0)' in s,s
+ assert 'deploys: 3 merge(s), first at '+utc(T)+', last at '+utc(T+200)+', per day - (first to last under a day) (n 3, missing 0)' in s,s
 elif case=='outside':
  history(reported=utc(T+50));git('tag','draken-platform-v0.1.0');d,_=decoded()
  assert d['deploys']['n']==3 and d['git']['releases']==0 and d['git']['deploy_source']=='fallback',d
@@ -115,7 +115,7 @@ elif case=='shipping-source':
  assert ls['B']['reported_at']==utc(T+50) and ls['B']['fixes_release']=='v1.0.0' and d['time_to_recover']['value']==dict(median=50,p90=50), (d,ls)
 elif case=='times':
  history(reported=utc(T-50),times=(T+200,T+100,T));d,_=decoded()
- assert d['deploys']['value']==dict(count=3,first=T,last=T+200,per_day=1296),d
+ assert d['deploys']['value']==dict(count=3,first=T,last=T+200,per_day=None),d
  assert d['lead_time']['value']==dict(median=115,p90=210) and d['change_failure_rate']['missing']==1,d
 elif case=='missing':
  history(reported=utc(T+50));write('.git/shipcraft/runs.jsonl','');d,_=decoded()

@@ -113,7 +113,7 @@ elif case=='root':
  d,_=decoded(p);old,_=decoded(a);old['since']=r1;assert d==old,(d,old)
 elif case=='line-order':
  history(reported=utc(T+50),times=(T+300,T+100,T));p=report('--json','--since',r2);assert p.returncode==0,p.stderr
- d,_=decoded(p);assert d['deploys']==dict(value=dict(count=2,first=T,last=T+100,per_day=1728),n=2,missing=0,reason=None) and d['rework_rate']['n']==1,d
+ d,_=decoded(p);assert d['deploys']==dict(value=dict(count=2,first=T,last=T+100,per_day=None),n=2,missing=0,reason=None) and d['rework_rate']['n']==1,d
 elif case=='unknown64':
  history();value='f'*64;p=report('--since',value);assert p.returncode==2 and not p.stdout and p.stderr==f'report: --since {value} is not a merge on refs/heads/main\n'.encode(),p.stderr
 elif case=='side':
