@@ -254,7 +254,7 @@ fn protect(repo: &Repo, review: bool) {
     let path = format!("repos/{{owner}}/{{repo}}/branches/{branch}/protection");
     match gh::with_input(repo, &["api", "-X", "PUT", &path], &body) {
         Ok(_) => println!("shipcraft: GitHub now requires {required} to merge into {branch}."),
-        Err(e) if e.contains("403") || e.contains("Upgrade to GitHub Pro") => {
+        Err(e) if e.contains("Upgrade to GitHub Pro") => {
             println!("shipcraft: this repository has no branch protection on its GitHub plan: `shipcraft merge` is the gate.")
         }
         Err(e) => println!("shipcraft: could not mark statuses as required ({e}); `shipcraft merge` is the gate."),

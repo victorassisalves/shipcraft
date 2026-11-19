@@ -313,7 +313,7 @@ if c=='first-passed': assert a['refusals']=={'red-already-green':1} and a['error
 if c=='missing-steps':
     fields(red_at=None,close_at=None,merge_at=200,red_to_close=None,close_to_merge=None,red_to_merge=None,state='merged')
     assert set(a['unobserved'])=={'red','close'},a
-if c=='open': fields(merge_at=None,red_to_close=40,close_to_merge=None,red_to_merge=None,state='open'); assert not days,days
+if c=='open': fields(merge_at=None,red_to_close=40,close_to_merge=None,red_to_merge=None,state='closed'); assert not days,days
 if c=='two-locks':
     assert set(locks)=={'lock-38-A','lock-38-B'},locks
     assert locks['lock-38-B']['red_to_merge']==140,locks

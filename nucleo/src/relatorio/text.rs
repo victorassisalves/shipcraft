@@ -35,6 +35,17 @@ pub(super) fn percent(x: f64) -> String {
 }
 
 /// Item 83's text forms of a value; `-` when it is empty (or not a number).
+/// Item 136: DORA's per-day rate; null only because the deploys read span
+/// more than zero and less than a day says so.
+pub(super) fn per_day(v: &Value) -> String {
+    let span = v["last"].as_i64().zip(v["first"].as_i64()).map(|(last, first)| last - first);
+    match (v["per_day"].as_f64(), span) {
+        (Some(x), _) => format!("{x:.2}"),
+        (None, Some(span)) if span > 0 && span < 86_400 => "- (first to last under a day)".to_string(),
+        _ => "-".to_string(),
+    }
+}
+
 fn show_with(v: &Value, f: impl Fn(f64) -> String) -> String {
     v.as_f64().map_or_else(|| "-".to_string(), f)
 }
@@ -360,7 +371,7 @@ fn dora_text(meta: &Value, dora: &Value) -> String {
             if merge { "merge" } else { "release" },
             time(&v["first"]),
             time(&v["last"]),
-            show_with(&v["per_day"], |x| format!("{x:.2}")),
+            per_day(v),
             tail(d)
         )
     };
