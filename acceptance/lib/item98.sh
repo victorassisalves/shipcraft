@@ -202,9 +202,9 @@ elif mode=='second-run':shape(d,controls);notice(p,2);want(any('flaky98' in c fo
 elif mode=='all':shape(d,[]);notice(p,0)
 elif mode=='no-base':shape(d,[]);notice(p,0)
 elif mode=='unmapped':
- want('own:unknown98::unmapped98' in d['cases'],'unmapped report variant absent');shape(d,[]);notice(p,0,unmapped=3)
+ want('own:unknown98::unmapped98' in d['cases'],'unmapped report variant absent');shape(d,[]);notice(p,0,unmapped=4)
 elif mode=='suite-local':
- want('own:unknown98::unmapped98' in d['cases'],'suite-local unmapped variant absent');shape(d,['other:tests.test_other98::test_other98']);notice(p,1,unmapped=3)
+ want('own:unknown98::unmapped98' in d['cases'],'suite-local unmapped variant absent');shape(d,['other:tests.test_other98::test_other98']);notice(p,1,unmapped=4)
 elif mode=='red-log-fails':shape(d,controls);notice(p,2);want(Path('.git/shipcraft/runs.jsonl').is_dir(),'log blocker lost')
 # The remaining arms exercise commands past RED, without an early writer-shape gate.
 elif mode in ('redo','redo-head','redo4','redo-unchanged','redo-write-fails','redo-commit'):

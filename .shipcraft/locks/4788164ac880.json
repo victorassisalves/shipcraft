@@ -50,7 +50,7 @@
     "acceptance/lib/item122.sh": "sha256:21a535239c17660465f4d11b6501329fe8d77ca71b09f53135e462068c3603b9",
     "acceptance/lib/item123.sh": "sha256:0c6246e737ce618fe6019382cef5a547d0e8634bec66eb1632d40f5afdeabf91",
     "acceptance/lib/item124.sh": "sha256:c168c8a6409611c7bd3b5752b86a7a35fcfa6c26bb43fbd0ecad0b3f4f9822c9",
-    "acceptance/lib/item125.sh": "sha256:79bae8ce9525d636c4f83bf562d2cf5d438704ae4495e668f6637f02f526d503",
+    "acceptance/lib/item125.sh": "sha256:8bfe89bce3c1d18906771ca116249eb4e7a4121caff1201ff404a00a4c8bbea6",
     "acceptance/lib/item126.sh": "sha256:9df4457a2b8d3a9cc8d704e8d75498ef0db900dce6acae69d558162b2f870411",
     "acceptance/lib/item127.sh": "sha256:947a85689726a3dbb729cfe1ca632ae4629086a958eb2053cc2fd798db6e34b8",
     "acceptance/lib/item128.sh": "sha256:13e387b0105da0346c15e3f8666fc53366a7617a880dae19257906e418bdbd51",
@@ -60,7 +60,7 @@
     "acceptance/lib/item132.sh": "sha256:007e59c6597df52dc328b9b55c2f00f2f1cefd7b14acfc6725deba891bb56a6e",
     "acceptance/lib/item133.sh": "sha256:7b4ad0bfd0c3bc8e49e659ccbb4f8da6338ca405c127c9a8b322dd7737ff4e60",
     "acceptance/lib/item134.sh": "sha256:1dd2b4ef4b64ceee0dc259ff2b5bee271bb7217ee416fb7bbcd8ce9b1ca43048",
-    "acceptance/lib/item136.sh": "sha256:4e9844594136085abc4345734f8e02d4cf27b2dc534680581b04d1bc111c6e9f",
+    "acceptance/lib/item136.sh": "sha256:97e2cd0173dbb963de9813138e988fcf6d5762a28f10d20fa471ca9088231865",
     "acceptance/lib/item16a.sh": "sha256:d83f4146699d5f19ce369613c49449b2c6b4de1bd96c66e17d7a4f2ce350e125",
     "acceptance/lib/item16b.sh": "sha256:dc35a66c9f04935c9c30086066745469119cb8f4a220e7bb83abc636ebca8119",
     "acceptance/lib/item17.sh": "sha256:5efdcfc0c8b419625cbc0e96a6aaac226387a5a7dad57f8ac90d64cdedbee4c1",
@@ -132,7 +132,7 @@
     "acceptance/lib/item91.sh": "sha256:2f423b9493ac8bcf6704df30cf08d558cebff46d3ec9baeedd37eea2f8450bd6",
     "acceptance/lib/item96.sh": "sha256:f6753eee8f7bfc8a2efe28a144d963c95e0bd6bdd945c84e5e9b0f5d69184258",
     "acceptance/lib/item97.sh": "sha256:9537fed1aae7516bf46909eeb6d26f6e2f409e03bcb2f6118b9a3c177141417c",
-    "acceptance/lib/item98.sh": "sha256:fdba9aa852db5ffbda666347feb0b251c76a5648a7c09567bcbddbe58f2ab6ce",
+    "acceptance/lib/item98.sh": "sha256:8870d90ba499cefe004431422d98460b8a54b4d3352c2ef8e07445f539c82e0f",
     "acceptance/lib/item99.sh": "sha256:d1afc65a5109f3990d95bdb218f87b87525786eeeaa7b78f28152219726a38a1",
     "acceptance/lib/rename.sh": "sha256:a6ac8f0def7da9c3bd4f55793c12d19067e66841179cfa47fdb78bd6bdc6860a",
     "acceptance/lib/v1.sh": "sha256:01c441f22cbaa071715b843966f61d18181db77d257aa5893dfadf29233905b3",
@@ -170,7 +170,7 @@
     "acceptance/pontos/132.md": "sha256:85914a385e58d99cbc555cef56334e7f0a0cfd817df6b6623600f47d7d2636d5",
     "acceptance/pontos/133.md": "sha256:dda7079d3f4a0388865d477ddd03bd8a8c52f0ea29c362595dbe5581fdaf85a6",
     "acceptance/pontos/134.md": "sha256:a9bcd5c398d637abe6b9ec3ff78d1de6b2249f58bdd84136bad64a10432e6824",
-    "acceptance/pontos/136.md": "sha256:2c6ec971d6d05e0df08d9799a2a047b17459794da915fc2f53f3a215976ee853",
+    "acceptance/pontos/136.md": "sha256:a2b5074554b94eff021c9512eeb311bc08e1efe7478ac7b5bdd059d6f9c0ab00",
     "acceptance/pontos/15a.md": "sha256:f1480266606c0a01f815315cb04ddea9544438df9dda618e06cf167ca9f971b2",
     "acceptance/pontos/15c.md": "sha256:81c2cc2c4613889e13e620e865cec3e6a8833e3f3c1f610d1d004eb6d7750e2a",
     "acceptance/pontos/16a.md": "sha256:862354f335d398149125128a4d520dff86d76c7eb10092b8a8fb3b3cc86e5e78",
@@ -277,7 +277,7 @@
     "acceptance/tools/shard.py": "sha256:5b530f4110b1aa23ebceafba1f8a59c0fb717f122dd8a1f05c927c8bdea6ae49",
     "acceptance/tools/slice.sh": "sha256:368aba67e2427b3f47573dc0d0caacdd5f973e647f1cad7915f704d2a9aebadf",
     "acceptance/tools/tmo.py": "sha256:03dd0904d07c119f115237889bb51392e2206b71fe77d694ffb3d1edd82b5c61",
-    "docs/spec.md": "sha256:f18d978613667871ede309955f759a61039558c87194f35946509c6ed18bcff0"
+    "docs/spec.md": "sha256:5feaeff505651fad7dedb40b510b4a877109080cbe5ed87f17bb1e0243249234"
   },
   "cases": [
     "acceptance:acceptance/lib/item124.sh::core::v1-124.after",
@@ -484,6 +484,7 @@
     "acceptance:acceptance/lib/item124.sh::core::v1-124.control-release",
     "acceptance:acceptance/lib/item124.sh::core::v1-124.fallback",
     "acceptance:acceptance/lib/item124.sh::core::v1-124.times",
+    "acceptance:acceptance/lib/item125.sh::core::v1-125.control-json",
     "acceptance:acceptance/lib/item125.sh::core::v1-125.line-order",
     "acceptance:acceptance/lib/item136.sh::core::v1-136.admin-status",
     "acceptance:acceptance/lib/item136.sh::core::v1-136.close-earliest",
@@ -552,7 +553,6 @@
     "acceptance:acceptance/lib/item125.sh::core::v1-125.control-collision",
     "acceptance:acceptance/lib/item125.sh::core::v1-125.control-fault",
     "acceptance:acceptance/lib/item125.sh::core::v1-125.control-gh-failure",
-    "acceptance:acceptance/lib/item125.sh::core::v1-125.control-json",
     "acceptance:acceptance/lib/item125.sh::core::v1-125.control-merge",
     "acceptance:acceptance/lib/item125.sh::core::v1-125.control-release",
     "acceptance:acceptance/lib/item125.sh::core::v1-125.control-release-id",
@@ -686,5 +686,5 @@
   "kind": "fix",
   "reported_at": "2026-11-18T16:20-03:00",
   "fixes_release": "v2.0.0",
-  "seal": "df9e5eae4137bd04b208a524ebf7cd379a541e7a3b768f250f243f52f209643e"
+  "seal": "d5066f68bf6344f38c794c59c027477b3b623e03d612194fe3018920cb967e2d"
 }

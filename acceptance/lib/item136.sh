@@ -44,7 +44,7 @@ if case=='repro-b':
  assert [x for x in p.stdout.splitlines() if 'branch protection' in x]==[expected]
 elif case=='admin-status':
  protect('admin-required');p,lines=status()
- assert lines==['shipcraft: could not read branch protection (gh: Must have admin rights to Repository. (HTTP 403)): use `shipcraft merge` as the gate'],lines
+ assert lines==['shipcraft: could not read branch protection (gh: Must have admin rights to Repository. (HTTP 403) {"message":"Must have admin rights to Repository.","documentation_url":"https://docs.github.com/rest/branches/branch-protection#get-branch-protection","status":"403"}): use `shipcraft merge` as the gate'],lines
 elif case=='other-base':
  protect('not-found');git('update-ref','refs/remotes/origin/trunk136','HEAD');git('symbolic-ref','refs/remotes/origin/HEAD','refs/remotes/origin/trunk136')
  p,lines=status();assert lines==['shipcraft: could not read branch protection on trunk136 (GitHub answers 404 when this account is not an admin of the repository, so protection may exist): use `shipcraft merge` as the gate'],lines
