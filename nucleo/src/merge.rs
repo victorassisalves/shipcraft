@@ -153,6 +153,8 @@ pub fn status(repo: &Repo) -> Result<()> {
         .map(|(path, _)| path)
         .collect();
     println!("shipcraft: open locks: {}", if open.is_empty() { "none".to_string() } else { open.join(", ") });
+    // Item 134: a bare python3 beside the project's venv (read-only).
+    crate::python_env::status_lines(repo, &config).iter().for_each(|line| println!("{line}"));
     let path = format!("repos/{{owner}}/{{repo}}/branches/{base}/protection");
     let line = match gh::run(repo, &["api", &path]) {
         Ok(out) => {

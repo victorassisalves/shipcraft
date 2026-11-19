@@ -36,6 +36,7 @@ mod narrow;
 mod origin;
 mod pr;
 mod processo;
+mod python_env;
 mod red;
 mod refusal;
 mod relatorio;

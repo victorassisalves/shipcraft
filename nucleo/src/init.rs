@@ -24,6 +24,7 @@ use crate::init_msg::{self, Plan};
 use crate::init_tool;
 use crate::lang::{self, Lang};
 use crate::lock::LOCK_DIR;
+use crate::python_env;
 use crate::refusal::{failed, Result};
 use crate::tsbuild;
 use std::fs;
@@ -97,6 +98,12 @@ pub fn run(repo: &Repo, options: &Options) -> Result<()> {
     let unchecked =
         if kept || lang != Some(Lang::Node) { Vec::new() } else { drop_empty_checks(repo, &mut suites, &built) };
     let workspace = !matches!(suites.as_slice(), [(_, raiz, _)] if raiz == ".");
+    // Item 134: the project's Python, only in a config this run writes.
+    let python = (!kept && custom.is_none() && lang == Some(Lang::Python) && !workspace)
+        .then(|| python_env::Choice::pick(repo.root()));
+    if let Some(choice) = &python {
+        suites[0].2.command = choice.command();
+    }
     // Item 71: after [build] and item 56's judgement, before anything is written.
     let (probed, named) = if !kept && lang == Some(Lang::Node) && workspace {
         crate::init_probe::convert(repo.root(), &mut suites)
@@ -107,7 +114,10 @@ pub fn run(repo: &Repo, options: &Options) -> Result<()> {
         None if custom.is_some() => println!("shipcraft: test command run as written (filter = \"command\")"),
         // Item 90: a kept config with no language chosen: neither line applies.
         None => {}
-        Some(lang) if !workspace => println!("shipcraft: language {} (runner {})", lang.name(), suites[0].2.runner),
+        Some(lang) if !workspace => {
+            println!("shipcraft: language {} (runner {})", lang.name(), suites[0].2.runner);
+            python.iter().for_each(|choice| println!("{}", choice.line()));
+        }
         Some(lang) => println!("shipcraft: workspace {} with {} suite(s)", lang.name(), suites.len()),
     }
     for line in &probed {
@@ -191,6 +201,11 @@ pub fn run(repo: &Repo, options: &Options) -> Result<()> {
     // Item 131: the project's install, whose packages a `git add -A` would stage.
     if local && modules_not_ignored(repo.root()) {
         println!("shipcraft: node_modules is not ignored by git: add it to .gitignore before committing, or `git add -A` stages the installed packages");
+    }
+    if let Some(warning) =
+        python.as_ref().and_then(|c| c.venv()).and_then(|d| python_env::unignored_warning(repo.root(), d))
+    {
+        println!("{warning}");
     }
     // Item 91: a new config whose root suite got vitest only by default.
     if !kept && lang == Some(Lang::Node) && !workspace && lang::node_runner(repo.root()).is_none() {
