@@ -9,6 +9,7 @@ use crate::lock::{lock_files, new_digest, new_lock_path, Fix, Lock, LOCK_DIR};
 use crate::narrow::{self, Chosen, Fallback, Plan};
 use crate::refusal::{failed, refuse, short_list, Result};
 use crate::suite::{self, Narrowed};
+use crate::vitest_files;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, Write};
@@ -90,6 +91,7 @@ pub fn run(
     print_dropped(&dropped);
     left.print();
     print_controls(&lock);
+    vitest_files::print_beside(&config, &lock);
     println!(
         "shipcraft: RED locked at {path}: {} file(s), {} case(s), {} failing: {}",
         lock.files.len(),
@@ -182,6 +184,7 @@ pub fn redo(
     left.print();
     *unchanged = Some(left);
     print_controls(&lock);
+    vitest_files::print_beside(&config, &lock);
 
     let minus = |a: &[String], b: &[String]| a.iter().filter(|case| !b.contains(case)).cloned().collect::<Vec<_>>();
     let list = |cases: Vec<String>| if cases.is_empty() { "none".to_string() } else { cases.join(", ") };
@@ -716,10 +719,16 @@ fn refuse_a_suite_without_tests(
     Ok(())
 }
 
-/// The hash of every test file and of `.shipcraft.toml`, by path.
+/// The hash of every test file and of `.shipcraft.toml`, by path; item 132:
+/// and of what vitest reads beside the tests, or `setup-unreadable`.
 fn locked_files(repo: &Repo, config: &Config) -> Result<BTreeMap<String, String>> {
+    let found = vitest_files::discover(repo, config)?;
+    if let Some((module, why)) = &found.unreadable {
+        return vitest_files::refuse_unreadable(module, why);
+    }
     let mut files = BTreeMap::new();
-    for path in config.test_files(repo)?.iter().map(String::as_str).chain([CONFIG_FILE]) {
+    let tests = config.test_files(repo)?;
+    for path in tests.iter().chain(&found.paths).map(String::as_str).chain([CONFIG_FILE]) {
         let bytes = fs::read(repo.path(path)).map_err(|e| failed(format!("read {path}: {e}")))?;
         files.insert(path.to_string(), new_digest(&bytes));
     }
