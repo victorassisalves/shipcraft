@@ -73,7 +73,7 @@ pub fn run(
     let left = leave_out(repo, &config, &changed, all, None, &failing)?;
     let (cases, failing) = without(&left.cases, report.cases_run(), failing);
     // Item 98: from the report `red` accepted, before item 53's second run.
-    let controls = controls(repo, &config, &changed, all, &report, &cases)?;
+    let (controls, untied) = controls(repo, &config, &changed, all, &report, &cases)?;
 
     let files = locked_files(repo, &config)?;
     refuse_a_suite_without_tests(repo, &config, &files, &failing)?;
@@ -90,7 +90,7 @@ pub fn run(
 
     print_dropped(&dropped);
     left.print();
-    print_controls(&lock);
+    print_controls(&lock, untied);
     vitest_files::print_beside(&config, &lock);
     println!(
         "shipcraft: RED locked at {path}: {} file(s), {} case(s), {} failing: {}",
@@ -159,8 +159,8 @@ pub fn redo(
     let (run, failing) = without(&left.cases, run, failing);
     // Item 98: with no changed paths (the base is HEAD) the old lock's controls
     // that still hold are kept; otherwise they are recomputed as `red` does.
-    let controls = match &changed {
-        Ok(changed) if !all && changed.paths.is_empty() => kept_controls(&old, &run, &report),
+    let (controls, untied) = match &changed {
+        Ok(changed) if !all && changed.paths.is_empty() => (kept_controls(&old, &run, &report), 0),
         _ => controls(repo, &config, &changed, all, &report, &run)?,
     };
     let files = locked_files(repo, &config)?;
@@ -183,7 +183,7 @@ pub fn redo(
     print_dropped(&dropped);
     left.print();
     *unchanged = Some(left);
-    print_controls(&lock);
+    print_controls(&lock, untied);
     vitest_files::print_beside(&config, &lock);
 
     let minus = |a: &[String], b: &[String]| a.iter().filter(|case| !b.contains(case)).cloned().collect::<Vec<_>>();
@@ -531,10 +531,12 @@ fn leave_out(
 }
 
 /// Item 98: the controls, byte-sorted: the cases of `cases` that passed in
-/// `report` (the report `red` accepted) and that item 81's mapper holds, per
-/// suite and over all of the suite's passing cases at once, to a changed test
-/// file. None with `--all` or without changed paths; none for a suite the
-/// mapper cannot map.
+/// `report` (the report `red` accepted) and that item 81's mapper, its map
+/// inferred per suite over all of the suite's passing cases at once, holds
+/// (item 136: case by case) to one file that is a changed test file. None with
+/// `--all` or without changed paths; none for a suite the mapper cannot map.
+/// Item 136: also how many passing cases could not be tied to a single file
+/// (a suite without a map, or a case with no file or more than one).
 fn controls(
     repo: &Repo,
     config: &Config,
@@ -542,16 +544,17 @@ fn controls(
     all: bool,
     report: &Report,
     cases: &[String],
-) -> Result<Vec<String>> {
-    let Ok(changed) = changed else { return Ok(Vec::new()) };
+) -> Result<(Vec<String>, usize)> {
+    let Ok(changed) = changed else { return Ok((Vec::new(), 0)) };
     if all {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), 0));
     }
     let changed_paths: BTreeSet<&[u8]> = changed.paths.iter().map(|(_, path)| path.as_slice()).collect();
     let passing: Vec<&String> = cases.iter().filter(|case| report.outcome(case) == Some(Outcome::Passed)).collect();
     let locked = config.test_files(repo)?;
     let present = repo.files()?;
     let mut controls = BTreeSet::new();
+    let mut untied = BTreeSet::new();
     for suite in config.suites() {
         let own: Vec<(&String, &str)> =
             passing.iter().filter_map(|case| config.own(&suite, case).map(|id| (*case, id))).collect();
@@ -559,27 +562,38 @@ fn controls(
             continue;
         }
         let ids: Vec<&str> = own.iter().map(|(_, id)| *id).collect();
-        let held = suite::holders(repo.root(), &suite, &locked, &present, &ids);
-        controls.extend(held_in_changed(&own, held.as_deref(), &suite.prefix(), &changed_paths));
+        let held = suite::holder_each(repo.root(), &suite, &locked, &present, &ids);
+        let (held, not_tied) = held_in_changed(&own, held.as_deref(), &suite.prefix(), &changed_paths);
+        controls.extend(held);
+        untied.extend(not_tied);
     }
-    Ok(controls.into_iter().collect())
+    let untied = untied.iter().filter(|case| !controls.contains(*case)).count();
+    Ok((controls.into_iter().collect(), untied))
 }
 
 /// Item 98: the cases of one suite (`own`, with their ids in the suite) whose
-/// file, `held` in the same order from the suite's root, is a changed path;
-/// none when the suite has no mapping.
+/// one file, `held` in the same order from the suite's root, is a changed
+/// path; none when the suite has no mapping. Item 136: and the cases not tied
+/// to a single file (all of them when the suite has no mapping).
 fn held_in_changed(
     own: &[(&String, &str)],
-    held: Option<&[String]>,
+    held: Option<&[Option<String>]>,
     prefix: &str,
     changed_paths: &BTreeSet<&[u8]>,
-) -> Vec<String> {
-    let Some(held) = held else { return Vec::new() };
-    own.iter()
-        .zip(held)
-        .filter(|(_, file)| changed_paths.contains(format!("{prefix}{file}").as_bytes()))
-        .map(|((case, _), _)| (*case).clone())
-        .collect()
+) -> (Vec<String>, Vec<String>) {
+    let Some(held) = held else { return (Vec::new(), own.iter().map(|(case, _)| (*case).clone()).collect()) };
+    let mut controls = Vec::new();
+    let mut untied = Vec::new();
+    for ((case, _), file) in own.iter().zip(held) {
+        match file {
+            Some(file) if changed_paths.contains(format!("{prefix}{file}").as_bytes()) => {
+                controls.push((*case).clone())
+            }
+            Some(_) => {}
+            None => untied.push((*case).clone()),
+        }
+    }
+    (controls, untied)
 }
 
 /// Item 98: a redo with no changed paths keeps the old lock's controls that
@@ -594,12 +608,20 @@ fn kept_controls(old: &Lock, cases: &[String], report: &Report) -> Vec<String> {
 
 /// Item 98: the line right before `RED locked at` / `RED redone at`, when the
 /// lock written is format 5 or 6.
-fn print_controls(lock: &Lock) {
+/// Item 136: with `untied` above 0, the clause saying how many passing cases
+/// could not be tied to a single test file.
+fn print_controls(lock: &Lock, untied: usize) {
     if lock.controls.is_some() {
-        println!(
-            "shipcraft: controls: {} passing case(s) of the changed test files; the hook runs them too",
-            lock.controls().len()
-        );
+        println!("{}", controls_line(lock.controls().len(), untied));
+    }
+}
+
+fn controls_line(n: usize, untied: usize) -> String {
+    let line = format!("shipcraft: controls: {n} passing case(s) of the changed test files; the hook runs them too");
+    if untied == 0 {
+        line
+    } else {
+        format!("{line}; {untied} passing case(s) could not be tied to a single test file, so they are not controls")
     }
 }
 
@@ -828,13 +850,38 @@ mod tests {
     fn a_control_is_a_case_held_to_a_changed_path() {
         let (a, b, c) = ("t::pass".to_string(), "t::also".to_string(), "u::pass".to_string());
         let own = [(&a, "t::pass"), (&b, "t::also"), (&c, "u::pass")];
-        let held = strings(&["tests/t.py", "tests/t.py", "tests/u.py"]);
+        let held = vec![Some("tests/t.py".to_string()), Some("tests/t.py".to_string()), Some("tests/u.py".to_string())];
         let changed: BTreeSet<&[u8]> = [b"api/tests/t.py".as_slice()].into();
-        assert_eq!(held_in_changed(&own, Some(&held), "api/", &changed), strings(&["t::pass", "t::also"]));
+        let none = Vec::<String>::new();
+        assert_eq!(
+            held_in_changed(&own, Some(&held), "api/", &changed),
+            (strings(&["t::pass", "t::also"]), none.clone())
+        );
         // Without the suite's prefix the path is not the changed one.
-        assert!(held_in_changed(&own, Some(&held), "", &changed).is_empty());
-        // A suite the mapper cannot map contributes nothing.
-        assert!(held_in_changed(&own, None, "api/", &changed).is_empty());
+        assert_eq!(held_in_changed(&own, Some(&held), "", &changed), (none.clone(), none.clone()));
+        // A suite the mapper cannot map contributes nothing, and none of its cases is tied.
+        assert_eq!(
+            held_in_changed(&own, None, "api/", &changed),
+            (none.clone(), strings(&["t::pass", "t::also", "u::pass"]))
+        );
+        // Item 136: a case with no single file is not a control and does not empty the suite.
+        let held = vec![Some("tests/t.py".to_string()), None, Some("tests/u.py".to_string())];
+        assert_eq!(
+            held_in_changed(&own, Some(&held), "api/", &changed),
+            (strings(&["t::pass"]), strings(&["t::also"]))
+        );
+    }
+
+    #[test]
+    fn the_controls_line_names_the_untied_cases_only_when_there_are_some() {
+        assert_eq!(
+            controls_line(2, 0),
+            "shipcraft: controls: 2 passing case(s) of the changed test files; the hook runs them too"
+        );
+        assert_eq!(
+            controls_line(29, 9),
+            "shipcraft: controls: 29 passing case(s) of the changed test files; the hook runs them too; 9 passing case(s) could not be tied to a single test file, so they are not controls"
+        );
     }
 
     #[test]
