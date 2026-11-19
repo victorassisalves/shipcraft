@@ -15,7 +15,7 @@ use std::path::Path;
 /// Suites to write: (nome, raiz, profile).
 type Suites = Vec<(String, String, Profile)>;
 
-pub(super) fn plan(repo: &Repo, flag: Option<&str>) -> Result<(Option<Lang>, Suites)> {
+pub(super) fn plan(repo: &Repo, flag: Option<&str>, inv: &str) -> Result<(Option<Lang>, Suites)> {
     if flag.is_none() {
         if let Some((lang, patterns)) = lang::workspace(repo.root()) {
             let suites = workspace_suites(repo, lang, &patterns)?;
@@ -24,7 +24,7 @@ pub(super) fn plan(repo: &Repo, flag: Option<&str>) -> Result<(Option<Lang>, Sui
             }
         }
     }
-    let Some(lang) = choose_lang(repo, flag)? else {
+    let Some(lang) = choose_lang(repo, flag, inv)? else {
         return Ok((None, Vec::new()));
     };
     let profile = lang.profile(repo.root(), "node_modules/.bin/");
@@ -125,7 +125,7 @@ fn checks_no_file(path: &Path) -> bool {
         && config.get("references").and_then(|v| v.as_array()).is_some_and(|r| !r.is_empty())
 }
 
-fn choose_lang(repo: &Repo, flag: Option<&str>) -> Result<Option<Lang>> {
+fn choose_lang(repo: &Repo, flag: Option<&str>, inv: &str) -> Result<Option<Lang>> {
     if let Some(name) = flag {
         return match Lang::from_name(name) {
             Some(lang) => Ok(Some(lang)),
@@ -142,11 +142,13 @@ fn choose_lang(repo: &Repo, flag: Option<&str>) -> Result<Option<Lang>> {
         // Item 90: a config already says how to run the tests, in whatever form
         // (a link, a broken link and a folder count); later steps judge it.
         _ if repo.path(CONFIG_FILE).symlink_metadata().is_ok() => Ok(None),
+        // Item 131: a `package.json` with no runner and no workspace is Node.
+        [] if repo.path("package.json").exists() && lang::workspace(repo.root()).is_none() => Ok(Some(Lang::Node)),
         [] => refuse(
             "lang-unrecognized",
             "could not recognize the project language",
             "shipcraft recognizes a language by its project file, and found none it knows; it can also run any test command that writes JUnit",
-            format!("specify the language: shipcraft init --lang python|node|go; for any other: {OTHER_FORM}"),
+            format!("specify the language: {inv} init --lang python|node|go; for any other: {inv} {OTHER_FORM}"),
         ),
         found => refuse(
             "lang-multiple",
@@ -155,7 +157,7 @@ fn choose_lang(repo: &Repo, flag: Option<&str>) -> Result<Option<Lang>> {
                 found.iter().map(|l| l.name()).collect::<Vec<_>>().join(", ")
             ),
             "each project has a runner and a suite; shipcraft does not choose for you",
-            format!("specify the language: shipcraft init --lang python|node|go; for any other: {OTHER_FORM}"),
+            format!("specify the language: {inv} init --lang python|node|go; for any other: {inv} {OTHER_FORM}"),
         ),
     }
 }

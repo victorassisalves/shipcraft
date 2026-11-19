@@ -297,19 +297,9 @@ fn setup_hint() {
     }
 }
 
-/// Item 69: the one `init` command the hint names. The project's install (item
-/// 58's rule) gets `pnpm exec` when a regular `pnpm-lock.yaml` sits at the root
-/// and `pnpm` is on `PATH`, `npx --` otherwise; anything else is `shipcraft init`.
-fn init_command(root: &std::path::Path) -> &'static str {
-    if !matches!(init::install_at(root), init::Install::Project) {
-        return "shipcraft init";
-    }
-    let lock = root.join("pnpm-lock.yaml").symlink_metadata().is_ok_and(|m| m.file_type().is_file());
-    if lock && init::on_path("pnpm") {
-        "pnpm exec shipcraft init"
-    } else {
-        "npx -- shipcraft init"
-    }
+/// Item 69: the one `init` command the hint names, by item 131's shared rule.
+fn init_command(root: &std::path::Path) -> String {
+    format!("{} init", init::invocation(root, &init::install_at(root)))
 }
 
 fn invalid(args: &[&str]) -> Stop {
