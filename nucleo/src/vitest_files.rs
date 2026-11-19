@@ -14,7 +14,6 @@ use crate::refusal::{failed, refuse, short_list, Result};
 use scan::Event;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::io::ErrorKind;
 
 /// The extensions of a runner config name.
 const CONFIG_EXTS: [&str; 6] = ["ts", "mts", "cts", "js", "mjs", "cjs"];
@@ -123,7 +122,7 @@ pub fn discover(repo: &Repo, config: &Config) -> Result<Found> {
             Kind::Link => {
                 why.entry(path.clone()).or_insert_with(|| format!("{} is a symbolic link", one_line(&path)));
             }
-            Kind::Absent | Kind::Folder => {}
+            Kind::Folder => {}
         }
     }
     let mut seen: BTreeSet<String> = queue.iter().cloned().collect();
@@ -160,7 +159,7 @@ pub fn discover(repo: &Repo, config: &Config) -> Result<Found> {
                         named = true;
                         continue;
                     }
-                    Kind::Absent | Kind::Folder => continue,
+                    Kind::Folder => continue,
                 }
                 if !import {
                     paths.insert(candidate);
@@ -183,17 +182,16 @@ enum Kind {
     File,
     Link,
     Folder,
-    Absent,
 }
 
-/// A repository path as `fs::symlink_metadata` sees it; a path git lists but
-/// the tree no longer has is absent.
+/// A repository path as `fs::symlink_metadata` sees it. Every path asked is one
+/// `repo.files()` lists, so one the tree no longer has (a tracked file deleted)
+/// is a read failure, as `locked_files` fails on it: exit 2, no lock written.
 fn kind(repo: &Repo, path: &str) -> Result<Kind> {
     match fs::symlink_metadata(repo.path(path)) {
         Ok(meta) if meta.file_type().is_symlink() => Ok(Kind::Link),
         Ok(meta) if meta.is_dir() => Ok(Kind::Folder),
         Ok(_) => Ok(Kind::File),
-        Err(e) if e.kind() == ErrorKind::NotFound => Ok(Kind::Absent),
         Err(e) => Err(failed(format!("read {path}: {e}"))),
     }
 }
@@ -281,6 +279,53 @@ mod tests {
 
     fn found(set: BTreeSet<String>) -> Vec<String> {
         set.into_iter().collect()
+    }
+
+    /// A git repository with `files` committed, then `deleted` removed from the tree.
+    fn repo_with(files: &[(&str, &str)], deleted: &[&str]) -> (crate::git::TempDir, Repo) {
+        let dir = crate::git::TempDir::new("shipcraft-vitest-files-").unwrap();
+        let git = |args: &[&str]| assert!(crate::git::git_in(dir.path(), args).unwrap().status.success());
+        git(&["init", "-q"]);
+        for (path, text) in files {
+            let full = dir.path().join(path);
+            fs::create_dir_all(full.parent().unwrap()).unwrap();
+            fs::write(full, text).unwrap();
+        }
+        git(&["add", "-A"]);
+        for path in deleted {
+            fs::remove_file(dir.path().join(path)).unwrap();
+        }
+        let repo = Repo::at_root(dir.path());
+        (dir, repo)
+    }
+
+    #[test]
+    fn a_tracked_path_deleted_from_the_tree_fails_the_discovery() {
+        let config = Config::parse("[[suite]]\ncommand = \"vitest run\"\nglobs = [\"src/**/*.test.ts\"]\n").unwrap();
+        let files = [
+            ("vitest.config.ts", "import './base'\nexport default { test: { setupFiles: ['./src/setup'] } }"),
+            ("base.ts", "export {}"),
+            ("src/setup.ts", "// setup"),
+        ];
+        let (_dir, repo) = repo_with(&files, &[]);
+        let whole = discover(&repo, &config).unwrap();
+        assert!(whole.unreadable.is_none());
+        assert_eq!(found(whole.paths), paths(&["base.ts", "src/setup.ts", "vitest.config.ts"]));
+        // A runner config, a module reached by an import and a setup file candidate.
+        for gone in ["vitest.config.ts", "base.ts", "src/setup.ts"] {
+            let (_dir, repo) = repo_with(&files, &[gone]);
+            match discover(&repo, &config) {
+                Err(crate::refusal::Stop::Failed(message)) => {
+                    assert!(message.starts_with(&format!("read {gone}: ")), "{message}")
+                }
+                _ => panic!("{gone} deleted from the tree must fail the discovery"),
+            }
+        }
+        // A setup literal with no candidate git lists is still unreadable.
+        let missing = [("vitest.config.ts", "export default { test: { setupFiles: './nope.ts' } }")];
+        let (_dir, repo) = repo_with(&missing, &[]);
+        let why = discover(&repo, &config).unwrap().unreadable;
+        assert_eq!(why, Some(("vitest.config.ts".into(), "./nope.ts names no file in the repository".into())));
     }
 
     #[test]
