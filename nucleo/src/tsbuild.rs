@@ -44,7 +44,7 @@ pub fn infer(repo: &Repo) -> Result<Option<(String, Vec<String>)>> {
     let before = untracked(repo);
     let probed = suite::probe_build(&command, repo.root())?;
     if let Err((how, line)) = &probed {
-        let line = line.as_ref().map(|l| format!(": {l}")).unwrap_or_default();
+        let line = line.as_ref().map(|l| format!(": {}", fold(l))).unwrap_or_default();
         println!("shipcraft: skipped the optional [build] step: `{command}` {how}{line}");
         println!("Why: init writes [build] only after it passes in the tree; a failing [build] would refuse every shipcraft ci and shipcraft red, so init goes on without it");
         println!(
@@ -53,8 +53,7 @@ pub fn infer(repo: &Repo) -> Result<Option<(String, Vec<String>)>> {
         );
     }
     if let (Some(before), Some(after)) = (before, untracked(repo)) {
-        let left: Vec<String> =
-            after.difference(&before).map(|path| crate::red::one_line(&String::from_utf8_lossy(path))).collect();
+        let left: Vec<String> = after.difference(&before).map(|path| fold(&String::from_utf8_lossy(path))).collect();
         if !left.is_empty() {
             println!(
                 "shipcraft: the build left files git does not ignore: {}; add them to .gitignore before committing",
@@ -63,6 +62,13 @@ pub fn infer(repo: &Repo) -> Result<Option<(String, Vec<String>)>> {
         }
     }
     Ok(probed.is_ok().then_some((command, dirs)))
+}
+
+/// Item 131: one line for the probe's lines: each run of whitespace and control
+/// characters becomes one space, with no other escaping.
+fn fold(text: &str) -> String {
+    let parts = text.split(|c: char| c.is_whitespace() || c.is_control()).filter(|part| !part.is_empty());
+    parts.collect::<Vec<_>>().join(" ")
 }
 
 /// Item 131: a TOML basic string on one line, `"` and `\` escaped (the `toml`
@@ -191,7 +197,12 @@ fn by_hand(command: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::basic_string;
+    use super::{basic_string, fold};
+
+    #[test]
+    fn fold_turns_whitespace_and_control_runs_into_one_space() {
+        assert_eq!(fold("b\nname\t \u{1}x\u{2028}y"), "b name x y");
+    }
 
     #[test]
     fn basic_string_reads_back_as_the_same_command() {

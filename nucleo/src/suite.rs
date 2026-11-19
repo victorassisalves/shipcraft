@@ -375,13 +375,13 @@ pub fn run_build(command: &str, dir: &Path) -> Result<std::result::Result<(), St
 
 /// Item 131: `init`'s quiet `[build]` probe. Runs as `run_build` does, writes
 /// neither stream anywhere, and keeps only the first non-blank line of stderr,
-/// else of stdout, folded to one line; on failure, how it ended and that line.
+/// else of stdout; on failure, how it ended and that line.
 pub fn probe_build(command: &str, dir: &Path) -> Result<std::result::Result<(), (String, Option<String>)>> {
     let ran = shell_with(command, dir, false, &[], false)?;
     if ran.status.success() {
         return Ok(Ok(()));
     }
-    Ok(Err((ended(ran.status), ran.first_err.or(ran.first_out).map(|line| one_line(&line)))))
+    Ok(Err((ended(ran.status), ran.first_err.or(ran.first_out))))
 }
 
 fn ended(status: ExitStatus) -> String {
