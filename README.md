@@ -173,7 +173,7 @@ Upgrading: with the npm install, `pnpm add -DE shipcraft@latest` (or `npm i -D -
 |---|---|
 | Languages | Python, TypeScript/JavaScript, Go, and any runner that writes JUnit XML through a generic suite |
 | Runners | pytest, vitest, jest, `go test` / gotestsum, anything else via `[[suite]]` |
-| Hook managers | plain git hooks, lefthook, husky, pre-commit |
+| Hook managers | plain git hooks, lefthook, husky (9, 7 and 8), pre-commit and prek |
 | Repositories | single package or monorepo (several `[[suite]]` entries), TypeScript project references (`[build]`) |
 | CI | local (on your machine, no runner needed) or GitHub Actions |
 | Review | a separate agent session: Codex, Claude or Gemini CLI |

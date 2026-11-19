@@ -2,14 +2,16 @@
 //! framework through the `commit-msg` (item 17): `shipcraft check --commit-msg` in
 //! the `commit-msg` and `shipcraft close` in the `post-commit`. Their `pre-commit`
 //! is not touched: its formatters run before, and the `commit-msg` sees the
-//! final index.
+//! final index. Item 133: husky 7 and 8 (`init_husky`), prek's launchers and the
+//! hooks with no stages.
 
 use crate::config::CONFIG_FILE;
 use crate::git::Repo;
-use crate::init::{is_executable, layout, single_source, LOCAL};
-use crate::refusal::{failed, refuse, Result, Stop};
+use crate::init::{is_executable, layout, on_path, single_source, LOCAL};
+use crate::refusal::{failed, refuse, short_list, Result, Stop};
 use serde_norway::Value;
 use std::fs;
+use std::path::Path;
 
 pub const PRE_COMMIT_CONFIG: &str = ".pre-commit-config.yaml";
 /// The husky files the init writes, and the line of each (point 1).
@@ -18,9 +20,11 @@ pub const HUSKY: [(&str, &str); 2] =
 /// The two local hooks of the pre-commit framework (point 2): id, entry, stage.
 const HOOKS: [(&str, &str, &str); 2] = [
     ("shipcraft-check", "shipcraft check --commit-msg", "commit-msg"),
-    ("shipcraft-fecha", "shipcraft close", "post-commit"),
+    ("shipcraft-close", "shipcraft close", "post-commit"),
 ];
-const TWICE: &str = "with it, the suite would run twice per commit: remove it";
+/// 133.5: the post-commit hook's id before 2.76, still read as it.
+const LEGACY: &str = "shipcraft-fecha";
+pub(crate) const TWICE: &str = "with it, the suite would run twice per commit: remove it";
 
 /// What the integration writes: (file, old text or None when new, new text),
 /// and what git does not run yet, with the command that installs it.
@@ -28,7 +32,11 @@ pub struct Tool {
     pub name: &'static str,
     pub writes: Vec<(String, Option<String>, String)>,
     pub missing: Vec<String>,
-    pub install: &'static str,
+    pub install: String,
+    /// 133.4: the ids of the project's pre-commit hooks that also run at commit-msg and post-commit.
+    pub stageless: Vec<String>,
+    /// 133.1: the files this plan creates are set to 0755 (husky 7 and 8).
+    pub exec_new: bool,
 }
 
 /// Whether the project uses one of these tools: `.husky/`, a husky before
@@ -42,13 +50,13 @@ pub fn husky_path(dir: Option<&str>) -> bool {
     dir.is_some_and(|d| d.starts_with(".husky"))
 }
 
-fn old_husky(repo: &Repo) -> bool {
+pub(crate) fn old_husky(repo: &Repo) -> bool {
     let package = fs::read_to_string(repo.path("package.json")).ok();
     let json = package.and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
     json.is_some_and(|p| p.get("husky").and_then(|h| h.get("hooks")).is_some())
 }
 
-/// 25.3: a line that runs `shipcraft check` (its first two words, after an `exec`), in a `pre-commit`.
+/// 25.3: a line that runs `shipcraft check` (its first two words, after an `exec`), in the installed `pre-commit`.
 fn checks(text: &str) -> bool {
     text.lines().any(|l| l.split_whitespace().skip_while(|w| *w == "exec").take(2).eq(["shipcraft", "check"]))
 }
@@ -69,59 +77,10 @@ pub fn decide(repo: &Repo, dir: Option<&str>, local: bool) -> Result<Tool> {
         return alien(format!("the project uses two hook tools: {both}"), "keep only one");
     }
     if husky {
-        husky_plan(repo, dir, local)
+        crate::init_husky::plan(repo, dir, local)
     } else {
         pre_commit_plan(repo, dir, local)
     }
-}
-
-fn husky_plan(repo: &Repo, dir: Option<&str>, local: bool) -> Result<Tool> {
-    let old = old_husky(repo);
-    let h = fs::read(repo.path(".husky/_/h"));
-    if old || dir != Some(".husky/_") || h.is_err() {
-        let what = "this project does not use husky 9 (core.hooksPath `.husky/_`, `.husky/_/h`, no `husky.hooks` in package.json)";
-        return alien(what.into(), "shipcraft integrates with husky 9: update husky to 9, run `npx husky`");
-    }
-    if h.is_ok_and(|bytes| bytes.is_empty()) {
-        return alien(".husky/_/h is empty: husky installation was interrupted".into(), "run `npx husky`");
-    }
-    let shipcraft = |l: &&str| matches!(l.split_whitespace().next(), Some("shipcraft" | LOCAL));
-    if read(repo, ".husky/pre-commit")?.is_some_and(|t| checks(&t)) {
-        return alien(".husky/pre-commit has an `shipcraft check`".into(), TWICE);
-    }
-    let mut writes = Vec::new();
-    for (file, plain) in HUSKY {
-        let project = plain.replacen("shipcraft", LOCAL, 1);
-        let line = if local { project.as_str() } else { plain };
-        let Some(text) = read(repo, file)? else {
-            writes.push((file.to_string(), None, format!("{line}\n")));
-            continue;
-        };
-        match text.lines().filter(shipcraft).find(|l| l.trim() != plain && l.trim() != project) {
-            Some(other) => {
-                return alien(
-                    format!("{file} already calls shipcraft another way ({})", other.trim()),
-                    &format!("keep only `{line}`"),
-                )
-            }
-            None if text.lines().any(|l| shipcraft(&l)) => {}
-            // 25.4: first, after the `#!`: at the end, an `exec` or an `exit 0` would skip it.
-            None => {
-                let (bang, rest) = match text.split_once('\n') {
-                    Some((first, rest)) if first.starts_with("#!") => (format!("{first}\n"), rest),
-                    None if text.starts_with("#!") => (format!("{text}\n"), ""),
-                    _ => (String::new(), text.as_str()),
-                };
-                writes.push((file.to_string(), Some(text.clone()), format!("{bang}{line}\n{rest}")));
-            }
-        }
-    }
-    let missing = ["commit-msg", "post-commit"]
-        .iter()
-        .map(|h| format!(".husky/_/{h}"))
-        .filter(|l| !is_executable(&repo.path(l)))
-        .collect();
-    Ok(Tool { name: "husky", writes, missing, install: "npx husky" })
 }
 
 fn pre_commit_plan(repo: &Repo, dir: Option<&str>, local: bool) -> Result<Tool> {
@@ -140,21 +99,25 @@ fn pre_commit_plan(repo: &Repo, dir: Option<&str>, local: bool) -> Result<Tool> 
         return stop(&problem);
     }
     let Some(repos) = doc.get("repos").and_then(Value::as_sequence) else { return stop("has no `repos` list") };
+    let hooks = || repos.iter().filter_map(|r| r.get("hooks")?.as_sequence()).flatten();
+    let ids: Vec<&str> = hooks().filter_map(|h| h.get("id")?.as_str()).collect();
+    // 133.5: `shipcraft close` would run twice, whatever the order and contents.
+    if ids.contains(&HOOKS[1].0) && ids.contains(&LEGACY) {
+        return stop(&format!("has both {} and {LEGACY} (post-commit)", HOOKS[1].0));
+    }
     // 25.3: a hook's stages are its `stages`, if not empty; else the top's
     // `default_stages`, if there (`[]` is none); else all. Not a list of text: does not read.
     let default = match stage_list(doc.get("default_stages")) {
         Ok(list) => list,
         Err(()) => return stop("has an unreadable `default_stages` (not a list of strings)"),
     };
-    let mut wanted: Vec<usize> = vec![0, 1];
-    for hook in repos.iter().filter_map(|r| r.get("hooks")?.as_sequence()).flatten() {
+    let (mut wanted, mut stageless): (Vec<usize>, Vec<String>) = (vec![0, 1], Vec::new());
+    for hook in hooks() {
         let id = hook.get("id").and_then(Value::as_str);
-        if let Some(i) = HOOKS.iter().position(|(h, ..)| Some(*h) == id) {
-            if *hook != canonical(i, false) && *hook != canonical(i, true) {
-                return stop(&format!(
-                    "has hook `{}` ({}) different from what shipcraft writes",
-                    HOOKS[i].0, HOOKS[i].2
-                ));
+        let own = HOOKS.iter().position(|(h, ..)| Some(*h) == id).or((id == Some(LEGACY)).then_some(1));
+        if let (Some(i), Some(id)) = (own, id) {
+            if *hook != canonical(i, false, id) && *hook != canonical(i, true, id) {
+                return stop(&format!("has hook `{id}` ({}) different from what shipcraft writes", HOOKS[i].2));
             }
             wanted.retain(|w| *w != i);
             continue;
@@ -162,6 +125,13 @@ fn pre_commit_plan(repo: &Repo, dir: Option<&str>, local: bool) -> Result<Tool> 
         let Ok(own) = stage_list(hook.get("stages")) else {
             return stop("has an unreadable `stages` (not a list of strings)");
         };
+        // 133.4: deduplicated on the raw id, in file order.
+        match id {
+            Some(id) if own.as_ref().is_none_or(Vec::is_empty) && !stageless.iter().any(|s| s == id) => {
+                stageless.push(id.to_string())
+            }
+            _ => {}
+        }
         let stages = own.filter(|s| !s.is_empty()).or(default.clone());
         let pre = stages.is_none_or(|s| s.iter().any(|v| matches!(v.as_str(), "pre-commit" | "commit")));
         // The first word as the shell splits it, named `shipcraft` with or without a path, then `check`.
@@ -187,22 +157,33 @@ fn pre_commit_plan(repo: &Repo, dir: Option<&str>, local: bool) -> Result<Tool> 
         }
         writes.push((PRE_COMMIT_CONFIG.to_string(), Some(text), new));
     }
-    if fs::read_to_string(repo.hook_path("pre-commit")?).is_ok_and(|t| t.contains("# shipcraft hook") || checks(&t)) {
+    let pre = fs::read_to_string(repo.hook_path("pre-commit")?).ok();
+    if pre.as_deref().is_some_and(|t| t.contains("# shipcraft hook") || checks(t)) {
         return alien("the installed pre-commit hook runs `shipcraft check`".into(), TWICE);
     }
+    // 133.3: a file that cannot be read is no launcher of either kind.
+    let (mut prek, mut classic) = (pre.as_deref().is_some_and(|t| is_prek(t, "pre-commit")), false);
     let mut missing = Vec::new();
     for hook in ["commit-msg", "post-commit"] {
         let path = repo.hook_path(hook)?;
         let shown = path.strip_prefix(repo.root()).unwrap_or(&path).display().to_string();
+        let text = fs::read_to_string(&path).ok();
+        let (ours, theirs) =
+            (text.as_deref().is_some_and(|t| is_launcher(t, hook)), text.is_some_and(|t| is_prek(&t, hook)));
+        (classic, prek) = (classic || ours, prek || theirs);
         if path.symlink_metadata().is_err() {
             missing.push(format!("hook {hook}"));
-        } else if !fs::read_to_string(&path).is_ok_and(|t| is_launcher(&t, hook)) {
-            return alien(format!("installed hook {hook} ({shown}) is not from pre-commit"), "remove it");
+        } else if !ours && !theirs {
+            return alien(format!("installed hook {hook} ({shown}) is not from pre-commit or prek"), "remove it");
         } else if !is_executable(&path) {
             missing.push(format!("hook {hook}"));
         }
     }
-    Ok(Tool { name: "pre-commit", writes, missing, install: "pre-commit install -t commit-msg -t post-commit" })
+    let prek = prek || (!classic && !on_path("pre-commit") && on_path("prek"));
+    let name = if prek { "prek" } else { "pre-commit" };
+    let install = format!("{name} install -t commit-msg -t post-commit");
+    let stageless = if default.as_ref().is_none_or(Vec::is_empty) { stageless } else { Vec::new() };
+    Ok(Tool { name, writes, missing, install, stageless, exec_new: false })
 }
 
 /// A `stages` list: None when absent; a value that is not a list of text is `Err`.
@@ -249,9 +230,28 @@ pub fn is_launcher(script: &str, hook: &str) -> bool {
         && script.contains(&format!("--config={PRE_COMMIT_CONFIG} --hook-type={hook})"))
 }
 
+/// 133.3: the script `prek install` writes for this hook, with the config at the
+/// root: the marker line and one `exec "$PREK" hook-impl <options> -- ...` line.
+pub(crate) fn is_prek(script: &str, hook: &str) -> bool {
+    let lines: Vec<&str> = script.split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l)).collect();
+    let config = format!("--config={PRE_COMMIT_CONFIG}");
+    let launch = |line: &&str| {
+        let Some(words) = shell_words(line) else { return false };
+        let Some(options) = words.strip_prefix(&["exec".to_string(), "$PREK".into(), "hook-impl".into()]) else {
+            return false;
+        };
+        let options: Vec<&String> = options.iter().take_while(|w| *w != "--").collect();
+        let configs: Vec<&&String> =
+            options.iter().filter(|w| w.starts_with("--config") || w.as_str() == "-c").collect();
+        options.iter().any(|w| **w == format!("--hook-type={hook}"))
+            && (configs.is_empty() || (configs.len() == 1 && **configs[0] == config))
+    };
+    lines.iter().any(|l| l.starts_with("# File generated by prek")) && lines.iter().any(launch)
+}
+
 /// A file of the integration as text: None when absent; a link, a file that
 /// does not read (no read permission) or that is not text refuses.
-fn read(repo: &Repo, file: &str) -> Result<Option<String>> {
+pub(crate) fn read(repo: &Repo, file: &str) -> Result<Option<String>> {
     let path = repo.path(file);
     match path.symlink_metadata() {
         Err(_) => return Ok(None),
@@ -271,10 +271,14 @@ fn parse(text: &str) -> std::result::Result<Value, serde_norway::Error> {
     serde_norway::from_str(text.strip_prefix('\u{feff}').unwrap_or(text))
 }
 
-/// The hook `i` as the init writes it: exactly its 7 keys.
-fn canonical(i: usize, local: bool) -> Value {
+/// The hook `i` as the init writes it, under `id` (133.5): exactly its 7 keys.
+fn canonical(i: usize, local: bool, id: &str) -> Value {
     let doc = parse(&item(&[i], 0, 1, "\n", local)).unwrap_or(Value::Null);
-    doc.get(0).and_then(|r| r.get("hooks")).and_then(|h| h.get(0)).cloned().unwrap_or(Value::Null)
+    let mut hook = doc.get(0).and_then(|r| r.get("hooks")).and_then(|h| h.get(0)).cloned().unwrap_or(Value::Null);
+    if let Some(map) = hook.as_mapping_mut() {
+        map.insert("id".into(), id.into());
+    }
+    hook
 }
 
 /// A `repo: local` item with the hooks `wanted`, its dash at column `d` and
@@ -333,17 +337,32 @@ fn append(text: &str, wanted: &[usize], local: bool) -> Option<String> {
 /// The writes of `tool` and the `.shipcraft.toml` raise in one transaction: if a
 /// write fails, every file written goes back byte by byte (15a.1).
 pub fn write(repo: &Repo, tool: &Tool, min: Option<&(String, String)>) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    write_with(repo, tool, min, |path| fs::set_permissions(path, fs::Permissions::from_mode(0o755)))
+}
+
+/// `write` with the mode setter given (133.1: a failed mode undoes the run as a failed write does).
+fn write_with(
+    repo: &Repo,
+    tool: &Tool,
+    min: Option<&(String, String)>,
+    mode: impl Fn(&Path) -> std::io::Result<()>,
+) -> Result<()> {
     let config = min.map(|(old, new)| (CONFIG_FILE.to_string(), Some(old.clone()), new.clone()));
     let mut done = Vec::new();
     for (file, old, new) in config.iter().chain(&tool.writes) {
         let path = repo.path(file);
-        let wrote = fs::write(&path, new);
+        let wrote = match fs::write(&path, new) {
+            Err(e) => Err(format!("write {file}: {e}")),
+            Ok(()) if tool.exec_new && old.is_none() => mode(&path).map_err(|e| format!("set the mode of {file}: {e}")),
+            Ok(()) => Ok(()),
+        };
         done.push((path, old));
-        if let Err(e) = wrote {
+        if let Err(message) = wrote {
             for (path, old) in done.iter().rev() {
                 let _ = old.as_ref().map_or_else(|| fs::remove_file(path), |old| fs::write(path, old));
             }
-            return Err(failed(format!("write {file}: {e}")));
+            return Err(failed(message));
         }
         println!(
             "shipcraft: {} {file}",
@@ -386,13 +405,31 @@ pub fn notice(tool: &Tool) {
     }
 }
 
+/// 133.4, in `shipcraft init` right after `notice`: the hooks that will also run at commit-msg and post-commit.
+pub fn stages_notice(tool: &Tool) {
+    if !tool.stageless.is_empty() {
+        let ids: Vec<String> = tool.stageless.iter().map(|id| crate::red::one_line(id)).collect();
+        println!(
+            "shipcraft: these pre-commit hooks have no stages in {PRE_COMMIT_CONFIG}, so they also run at commit-msg and post-commit: {}; to keep them at pre-commit only, add stages: [pre-commit] to them or default_stages: [pre-commit] at the top",
+            short_list(&ids)
+        );
+    }
+}
+
+/// 133.1: a `foreign-hook` refusal whose Next is whole, with no manual branch.
+pub(crate) fn alien_plain<T>(what: &str, how: &str) -> Result<T> {
+    refuse("foreign-hook", what, WHY, how)
+}
+
+const WHY: &str = "shipcraft does not replace or edit another tool's hook: when in doubt, this step stays manual";
+
 /// The `hook-alheio` refusal of this route: what keeps the integration, and
 /// the commands by hand, never the `pre-commit`.
-fn alien<T>(what: String, how: &str) -> Result<T> {
+pub(crate) fn alien<T>(what: String, how: &str) -> Result<T> {
     refuse(
         "foreign-hook",
         what,
-        "shipcraft does not replace or edit another tool's hook: when in doubt, this step stays manual",
+        WHY,
         format!("{how} and run `shipcraft init` again, or manually put `shipcraft check --commit-msg` in commit-msg and `shipcraft close` in post-commit"),
     )
 }
@@ -410,7 +447,112 @@ mod tests {
         );
         assert!(new.ends_with("default_stages: [pre-commit]\n"));
         let doc = parse(&new).unwrap();
-        assert_eq!(doc["repos"][1]["hooks"][1], canonical(1, false));
+        assert_eq!(doc["repos"][1]["hooks"][1], canonical(1, false, "shipcraft-close"));
         assert_eq!(doc["repos"][1]["hooks"][0]["stages"][0], Value::from("commit-msg"));
+    }
+
+    const PREK: &str = "#!/bin/sh\n# File generated by prek: https://github.com/j178/prek\n# ID: 182c10f181da4464a3eec51b83331688\nHERE=\"$(cd \"$(dirname \"$0\")\" && pwd)\"\nPREK=\"/usr/bin/prek\"\nexec \"$PREK\" hook-impl --hook-dir \"$HERE\" --script-version 4 --hook-type=commit-msg -- \"$@\"\n";
+
+    #[test]
+    fn reads_the_prek_launch_line() {
+        assert!(is_prek(PREK, "commit-msg"));
+        assert!(is_prek(&PREK.replace('\n', "\r\n"), "commit-msg"));
+        assert!(!is_prek(PREK, "post-commit"));
+        assert!(!is_prek(&PREK.replace("# File generated by prek", "# File"), "commit-msg"));
+        let with = |extra: &str| PREK.replace(" -- ", &format!(" {extra} -- "));
+        assert!(is_prek(&with("--config=\".pre-commit-config.yaml\""), "commit-msg"));
+        assert!(!is_prek(&with("--config=\"other.yaml\""), "commit-msg"));
+        assert!(!is_prek(&with("--config other.yaml"), "commit-msg"));
+        assert!(!is_prek(&with("-c other.yaml"), "commit-msg"));
+        assert!(!is_prek(&with("--config=.pre-commit-config.yaml --config=.pre-commit-config.yaml"), "commit-msg"));
+        assert!(is_prek(&PREK.replace("\"$@\"", "-c x \"$@\""), "commit-msg"));
+        assert!(!is_prek(&PREK.replace("exec \"$PREK\"", "echo exec \"$PREK\""), "commit-msg"));
+        assert!(!is_prek(&PREK.replace("exec \"$PREK\"", "# exec \"$PREK\""), "commit-msg"));
+        assert!(!is_prek(&PREK.replace("hook-impl", "hook-impl '"), "commit-msg"));
+    }
+
+    fn repo_with(config: &str) -> (crate::git::TempDir, Repo) {
+        let dir = crate::git::TempDir::new("shipcraft-test-item133").unwrap();
+        let out = std::process::Command::new("git").arg("init").arg("-q").arg(dir.path()).output().unwrap();
+        assert!(out.status.success());
+        fs::write(dir.path().join(PRE_COMMIT_CONFIG), config).unwrap();
+        let repo = Repo::at_root(dir.path());
+        (dir, repo)
+    }
+
+    fn hook(id: &str, stages: &str) -> String {
+        format!("  - id: {id}\n    name: x\n    entry: x\n    language: system\n{stages}")
+    }
+
+    #[test]
+    fn lists_the_hooks_with_no_stages() {
+        let hooks = [
+            hook("lint", ""),
+            hook("typed", "    stages: [pre-push]\n"),
+            hook("empty", "    stages: []\n"),
+            hook("lint", ""),
+            "  - id: 7\n    name: x\n    entry: x\n    language: system\n".to_string(),
+        ];
+        let config = format!("repos:\n- repo: local\n  hooks:\n{}", hooks.concat());
+        let (_d, repo) = repo_with(&config);
+        let tool = pre_commit_plan(&repo, None, false).unwrap_or_else(|e| panic!("{e:?}"));
+        assert_eq!(tool.stageless, ["lint", "empty"]);
+        assert_eq!(tool.writes.len(), 1);
+        let (_d, repo) = repo_with(&format!("default_stages: [pre-commit]\n{config}"));
+        assert!(pre_commit_plan(&repo, None, false).unwrap_or_else(|e| panic!("{e:?}")).stageless.is_empty());
+        let (_d, repo) = repo_with(&format!("default_stages: []\n{config}"));
+        assert_eq!(pre_commit_plan(&repo, None, false).unwrap_or_else(|e| panic!("{e:?}")).stageless.len(), 2);
+    }
+
+    #[test]
+    fn reads_the_old_close_id() {
+        let old = item(&[0, 1], 0, 1, "\n", false).replace("shipcraft-close", LEGACY);
+        let (_d, repo) = repo_with(&format!("repos:\n{old}"));
+        let tool = pre_commit_plan(&repo, None, false).unwrap_or_else(|e| panic!("{e:?}"));
+        assert!(tool.writes.is_empty() && tool.stageless.is_empty());
+        let both = format!(
+            "{old}{}",
+            item(&[1], 0, 1, "\n", false).replace("entry: shipcraft close\n", "entry: shipcraft close --x\n")
+        );
+        let (_d, repo) = repo_with(&format!("repos:\n{both}"));
+        match pre_commit_plan(&repo, None, false) {
+            Err(Stop::Refused(r)) => {
+                assert_eq!(
+                    r.what(),
+                    ".pre-commit-config.yaml has both shipcraft-close and shipcraft-fecha (post-commit)"
+                )
+            }
+            other => panic!("both ids must refuse: {:?}", other.map(|t| t.writes)),
+        }
+        let fecha = item(&[1], 0, 1, "\n", false).replace("shipcraft-close", LEGACY);
+        let differs = fecha.replace("pass_filenames: false\n", "pass_filenames: true\n");
+        let (_d, repo) = repo_with(&format!("repos:\n{differs}"));
+        match pre_commit_plan(&repo, None, false) {
+            Err(Stop::Refused(r)) => assert!(r.what().contains("`shipcraft-fecha`"), "{}", r.what()),
+            _ => panic!("a differing old id must refuse"),
+        }
+    }
+
+    #[test]
+    fn a_failed_mode_undoes_the_run() {
+        let dir = crate::git::TempDir::new("shipcraft-test-item133").unwrap();
+        let repo = Repo::at_root(dir.path());
+        fs::write(dir.path().join("kept"), "old").unwrap();
+        fs::write(dir.path().join(CONFIG_FILE), "min").unwrap();
+        let writes =
+            vec![("kept".to_string(), Some("old".to_string()), "new".to_string()), ("made".into(), None, "x".into())];
+        let tool =
+            Tool { name: "husky", writes, missing: vec![], install: String::new(), stageless: vec![], exec_new: true };
+        let min = ("min".to_string(), "raised".to_string());
+        let refused = || std::io::Error::other("refused");
+        match write_with(&repo, &tool, Some(&min), |_| Err(refused())) {
+            Err(Stop::Failed(message)) => assert_eq!(message, "set the mode of made: refused"),
+            _ => panic!("a failed mode must fail"),
+        }
+        assert_eq!(fs::read_to_string(dir.path().join("kept")).unwrap(), "old");
+        assert_eq!(fs::read_to_string(dir.path().join(CONFIG_FILE)).unwrap(), "min");
+        assert!(dir.path().join("made").symlink_metadata().is_err());
+        assert!(write(&repo, &tool, None).is_ok());
+        assert!(is_executable(&dir.path().join("made")) && !is_executable(&dir.path().join("kept")));
     }
 }
