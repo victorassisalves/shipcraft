@@ -41,7 +41,7 @@ pub(crate) use agents::{marker_lines, rewrite, written_blocks};
 pub use config_file::AGENTS;
 pub use files::{is_executable, on_path};
 pub use hook::{hook_status, LEFTHOOK_FILES, LOCAL};
-pub(crate) use hook::{install_at, invocation, written_hook, Install, HOOK_MARK};
+pub(crate) use hook::{hooks_path_by, install_at, invocation, written_hook, HooksPath, Install, HOOK_MARK};
 pub use lefthook::{block_layout, insert_text, layout, lefthook_source, single_source};
 
 const LOCAL_NOTICE: &str =

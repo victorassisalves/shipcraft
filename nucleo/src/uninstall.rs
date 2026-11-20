@@ -3,7 +3,8 @@
 use crate::config::CONFIG_FILE;
 use crate::export::{closed, open_lock, Git};
 use crate::git::Repo;
-use crate::init::{install_at, marker_lines, rewrite, written_blocks, written_hook, Install, HOOK_MARK};
+use crate::init::HOOK_MARK;
+use crate::init::{hooks_path_by, install_at, marker_lines, rewrite, written_blocks, written_hook, HooksPath, Install};
 use crate::init::{LEFTHOOK_FILES, LOCAL};
 use crate::init_husky::{shipcraft_words, words, HELPERS};
 use crate::init_tool::{append, item, HUSKY, LEGACY, PRE_COMMIT_CONFIG};
@@ -15,7 +16,6 @@ use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
-const NOT_FILE: &str = "not a regular file";
 const LOCKS: &str = ".shipcraft/locks";
 
 /// None: not Shipcraft's; `Some(None)`: left; else the new bytes (none: the file is removed).
@@ -54,35 +54,18 @@ impl Plan {
 
     /// Shipcraft's own file, removed whatever its content; whether it was.
     fn own(&mut self, repo: &Repo, shown: &str) -> Result<bool> {
-        match kind(&repo.path(shown), shown)? {
-            Kind::File(bytes, mode) => self.change(repo.path(shown), shown, (bytes, mode), None, String::new()),
-            Kind::Missing => return Ok(false),
-            _ => self.left(shown, NOT_FILE, false),
-        }
-        Ok(self.steps.last().is_some_and(|s| matches!(s, Step::Change { .. })))
-    }
-
-    /// Whether `dir` is a folder, read without following a link; any other entry is left.
-    fn folder(&mut self, repo: &Repo, dir: &str) -> Result<bool> {
-        let found = kind(&repo.path(dir), dir)?;
-        if !matches!(found, Kind::Folder | Kind::Missing) {
-            // A linked `.husky` may hold active hook calls: the config stays.
-            self.left(dir, "not a regular folder", dir == ".husky");
-        }
-        Ok(matches!(found, Kind::Folder))
+        let Some(old) = file(&repo.path(shown), shown)? else { return Ok(false) };
+        self.change(repo.path(shown), shown, old, None, String::new());
+        Ok(true)
     }
 
     /// A file shared with the project, read by `cut`; every one but `AGENTS.md` and `CLAUDE.md` is a hook.
     fn shared(&mut self, repo: &Repo, file: &str, reason: &str, what: &str, cut: impl Fn(&[u8]) -> Cut) -> Result<()> {
-        let hook = !file.ends_with(".md");
-        match kind(&repo.path(file), file)? {
-            Kind::File(bytes, mode) => match cut(&bytes) {
-                Some(Some(new)) => self.change(repo.path(file), file, (bytes, mode), Some(new), what.to_string()),
-                Some(None) => self.left(file, reason, hook),
-                None => {}
-            },
-            Kind::Missing => {}
-            _ => self.left(file, NOT_FILE, hook),
+        let Some((bytes, mode)) = self::file(&repo.path(file), file)? else { return Ok(()) };
+        match cut(&bytes) {
+            Some(Some(new)) => self.change(repo.path(file), file, (bytes, mode), Some(new), what.to_string()),
+            Some(None) => self.left(file, reason, !file.ends_with(".md")),
+            None => {}
         }
         Ok(())
     }
@@ -98,7 +81,7 @@ pub fn run(dry: bool) -> Result<()> {
             "finish the GREEN (the hook closes the lock when its cases pass), or drop the RED commit that opened the lock, then run shipcraft uninstall again",
         );
     }
-    let plan = plan(&repo)?;
+    let plan = plan(&repo, shape(&repo)?)?;
     let tracked = repo.run(&["ls-files", "-z", "--cached", "--full-name"])?;
     let Some(records) = tracked.strip_suffix(b"\0").or(tracked.is_empty().then_some(&[][..])) else {
         return Err(failed("`git ls-files -z --cached --full-name` printed a record with no NUL at its end"));
@@ -114,6 +97,9 @@ pub fn run(dry: bool) -> Result<()> {
             (Step::Line(line), _) => println!("{line}"),
             (Step::Change { what, .. }, None) => println!("shipcraft: would remove {what}"),
             (Step::Change { path, shown, old, new, what, hook }, Some(folder)) => {
+                if !matches!(file(path, shown), Ok(Some(now)) if now == *old) {
+                    return Err(failed(format!("{shown} changed since uninstall read it; nothing more was changed: run shipcraft uninstall again")));
+                }
                 let name = path.file_name().unwrap_or_default().to_string_lossy();
                 keep_copy(&folder.join(if *hook { format!("hooks/{name}") } else { shown.clone() }), old)?;
                 match new {
@@ -251,69 +237,113 @@ fn in_tree(root: &Path) -> Option<Vec<u8>> {
     })
 }
 
-/// What an entry is, read without following a link; a regular file with its bytes and mode.
-enum Kind {
-    Missing,
-    File(Vec<u8>, u32),
-    Folder,
-    Other,
+/// A path point 3 reads, without following a link: None when missing; point 2b refused any other shape.
+fn file(path: &Path, shown: &str) -> Result<Option<(Vec<u8>, u32)>> {
+    let read = |e: std::io::Error| failed(format!("read {shown}: {e}"));
+    match path.symlink_metadata() {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Ok(meta) if meta.file_type().is_file() => {
+            Ok(Some((fs::read(path).map_err(read)?, meta.permissions().mode() & 0o7777)))
+        }
+        Ok(_) => Err(failed(format!("read {shown}: not a regular file"))),
+        Err(e) => Err(read(e)),
+    }
 }
 
-fn kind(path: &Path, shown: &str) -> Result<Kind> {
+/// Paths are shown relative to the root, a hook outside it absolute (through its real folder).
+fn shown(repo: &Repo, path: &Path) -> String {
+    let real = path
+        .parent()
+        .and_then(|d| fs::canonicalize(d).ok())
+        .map_or(path.to_path_buf(), |d| d.join(path.file_name().unwrap_or_default()));
+    let root = fs::canonicalize(repo.root()).unwrap_or_else(|_| repo.root().to_path_buf());
+    real.strip_prefix(&root).unwrap_or(&real).display().to_string()
+}
+
+/// Point 2b: the first shape `init` does not create refuses; whether the plain-hook pass runs.
+fn shape(repo: &Repo) -> Result<bool> {
+    let plain = match hooks_path_by(repo, &["config", "--get", "core.hooksPath"])? {
+        HooksPath::Unset => true,
+        HooksPath::Set(v) if v == ".git/hooks" || v == ".husky/_" || v == ".husky" => v == ".git/hooks",
+        HooksPath::Set(v) => {
+            return unexpected("core.hooksPath", &format!("is set to {v}, a hooks folder init does not use"))
+        }
+        HooksPath::Fails(why) => return Err(failed(format!("git config core.hooksPath fails ({why})"))),
+    };
+    let hooks: Vec<PathBuf> =
+        if plain { vec![repo.hook_path("commit-msg")?, repo.hook_path("post-commit")?] } else { vec![] };
+    let mut folders: Vec<PathBuf> = [".shipcraft", ".shipcraft/briefs", LOCKS, ".husky"].map(|d| repo.path(d)).into();
+    folders.extend(hooks.iter().filter_map(|h| h.parent().map(Path::to_path_buf)));
+    let mut files: Vec<PathBuf> = ["AGENTS.md", "CLAUDE.md"].map(|f| repo.path(f)).into();
+    files.extend(hooks);
+    let named = [HUSKY[0].0, HUSKY[1].0, PRE_COMMIT_CONFIG].into_iter().chain(LEFTHOOK_FILES);
+    let named = named.chain([".shipcraft/briefs/red.md", ".shipcraft/briefs/green.md", ".shipcraft/locks/.gitkeep"]);
+    files.extend(named.map(|f| repo.path(f)));
+    folders.iter().try_for_each(|dir| check(repo, dir, true))?;
+    files.iter().try_for_each(|path| check(repo, path, false))?;
+    if repo.path(LOCKS).is_dir() {
+        for name in listing(repo, LOCKS)?.into_iter().filter(|n| n.ends_with(".json")) {
+            check(repo, &repo.path(&format!("{LOCKS}/{name}")), false)?;
+        }
+    }
+    check(repo, &repo.path(CONFIG_FILE), false)?;
+    Ok(plain)
+}
+/// Point 2b's test of one path that exists: a folder, or a regular file, never a link.
+fn check(repo: &Repo, path: &Path, folder: bool) -> Result<()> {
     let meta = match path.symlink_metadata() {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Kind::Missing),
-        Err(e) => return Err(failed(format!("read {shown}: {e}"))),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(failed(format!("read {}: {e}", shown(repo, path)))),
         Ok(meta) => meta,
     };
-    let read = || fs::read(path).map_err(|e| failed(format!("read {shown}: {e}")));
-    Ok(match meta.file_type() {
-        t if t.is_dir() => Kind::Folder,
-        t if t.is_file() => Kind::File(read()?, meta.permissions().mode() & 0o7777),
-        _ => Kind::Other,
-    })
+    let what = match meta.file_type() {
+        t if t.is_symlink() => "is a symbolic link",
+        t if folder && !t.is_dir() => "is not a folder",
+        t if !folder && !t.is_file() => "is not a regular file",
+        _ => return Ok(()),
+    };
+    unexpected(&shown(repo, path), what)
+}
+
+fn unexpected<T>(path: &str, what: &str) -> Result<T> {
+    refuse(
+        "uninstall-unexpected-shape",
+        format!("{path} {what}, a shape init does not create"),
+        "uninstall acts only on the shapes init creates, so it never reads or changes what it was not built for; nothing was changed",
+        "remove Shipcraft by hand with the README's steps (Removing Shipcraft): delete .shipcraft.toml and .shipcraft/, remove the block between <!-- shipcraft --> and <!-- /shipcraft --> in AGENTS.md and CLAUDE.md, and remove the shipcraft calls from your hooks; or put back the shape init made and run shipcraft uninstall again",
+    )
 }
 
 /// Points 3 and 4, in their order; every read before any write.
-fn plan(repo: &Repo) -> Result<Plan> {
+fn plan(repo: &Repo, plain: bool) -> Result<Plan> {
     let mut plan = Plan::default();
     let block = "its shipcraft markers do not hold a block Shipcraft writes (edited by hand, or from another version)";
     for name in ["AGENTS.md", "CLAUDE.md"] {
         plan.shared(repo, name, block, &format!("the shipcraft block from {name}"), |b| cut_block(name, b))?;
     }
-    for (name, msg) in [("commit-msg", true), ("post-commit", false)] {
+    for (name, msg) in [("commit-msg", true), ("post-commit", false)].into_iter().filter(|_| plain) {
         let path = repo.hook_path(name)?;
-        // husky 7 and 8: the hooks folder is `.husky`, whose files the husky step reads.
-        if HUSKY.iter().any(|(file, _)| repo.path(file) == path) {
-            continue;
-        }
-        // Resolved through its folder, so a `core.hooksPath` with `..` is shown absolute outside the root.
-        let dir = path.parent().and_then(|d| fs::canonicalize(d).ok());
-        let real = dir.map_or(path.clone(), |d| d.join(name));
-        let root = fs::canonicalize(repo.root()).unwrap_or_else(|_| repo.root().to_path_buf());
-        let shown = real.strip_prefix(&root).unwrap_or(&real).display().to_string();
-        let reason = match kind(&path, &shown)? {
-            Kind::File(bytes, mode) if written_hook(msg, &bytes) => {
-                plan.change(path, &shown, (bytes, mode), None, String::new());
+        let shown = shown(repo, &path);
+        let reason = match file(&path, &shown)? {
+            Some(old) if written_hook(msg, &old.0) => {
+                plan.change(path, &shown, old, None, String::new());
                 if let Some(Step::Change { hook, .. }) = plan.steps.last_mut() {
                     *hook = true;
                 }
                 continue;
             }
-            Kind::File(bytes, _) if contains(&bytes, HOOK_MARK.as_bytes()) => "a shipcraft hook edited by hand",
-            Kind::File(bytes, _) if crate::init_hooks::calls_shipcraft(&bytes) => {
+            Some((bytes, _)) if contains(&bytes, HOOK_MARK.as_bytes()) => "a shipcraft hook edited by hand",
+            Some((bytes, _)) if crate::init_hooks::calls_shipcraft(&bytes) => {
                 "it calls shipcraft and is not a hook init writes"
             }
-            Kind::File(..) | Kind::Missing => continue,
-            _ => NOT_FILE,
+            _ => continue,
         };
         plan.left(&shown, reason, true);
     }
-    if plan.folder(repo, ".husky")? {
-        for (file, line) in HUSKY {
-            let (reason, what) =
-                ("it calls shipcraft in a line init does not write", format!("the shipcraft line from {file}"));
-            plan.shared(repo, file, reason, &what, |b| cut_husky_line(b, line))?;
-        }
+    for (file, line) in HUSKY {
+        let (reason, what) =
+            ("it calls shipcraft in a line init does not write", format!("the shipcraft line from {file}"));
+        plan.shared(repo, file, reason, &what, |b| cut_husky_line(b, line))?;
     }
     let before = plan.steps.len();
     let what = format!("the shipcraft hooks from {PRE_COMMIT_CONFIG}");
@@ -330,20 +360,16 @@ fn plan(repo: &Repo) -> Result<Plan> {
         plan.steps.push(Step::Line("shipcraft: pre-commit's commit-msg and post-commit launchers stay in the hooks folder, and run any of the project's hooks with no stages at those stages: if nothing else needs them, pre-commit uninstall -t commit-msg -t post-commit (or prek uninstall ...)".into()));
     }
     for file in LEFTHOOK_FILES {
-        let reason = match kind(&repo.path(file), file)? {
-            Kind::File(bytes, _) if contains(&bytes, b"shipcraft") => {
-                "uninstall does not edit lefthook files yet: remove the shipcraft commands under commit-msg and post-commit"
-            }
-            Kind::File(..) | Kind::Missing => continue,
-            _ => NOT_FILE,
-        };
-        plan.left(file, reason, true);
+        if self::file(&repo.path(file), file)?.is_some_and(|(bytes, _)| contains(&bytes, b"shipcraft")) {
+            let reason = "uninstall does not edit lefthook files yet: remove the shipcraft commands under commit-msg and post-commit";
+            plan.left(file, reason, true);
+        }
     }
-    if plan.folder(repo, ".shipcraft")? {
+    if repo.path(".shipcraft").is_dir() {
         let mut known = Vec::new();
         for dir in [".shipcraft/briefs", LOCKS] {
             known.push(dir.to_string());
-            let names = match plan.folder(repo, dir)? {
+            let names = match repo.path(dir).is_dir() {
                 false => Vec::new(),
                 true if dir == LOCKS => listing(repo, dir)?,
                 true => vec!["red.md".into(), "green.md".into()],
@@ -359,17 +385,15 @@ fn plan(repo: &Repo) -> Result<Plan> {
         foreign.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
         foreign.iter().for_each(|shown| plan.left(shown, "not a file init or red writes", false));
     }
-    match (plan.hook_left.clone(), kind(&repo.path(CONFIG_FILE), CONFIG_FILE)?) {
-        (_, Kind::Missing) => {}
-        (Some(hook), _) => {
+    match plan.hook_left.clone() {
+        Some(hook) if repo.path(CONFIG_FILE).symlink_metadata().is_ok() => {
             let reason = format!("a hook that calls shipcraft is left ({hook}): remove that call first, then run shipcraft uninstall again");
             plan.left(CONFIG_FILE, &reason, false);
         }
-        _ => {
-            plan.own(repo, CONFIG_FILE)?;
-        }
+        Some(_) => {}
+        None => drop(plan.own(repo, CONFIG_FILE)?),
     }
-    if !matches!(kind(&repo.path(".sc2.toml"), ".sc2.toml")?, Kind::Missing) {
+    if repo.path(".sc2.toml").symlink_metadata().is_ok() {
         plan.left(".sc2.toml", "the config of an older Shipcraft", false);
     }
     Ok(plan)

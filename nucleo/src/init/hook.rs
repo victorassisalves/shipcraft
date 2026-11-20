@@ -161,7 +161,12 @@ pub(crate) enum HooksPath {
 /// the absolute path or a space refuse, even when they name the same directory.
 /// Exit 1 is an unset key; any other failure is not absence (15a.2).
 pub(crate) fn hooks_path(repo: &Repo) -> Result<HooksPath> {
-    let out = git_in(repo.root(), &["config", "core.hooksPath"])?;
+    hooks_path_by(repo, &["config", "core.hooksPath"])
+}
+
+/// `hooks_path` through these `git config` arguments (item 143 reads it with `--get`).
+pub(crate) fn hooks_path_by(repo: &Repo, args: &[&str]) -> Result<HooksPath> {
+    let out = git_in(repo.root(), args)?;
     Ok(match out.status.code() {
         Some(1) => HooksPath::Unset,
         Some(0) => HooksPath::Set(text(out.stdout.strip_suffix(b"\n").unwrap_or(&out.stdout))),
