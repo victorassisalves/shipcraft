@@ -251,7 +251,7 @@ pub fn post_commit(repo: &Repo) {
             "shipcraft: commit {short} would be refused by CI ({}): {}; next: {}",
             flat(r.code),
             flat(r.what()),
-            flat(r.how())
+            crate::inv::route(&flat(r.how()))
         ),
         Ok(Err(Stop::Failed(e))) | Err(e) => println!("shipcraft: commit {short} could not be checked ({}); CI checks it", flat(&e)),
     }

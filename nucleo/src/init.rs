@@ -256,8 +256,13 @@ fn protect(repo: &Repo, review: bool) {
     match gh::with_input(repo, &["api", "-X", "PUT", &path], &body) {
         Ok(_) => println!("shipcraft: GitHub now requires {required} to merge into {branch}."),
         Err(e) if e.contains("Upgrade to GitHub Pro") => {
-            println!("shipcraft: this repository has no branch protection on its GitHub plan: `shipcraft merge` is the gate.")
+            println!("{}", crate::inv::route("shipcraft: this repository has no branch protection on its GitHub plan: `shipcraft merge` is the gate."))
         }
-        Err(e) => println!("shipcraft: could not mark statuses as required ({e}); `shipcraft merge` is the gate."),
+        Err(e) => println!(
+            "{}",
+            crate::inv::route(&format!(
+                "shipcraft: could not mark statuses as required ({e}); `shipcraft merge` is the gate."
+            ))
+        ),
     }
 }

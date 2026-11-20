@@ -27,6 +27,7 @@ mod init_msg;
 mod init_probe;
 mod init_tool;
 mod install;
+mod inv;
 mod jest_files;
 mod jsonc;
 mod junit;
@@ -78,6 +79,7 @@ fn main() -> ExitCode {
     }
     let args: Vec<String> = std::env::args().skip(1).collect();
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    inv::read();
     match run(&args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(Stop::Refused(refusal)) => {
