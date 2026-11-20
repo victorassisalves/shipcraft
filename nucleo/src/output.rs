@@ -97,9 +97,11 @@ pub fn begin(command: &str) -> Option<Arc<Mutex<Cut>>> {
         };
     }
     let Invocation::Open { file, shown } = &mut *state else { return None };
+    // No file here: a write failed earlier in this invocation.
+    let file = file.take();
     let mut cut = Cut {
-        file: file.take(),
-        failed: false,
+        failed: file.is_none(),
+        file,
         shown_path: shown.clone(),
         count: 0,
         shown: 0,
