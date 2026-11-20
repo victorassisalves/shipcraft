@@ -38,6 +38,7 @@ The following surface is part of the contract. Unsupported calls exit 1 with `ac
 
 | Command | Contract |
 |---|---|
+| Every `gh` call | Appends one JSON line to `state/gh-env.log`: `{"args": [...], "GH_REPO": string or null, "GH_HOST": string or null}`; absent variables are null, set-empty variables are `""`. Existing call and mutation logs are unchanged. |
 | `gh auth status` | Authenticated. |
 | `gh repo view [URL] [--json F] [-q JQ]` | `acme/proj`, private, default branch `main`, permission `ADMIN`. Optional `state/repo-view.json` maps exact URL (or `*` fallback) to `fields` overrides, `omit` keys, verbatim `raw`, or nonzero `exit` with verbatim `stdout`/`stderr`; other calls and absent overrides are unchanged. |
 | `gh pr create --title T (--body B \| --body-file F\|-) [--base B] [--head H]` | Branch must be on origin; duplicate open PRs fail. |
