@@ -8,7 +8,7 @@ pub(super) fn day(t: f64) -> String {
 }
 
 /// Item 83: a Unix time as UTC `YYYY-MM-DDTHH:MM:SSZ`, its whole second rounded down.
-pub(super) fn utc(t: f64) -> String {
+pub(crate) fn utc(t: f64) -> String {
     let secs = t.floor() as i64;
     let rest = secs.rem_euclid(86_400);
     format!("{}T{:02}:{:02}:{:02}Z", civil(secs.div_euclid(86_400)), rest / 3600, rest % 3600 / 60, rest % 60)

@@ -11,7 +11,7 @@ use crate::suite::shell_quote;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const HOOK_MARK: &str = "# shipcraft hook";
+pub(crate) const HOOK_MARK: &str = "# shipcraft hook";
 /// Item 58: how the hooks of a project-local install call it.
 pub const LOCAL: &str = "./node_modules/.bin/shipcraft";
 const PLAIN_LOCAL: &str = "\"$(git rev-parse --show-toplevel)/node_modules/.bin/shipcraft\"";
@@ -161,7 +161,12 @@ pub(crate) enum HooksPath {
 /// the absolute path or a space refuse, even when they name the same directory.
 /// Exit 1 is an unset key; any other failure is not absence (15a.2).
 pub(crate) fn hooks_path(repo: &Repo) -> Result<HooksPath> {
-    let out = git_in(repo.root(), &["config", "core.hooksPath"])?;
+    hooks_path_by(repo, &["config", "core.hooksPath"])
+}
+
+/// `hooks_path` through these `git config` arguments (item 143 reads it with `--get`).
+pub(crate) fn hooks_path_by(repo: &Repo, args: &[&str]) -> Result<HooksPath> {
+    let out = git_in(repo.root(), args)?;
     Ok(match out.status.code() {
         Some(1) => HooksPath::Unset,
         Some(0) => HooksPath::Set(text(out.stdout.strip_suffix(b"\n").unwrap_or(&out.stdout))),
@@ -243,30 +248,13 @@ fn lefthook_hook(repo: &Repo, file: &str, local: bool) -> Result<Hook> {
 pub(super) fn install_hooks(hooks: &[PathBuf], local: bool, created: &mut Vec<PathBuf>) -> Result<bool> {
     let exe = std::env::current_exe().map_err(|e| failed(format!("find the current binary: {e}")))?;
     let exe = format!("exec {}", shell_quote(&exe.to_string_lossy()));
-    let missing = "shipcraft: not installed in this checkout (node_modules/.bin/shipcraft)";
     let mut wrote = false;
     for hook in hooks {
         let msg = hook.ends_with("commit-msg");
         if own_hook(hook) && (local || fs::read_to_string(hook).is_ok_and(|t| t.contains(PLAIN_LOCAL))) {
             continue;
         }
-        let (what, args) = if msg {
-            ("checks the commit against open locks", "check --commit-msg \"$1\"")
-        } else {
-            ("closes the lock the commit-msg check marked", "close")
-        };
-        let script = if !local {
-            format!("#!/bin/sh\n{HOOK_MARK}: {what}\n{exe} {args}\n")
-        } else if msg {
-            format!(
-                "#!/bin/sh\n{HOOK_MARK}: {what}\nif [ ! -f {PLAIN_LOCAL} ] || [ ! -x {PLAIN_LOCAL} ]; then\n  echo \"{missing}: install the project's dependencies\" >&2\n  exit 1\nfi\nexec {PLAIN_LOCAL} {args}\n"
-            )
-        } else {
-            format!(
-                "#!/bin/sh\n{HOOK_MARK}: {what}\nif [ ! -f {PLAIN_LOCAL} ] || [ ! -x {PLAIN_LOCAL} ]; then\n  echo \"{missing}: the lock stays open; install the project's dependencies and run node_modules/.bin/shipcraft close\" >&2\n  exit 0\nfi\nexec {PLAIN_LOCAL} {args}\n"
-            )
-        };
-        write(hook, &script, created)?;
+        write(hook, &hook_script(msg, local, &exe), created)?;
         make_executable(hook)?;
         wrote = true;
     }
@@ -276,4 +264,64 @@ pub(super) fn install_hooks(hooks: &[PathBuf], local: bool, created: &mut Vec<Pa
         println!("shipcraft: commit-msg and post-commit hooks already installed, kept");
     }
     Ok(wrote)
+}
+
+/// Item 143: the bytes of `init`'s own hook (`msg`: commit-msg); the machine form runs `exe` (`exec <word>`).
+fn hook_script(msg: bool, local: bool, exe: &str) -> String {
+    let missing = "shipcraft: not installed in this checkout (node_modules/.bin/shipcraft)";
+    let (what, args) = if msg {
+        ("checks the commit against open locks", "check --commit-msg \"$1\"")
+    } else {
+        ("closes the lock the commit-msg check marked", "close")
+    };
+    if !local {
+        format!("#!/bin/sh\n{HOOK_MARK}: {what}\n{exe} {args}\n")
+    } else if msg {
+        format!(
+            "#!/bin/sh\n{HOOK_MARK}: {what}\nif [ ! -f {PLAIN_LOCAL} ] || [ ! -x {PLAIN_LOCAL} ]; then\n  echo \"{missing}: install the project's dependencies\" >&2\n  exit 1\nfi\nexec {PLAIN_LOCAL} {args}\n"
+        )
+    } else {
+        format!(
+            "#!/bin/sh\n{HOOK_MARK}: {what}\nif [ ! -f {PLAIN_LOCAL} ] || [ ! -x {PLAIN_LOCAL} ]; then\n  echo \"{missing}: the lock stays open; install the project's dependencies and run node_modules/.bin/shipcraft close\" >&2\n  exit 0\nfi\nexec {PLAIN_LOCAL} {args}\n"
+        )
+    }
+}
+
+/// Item 143: `bytes` are a hook `init` writes: the project-local form, or the machine form with any `shell_quote`d path.
+pub(crate) fn written_hook(msg: bool, bytes: &[u8]) -> bool {
+    let template = hook_script(msg, false, "exec \0");
+    let (head, tail) = template.split_once('\0').unwrap_or_default();
+    let word = std::str::from_utf8(bytes).ok().and_then(|t| t.strip_prefix(head)?.strip_suffix(tail));
+    let quoted =
+        word.and_then(|w| w.strip_prefix('\'')?.strip_suffix('\'')).map(|i| shell_quote(&i.replace("'\"'\"'", "'")));
+    bytes == hook_script(msg, true, "").as_bytes() || (quoted.is_some() && quoted.as_deref() == word)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_the_hooks_init_writes() {
+        for msg in [true, false] {
+            for path in ["/usr/local/bin/shipcraft", "/a b/it's/shipcraft", ""] {
+                let script = hook_script(msg, false, &format!("exec {}", shell_quote(path)));
+                assert!(written_hook(msg, script.as_bytes()), "{path}");
+            }
+            assert!(written_hook(msg, hook_script(msg, true, "").as_bytes()));
+            assert!(!written_hook(!msg, hook_script(msg, true, "").as_bytes()));
+            let plain = hook_script(msg, false, "exec '/x/shipcraft'");
+            assert!(!written_hook(!msg, plain.as_bytes()));
+            for edited in [
+                plain.replace("'/x/shipcraft'", "/x/shipcraft"),
+                plain.replace("'/x/shipcraft'", "'/x/s'hipcraft'"),
+                plain.replace("'/x/shipcraft'", "'"),
+                plain.replace('\n', "\r\n"),
+                format!("{plain}\n"),
+                plain.replace("exec ", "exec  "),
+            ] {
+                assert!(!written_hook(msg, edited.as_bytes()), "{edited:?}");
+            }
+        }
+    }
 }

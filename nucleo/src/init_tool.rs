@@ -18,12 +18,12 @@ pub const PRE_COMMIT_CONFIG: &str = ".pre-commit-config.yaml";
 pub const HUSKY: [(&str, &str); 2] =
     [(".husky/commit-msg", "shipcraft check --commit-msg \"$1\""), (".husky/post-commit", "shipcraft close")];
 /// The two local hooks of the pre-commit framework (point 2): id, entry, stage.
-const HOOKS: [(&str, &str, &str); 2] = [
+pub(crate) const HOOKS: [(&str, &str, &str); 2] = [
     ("shipcraft-check", "shipcraft check --commit-msg", "commit-msg"),
     ("shipcraft-close", "shipcraft close", "post-commit"),
 ];
 /// 133.5: the post-commit hook's id before 2.76, still read as it.
-const LEGACY: &str = "shipcraft-fecha";
+pub(crate) const LEGACY: &str = "shipcraft-fecha";
 pub(crate) const TWICE: &str = "with it, the suite would run twice per commit: remove it";
 
 /// What the integration writes: (file, old text or None when new, new text),
@@ -284,7 +284,7 @@ fn canonical(i: usize, local: bool, id: &str) -> Value {
 /// A `repo: local` item with the hooks `wanted`, its dash at column `d` and
 /// `s` spaces after each dash, in block layout (25.4: `stages` too); `local`, the
 /// entry calls `./node_modules/.bin/shipcraft` (item 58).
-fn item(wanted: &[usize], d: usize, s: usize, eol: &str, local: bool) -> String {
+pub(crate) fn item(wanted: &[usize], d: usize, s: usize, eol: &str, local: bool) -> String {
     let pad = |n: usize| " ".repeat(n);
     let dash = |n: usize| format!("{}-{}", pad(n), pad(s));
     let (k, h) = (d + 1 + s, 2 * d + 2 + 2 * s);
@@ -305,7 +305,7 @@ fn item(wanted: &[usize], d: usize, s: usize, eol: &str, local: bool) -> String 
 
 /// The text with the item appended at the end of the `repos` list, in the
 /// indentation and the line ending the list already uses; None if unproved.
-fn append(text: &str, wanted: &[usize], local: bool) -> Option<String> {
+pub(crate) fn append(text: &str, wanted: &[usize], local: bool) -> Option<String> {
     // Every line break the parser reads (YAML 1.1); the first one is the eol.
     let breaks = ['\n', '\r', '\u{85}', '\u{2028}', '\u{2029}'];
     let (mut lines, mut from) = (Vec::new(), 0);

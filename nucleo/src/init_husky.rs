@@ -11,7 +11,7 @@ use std::fs;
 use std::io::ErrorKind;
 
 /// husky 7's and husky 8's helper lines, compared as text (133.1).
-const HELPERS: [&str; 2] = [". \"$(dirname \"$0\")/_/husky.sh\"", ". \"$(dirname -- \"$0\")/_/husky.sh\""];
+pub(crate) const HELPERS: [&str; 2] = [". \"$(dirname \"$0\")/_/husky.sh\"", ". \"$(dirname -- \"$0\")/_/husky.sh\""];
 /// 133.2: runners that run the project's installed binary, longest first.
 const RUNNERS: [&[&str]; 4] = [&["npx", "--no", "--"], &["npx", "--no"], &["pnpm", "exec", "--"], &["pnpm", "exec"]];
 const HELPER: &str = ".husky/_/husky.sh";
@@ -163,7 +163,7 @@ pub(crate) fn helper_line(text: &str) -> Option<usize> {
 }
 
 /// A line's words, split on spaces and tabs (133.2).
-fn words(line: &str) -> Vec<&str> {
+pub(crate) fn words(line: &str) -> Vec<&str> {
     line.split([' ', '\t']).filter(|w| !w.is_empty()).collect()
 }
 
