@@ -6,7 +6,8 @@
 //! Item 79: `[--github]` fills the selected locks' waiting and merge times
 //! from GitHub through `gh` (relatorio_gh); without it, nothing changes.
 //! Item 99: `[report] release_tags` in `<root>/.shipcraft.toml` names the
-//! project's release tags; without it, item 76's `vX.Y.Z` tags.
+//! project's release tags; without it, item 76's `vX.Y.Z` tags and item
+//! 137's bare `X.Y.Z` tags.
 //! Item 125: in merge mode, `--since` also takes a merge id, and the text
 //! names the merge that would fill rework rate and change failure rate.
 
@@ -36,7 +37,8 @@ use prs::{markers_of, merged_prs, red_parents};
 use quality::{reds, reds_weeks, review, size};
 use rows::locks_of;
 pub(crate) use rows::num;
-use selection::Selection;
+pub use selection::NotRelease;
+use selection::{bare, in_clone, Selection};
 use serde_json::{json, Map, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -50,10 +52,15 @@ type Row = Map<String, Value>;
 /// names a release of the selection; else the `<pattern>` the refusal shows:
 /// the pattern, `vX.Y.Z` under the default reading, or `invalid: <reason>`
 /// (item 99's full reason, as `report` prints it) under an invalid
-/// `[report]`, where no tag is accepted.
-pub fn not_a_release_name(tag: &str) -> Option<String> {
-    let selection = discover().map_or(Selection::Default(None), |(root, _)| Selection::read(&root));
-    selection.release_name_problem(tag)
+/// `[report]`, where no tag is accepted. Item 137: under the default
+/// reading, a bare `X.Y.Z` name is accepted when the clone holds that tag.
+pub fn not_a_release_name(tag: &str) -> Option<NotRelease> {
+    let root = discover().map(|(root, _)| root);
+    let selection = root.as_ref().map_or(Selection::Default(None), |root| Selection::read(root));
+    if matches!(selection, Selection::Default(_)) && bare(tag) {
+        return (!in_clone(root, tag)).then_some(NotRelease::NotInClone);
+    }
+    selection.release_name_problem(tag).map(NotRelease::Selection)
 }
 
 /// What `report` reads before any git call: the repository and run log, and

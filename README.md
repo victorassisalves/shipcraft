@@ -73,11 +73,11 @@ What you need:
 - Optional, for `shipcraft pr` and `shipcraft merge`: a GitHub remote named `origin` and `gh` logged in; for `shipcraft pr`, also write access to `origin` for the `gh` account, which `pr` checks before it pushes anything. Without a remote, the work stays local and `shipcraft ci --base <base>` is its finish line.
 - Optional, for the review: the `codex`, `claude` or `gemini` CLI. The review sends the diff to that agent's provider; without one, `init` turns the review off.
 
-Installing is two steps, and step 2 is required: add the package (or the binary), then run `init` at the repository root. `init` sets up Shipcraft and wires its hooks; until it runs, Shipcraft checks none of your commits. From the npm package, step 2 is `pnpm exec shipcraft init` or `npx -- shipcraft init`.
+Installing is two steps, and step 2 is required: add the package (or the binary), then run `init` at the repository root. `init` sets up Shipcraft and wires its hooks; until it runs, Shipcraft checks none of your commits. From the npm package, step 2 is `pnpm exec shipcraft init`, or `npx -- shipcraft init` with npm, yarn or bun (the hooks run this install from `node_modules/.bin`, so Yarn Plug'n'Play is not supported).
 
 ```bash
 # A Node/TypeScript project (macOS): pin Shipcraft in the project, like any dev dependency
-pnpm add -D shipcraft          # step 1, or: npm i -D shipcraft
+pnpm add -D shipcraft          # step 1, or: npm i -D shipcraft, yarn add -D shipcraft (yarn 1 at a workspaces root: yarn add -D -W shipcraft), bun add -d shipcraft
 pnpm exec shipcraft init       # step 2 (required), or: npx -- shipcraft init; the hooks call this project's install
 
 # macOS (Apple silicon or Intel), any language: the latest release, checksum-verified, into ~/.local/bin
@@ -100,7 +100,7 @@ Either way, `init` ends with the files to commit (`shipcraft: ready. Commit …`
 
 ```bash
 git add .shipcraft.toml .shipcraft    # plus every other file init listed (AGENTS.md, CLAUDE.md, the hook manager's file),
-                                      # and package.json with pnpm-lock.yaml or package-lock.json
+                                      # and package.json with its lockfile (pnpm-lock.yaml, package-lock.json, yarn.lock or bun.lock)
 git commit -m "add shipcraft"
 ```
 

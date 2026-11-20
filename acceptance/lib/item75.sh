@@ -99,7 +99,9 @@ if invalid:
  # Invalid arguments must win even over invalid config and an existing log.
  write('.shipcraft.toml','invalid TOML [\n');before=rows();files=snapshot()
  p=run(binary,'red',*args,ok=False)
- if mode in ('invalid-tag-prefix','invalid-tag-missing-part','invalid-tag-extra-part','invalid-tag-leading-major','invalid-tag-leading-minor','invalid-tag-leading-patch','invalid-tag-negative','invalid-tag-prerelease','invalid-tag-build'):
+ if mode=='invalid-tag-prefix':
+  assert p.returncode==2 and p.stdout=='' and p.stderr.splitlines()==['shipcraft: --fixes-release 2.25.0 is not a tag in this clone','Why: without [report] release_tags, red takes a release tag without v only when this clone holds a tag of that name, since an X.Y.Z number may name no release of this project.',"Next: fetch the project's tags (git fetch --tags), or pass the tag of the release that shipped the defect, or set [report] release_tags in .shipcraft.toml, then run red again."],(p.stdout,p.stderr)
+ elif mode in ('invalid-tag-missing-part','invalid-tag-extra-part','invalid-tag-leading-major','invalid-tag-leading-minor','invalid-tag-leading-patch','invalid-tag-negative','invalid-tag-prerelease','invalid-tag-build'):
   tag=args[-1]
   assert p.returncode==2 and p.stdout=='' and p.stderr.splitlines()==[f'shipcraft: --fixes-release {tag} is not a release tag of this project (release tags: vX.Y.Z)','Why: report counts a fix only against a release it reads, so this lock would name a release report never counts.','Next: pass the tag of the release that shipped the defect, or set [report] release_tags in .shipcraft.toml, then run red again.'],(p.stdout,p.stderr)
  else:
