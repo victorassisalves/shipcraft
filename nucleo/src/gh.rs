@@ -7,10 +7,23 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fs;
 use std::process::Command;
+use std::sync::Mutex;
+
+/// Item 144: origin's (`HOST/OWNER/REPO`, `HOST`) once `pr` or `merge` read it.
+static ORIGIN_REPO: Mutex<Option<(String, String)>> = Mutex::new(None);
+
+/// Item 144: every later `gh` process gets `GH_REPO` and `GH_HOST` (none: as inherited).
+pub fn pin(origin: Option<(String, String)>) {
+    *ORIGIN_REPO.lock().unwrap_or_else(|e| e.into_inner()) = origin;
+}
 
 /// `gh <args>` in the repository root: stdout, or the error text.
 pub fn run(repo: &Repo, args: &[&str]) -> std::result::Result<String, String> {
-    let out = Command::new("gh").args(args).current_dir(repo.root()).output().map_err(|e| format!("run gh: {e}"))?;
+    let mut command = Command::new("gh");
+    if let Some((name, host)) = ORIGIN_REPO.lock().unwrap_or_else(|e| e.into_inner()).clone() {
+        command.env("GH_REPO", name).env("GH_HOST", host);
+    }
+    let out = command.args(args).current_dir(repo.root()).output().map_err(|e| format!("run gh: {e}"))?;
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     if out.status.success() {
         Ok(stdout)
