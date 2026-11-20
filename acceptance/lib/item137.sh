@@ -179,7 +179,7 @@ elif case=='report-bare':
  assert d['deploys']['n']==2 and d['deploys']['value']['first']==stamp-86400 and d['deploys']['value']['last']==stamp,d
  text=report().stdout
  assert 'git: default branch refs/heads/main; 2 release(s); lock rows without log times come from the branch tip; release tags: vX.Y.Z or X.Y.Z' in text,text
- rr=reads();assert sum('for-each-ref' in r['args'] for r in rr)==2,rr
+ rr=reads();assert sum(any(a[i:i+2]==['for-each-ref','refs/tags'] for i in range(len(a)-1)) for a in (r['args'] for r in rr))==2,rr
 elif case=='report-readers':
  releases();observed=[]
  for body in (None,'DIRECTORY',b'\xff','broken [\n',base,base+'[report]\n',base+'[report]\ndeploy="release"\n'):
