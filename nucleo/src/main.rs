@@ -347,7 +347,7 @@ fn measured(camada: &str, command: impl FnOnce(&Repo, &mut medicao::CiRow) -> Re
     let result = command(&repo, &mut ci);
     // Item 141: the tree the hook judged, from the effective index after any
     // lock the hook wrote; "" when git cannot write it.
-    let hook = lock.map(|lock| (lock, repo.try_text(&["write-tree"]).unwrap_or_default()));
+    let hook = lock.map(|lock| (lock, unjudged::index_tree(&repo)));
     medicao::layer(&repo, camada, started, &result, (camada == "ci").then_some(ci), hook);
     result
 }

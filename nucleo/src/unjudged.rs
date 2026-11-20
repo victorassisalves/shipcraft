@@ -5,12 +5,13 @@
 //! `close` checks HEAD when it is not, and `status` and `pr` name such commits.
 
 use crate::config::CONFIG_FILE;
-use crate::git::{short, Repo, Snapshot};
+use crate::git::{short, Repo, Snapshot, TempDir};
 use crate::lock::{lock_files, Lock};
 use crate::medicao;
 use crate::refusal::Stop;
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
+use std::process::Command;
 
 /// What the run log says: the passed hook rows (tree, commit), the commits
 /// of the `close` rows, and the cutoff (the first row that carries `tree`).
@@ -177,6 +178,28 @@ pub fn status_line(repo: &Repo) -> Option<String> {
         "shipcraft: commits with a lock open that the hook did not judge: {}; shipcraft ci --base {base} judges them",
         named(&found)
     ))
+}
+
+/// Point 1: `git write-tree` of the effective index (`GIT_INDEX_FILE`, else
+/// the repository's), run on a temporary copy so the caller's index is never
+/// rewritten (item 28); "" on any failure. A missing index is an empty one.
+pub fn index_tree(repo: &Repo) -> String {
+    let index = match std::env::var_os("GIT_INDEX_FILE") {
+        Some(path) => Some(std::path::PathBuf::from(path)),
+        None => repo.try_text(&["rev-parse", "--git-path", "index"]).map(|p| repo.path(&p)),
+    };
+    let Some(index) = index else { return String::new() };
+    let Ok(temp) = TempDir::new("shipcraft-tree") else { return String::new() };
+    let copy = temp.path().join("index");
+    match fs::copy(&index, &copy) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return String::new(),
+        _ => {}
+    }
+    let out = Command::new("git").arg("-C").arg(repo.root()).arg("write-tree").env("GIT_INDEX_FILE", &copy).output();
+    match out {
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim().to_string(),
+        _ => String::new(),
+    }
 }
 
 /// Point 3: `close` without a mark checks HEAD when it has a lock open and
