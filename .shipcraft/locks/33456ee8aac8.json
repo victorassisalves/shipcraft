@@ -64,7 +64,7 @@
     "acceptance/lib/item136.sh": "sha256:97e2cd0173dbb963de9813138e988fcf6d5762a28f10d20fa471ca9088231865",
     "acceptance/lib/item137.sh": "sha256:5ddf0596c74b61144e667770a3cdc5d7c043c81bd6a42fc8add18c5f59fbc72a",
     "acceptance/lib/item138.sh": "sha256:dc9f1e96ac57aa6903fd3ef4a8a541c8aa201dc92bf47a64daaa8383af9d66e4",
-    "acceptance/lib/item139.sh": "sha256:5433374efc419f578743ba76be7a258aabf370ace3d30771109d41046f71fee7",
+    "acceptance/lib/item139.sh": "sha256:60b32a8653731d0b681978a145f68f5c02f8902dd06461e6355032436e29ad6e",
     "acceptance/lib/item16a.sh": "sha256:d83f4146699d5f19ce369613c49449b2c6b4de1bd96c66e17d7a4f2ce350e125",
     "acceptance/lib/item16b.sh": "sha256:dc35a66c9f04935c9c30086066745469119cb8f4a220e7bb83abc636ebca8119",
     "acceptance/lib/item17.sh": "sha256:5efdcfc0c8b419625cbc0e96a6aaac226387a5a7dad57f8ac90d64cdedbee4c1",
@@ -330,8 +330,7 @@
     "acceptance:acceptance/lib/item139.sh::node::v1-139.node"
   ],
   "failing_at_red": [
-    "acceptance:acceptance/lib/item139.sh::core::v1-139.midwrite",
-    "acceptance:acceptance/lib/item139.sh::core::v1-139.no-report"
+    "acceptance:acceptance/lib/item139.sh::core::v1-139.midwrite"
   ],
   "controls": [
     "acceptance:acceptance/lib/item139.sh::core::v1-139.blocked-parent",
@@ -356,6 +355,7 @@
     "acceptance:acceptance/lib/item139.sh::core::v1-139.leftover",
     "acceptance:acceptance/lib/item139.sh::core::v1-139.log-row-failure",
     "acceptance:acceptance/lib/item139.sh::core::v1-139.no-command",
+    "acceptance:acceptance/lib/item139.sh::core::v1-139.no-report",
     "acceptance:acceptance/lib/item139.sh::core::v1-139.nonregular",
     "acceptance:acceptance/lib/item139.sh::core::v1-139.readonly",
     "acceptance:acceptance/lib/item139.sh::core::v1-139.redo",
@@ -376,5 +376,5 @@
   "kind": "feature",
   "reported_at": null,
   "fixes_release": null,
-  "seal": "3f13e66337ea18fb18c340c92e29d7d5c288c283473f4a6074067b5e8e5f54be"
+  "seal": "0bf53f62482f16fd7eebaf9f83a5a8ce0f3faf7d1c263f5d47ba5a19f9cdf225"
 }

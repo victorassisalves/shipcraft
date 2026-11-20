@@ -30,6 +30,13 @@ def commit(message):git('add','-A');return ok('git','commit','-qm',message)
 def locks():return sorted(Path('.shipcraft/locks').glob('*.json'))
 def logpath(name='red'):
  p=Path(git('rev-parse','--git-path','shipcraft/output/'+name+'.log'));return p if p.is_absolute() else Path.cwd()/p
+def without_lines(data,prefixes):
+ # Split only at LF: other byte separators belong to the runner's output.
+ return b'\n'.join(line for line in data.split(b'\n') if not line.startswith(prefixes))
+def log_output():return without_lines(logpath().read_bytes(),(b'shipcraft: `',))
+def screen_output(p):
+ # Command announcements contain interpreter, runner and temporary JUnit paths.
+ return without_lines(p.stderr,(b'shipcraft: running the suite (',b'shipcraft: running the build (',b'shipcraft: checking the project ('))
 
 def payload(data,err=b'',mode='suite'):
  write(cw/(mode+'.out'),data);write(cw/(mode+'.err'),err)
@@ -166,11 +173,11 @@ elif case=='commands':
 elif case=='redo':
  payload(b'old139\n');assert red().returncode==0;commit('test: RED139')
  write(file139,Path(file139).read_text()+'\n# repaired assertion description139\n');payload(b'R'*10000);p=red('--redo')
- assert p.returncode==0 and b'RED redone at' in p.stdout and len(cuts(p))==2 and b'old139' not in logpath().read_bytes()
+ assert p.returncode==0 and b'RED redone at' in p.stdout and len(cuts(p))==2 and b'old139' not in log_output()
 elif case=='truncate':
  payload(b'OLD139'*3000);assert red().returncode==0
  before=json.loads(locks()[0].read_text());restart('truncate');payload(b'new139\n');p=red()
- assert p.returncode==0 and logpath().read_bytes().count(b'new139\n')>=1 and b'OLD139' not in logpath().read_bytes() and not cuts(p)
+ assert p.returncode==0 and log_output().count(b'new139\n')>=1 and b'OLD139' not in log_output() and not cuts(p)
  assert json.loads(locks()[0].read_text())==before
 elif case=='no-command':
  f=logpath();write(f,b'keep139\x00');payload(b'forbidden139')
@@ -188,11 +195,11 @@ elif case=='hook-green':
 elif case=='full-red':
  payload(b'F'*150000,b'U'*150000);f=logpath();write(f,b'preserve139')
  p=red(extra={'SHIPCRAFT_OUTPUT':'full'});d=locks()[0].read_bytes()
- assert p.returncode==0 and p.stderr.count(b'F')==300000 and p.stderr.count(b'U')==300000 and not cuts(p) and f.read_bytes()==b'preserve139'
+ assert p.returncode==0 and screen_output(p).count(b'F')==300000 and screen_output(p).count(b'U')==300000 and not cuts(p) and f.read_bytes()==b'preserve139'
  restart('full');q=red();assert q.returncode==0 and locks()[0].read_bytes()==d
 elif case=='full-hook':
  payload(b'F'*150000,b'U'*150000);assert red().returncode==0;f=logpath('hook');write(f,b'preserve139');git('add','-A');p=run('git','commit','-qm','test: full hook139',extra={'SHIPCRAFT_OUTPUT':'full'})
- assert p.returncode==0 and p.stderr.count(b'F')==150000 and p.stderr.count(b'U')==150000 and not cuts(p) and f.read_bytes()==b'preserve139'
+ assert p.returncode==0 and screen_output(p).count(b'F')==150000 and screen_output(p).count(b'U')==150000 and not cuts(p) and f.read_bytes()==b'preserve139'
 elif case=='env-values':
  payload(b'E'*10000);observed=[]
  for i,value in enumerate(('FULL','1',' full','full ','full\n','',os.fsdecode(b'full\xff'))):
@@ -231,7 +238,7 @@ elif case=='worktree':
 elif case=='no-report':
  payload(b'O'*12000,b' '*8000+b'\nfirst diagnostic139\nwrong last139\n');write(cw/'no-report','yes');p=red()
  assert p.returncode==1 and not locks() and len(cuts(p))==2 and b'first diagnostic139' in p.stderr.split(b'shipcraft refused:')[-1] and b'wrong last139' not in p.stderr.split(b'shipcraft refused:')[-1]
- assert logpath().read_bytes().count(b'O'*12000)==2 and rows()[-1]['code']=='no-report'
+ assert log_output().count(b'O')==24000 and rows()[-1]['code']=='no-report'
 elif case=='check-failure':
  payload(b' '*8000+b'\nstdout diagnostic139\n',b' '*9000+b'\nstderr diagnostic139\nwrong139\n',mode='check');write(cw/'check.fail','yes');p=red()
  assert p.returncode==1 and len(cuts(p))==1 and [x['mode'] for x in entries()]==['check'] and not locks()
@@ -253,7 +260,7 @@ elif case=='late-drop':
  assert p.returncode==0 and b'LATE139' not in p.stdout+p.stderr and b'LATE139' not in logpath().read_bytes() and len(cuts(p))==2
 elif case=='ci':
  payload(b'I'*150000,b'C'*150000);base=git('rev-parse','HEAD');commit('test: CI fixture139');p=run(binary,'ci','--base',base)
- assert p.returncode==1 and p.stderr.count(b'I')==150000 and p.stderr.count(b'C')==150000 and not cuts(p) and not logpath().exists() and not logpath('hook').exists()
+ assert p.returncode==1 and screen_output(p).count(b'I')==150000 and screen_output(p).count(b'C')==150000 and not cuts(p) and not logpath().exists() and not logpath('hook').exists()
 elif case=='version':
  spec=Path(os.environ['ACEITE']).parent/'docs/spec.md';manifest=Path(os.environ['ACEITE']).parent/'nucleo/Cargo.toml'
  version=re.search(r'This contract is \*\*([0-9.]+)\*\*',spec.read_text()).group(1)
