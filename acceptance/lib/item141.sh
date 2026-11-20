@@ -90,11 +90,11 @@ if case=='repro':
  assert logbytes()==before,'revert unexpectedly wrote a judgment row'
  q=run('shipcraft','ci','--base','main141')
  assert q.returncode==1 and rows()[-1]['code']=='test-changed',(q.returncode,q.stdout,q.stderr,rows()[-1])
- print('REPRODUCTION: git revert --no-edit T stdout='+repr(p.stdout)+'; CI refuses locked test edit',flush=True)
+ print('REPRODUCTION: git revert --no-edit T stderr='+repr(p.stderr)+'; CI refuses locked test edit',flush=True)
  what=next(l.removeprefix('shipcraft refused: ') for l in (q.stdout+q.stderr).splitlines() if l.startswith('shipcraft refused: '))
  nextstep=next(l.removeprefix('Next: ') for l in (q.stdout+q.stderr).splitlines() if l.startswith('Next: '))
  expected=[f'shipcraft: commit {short} (revert) was not judged by the hook, with lock {lock.stem} open; checking it now against the locks, without the suite (CI judges it in full).',f'shipcraft: commit {short} would be refused by CI (test-changed): {what}; next: {nextstep}']
- assert [l for l in p.stdout.splitlines() if l.startswith('shipcraft:')]==expected,(p.stdout,expected)
+ assert [l for l in p.stderr.splitlines() if l.startswith('shipcraft:')]==expected,(p.stdout,p.stderr,expected)
 elif case=='tree-hook':
  t,lock=seed();parent=head();write('unlocked141','staged');git('add','unlocked141')
  p=ok('shipcraft','check','--commit-msg','unused message')
@@ -129,7 +129,7 @@ elif case=='cherry-pick':
  p=ok('git','cherry-pick',s2);sha=head();short=sha[:7]
  assert logbytes()==before and trace()==calls and json.loads(lock.read_text())['state']=='open'
  expected=[f'shipcraft: commit {short} (cherry-pick) was not judged by the hook, with lock {lock.stem} open; checking it now against the locks, without the suite (CI judges it in full).',f'shipcraft: commit {short} would be refused by CI (test-changed): locked test tests/test_old.py changed after RED (in commit {short}); next: undo the change in tests/test_old.py; if the test looks wrong, stop and tell the RED author']
- assert notices(p)==expected,(p.stdout,expected)
+ assert [l for l in p.stderr.splitlines() if l.startswith('shipcraft: commit ')]==expected,(p.stdout,p.stderr,expected)
 elif case=='cherry-green':
  t,lock=seed()
  git('checkout','-qb','side141',t);green();commit('S1');s1=head()
@@ -137,7 +137,7 @@ elif case=='cherry-green':
  p=ok('git','cherry-pick',s1);short=head()[:7]
  assert logbytes()==before and trace()==calls and json.loads(lock.read_text())['state']=='open'
  expected=[f'shipcraft: commit {short} (cherry-pick) was not judged by the hook, with lock {lock.stem} open; checking it now against the locks, without the suite (CI judges it in full).',f'shipcraft: commit {short} keeps the locks\' files (the suite did not run); if the locked cases pass now, a commit through the hook closes the lock: git commit --allow-empty -m "close lock"']
- assert notices(p)==expected,(p.stdout,expected)
+ assert [l for l in p.stderr.splitlines() if l.startswith('shipcraft: commit ')]==expected,(p.stdout,p.stderr,expected)
  ok('git','commit','--allow-empty','-qm','close lock')
  assert json.loads(lock.read_text())['state']=='closed' and git('log','-1','--format=%s')=='chore(shipcraft): close lock '+lock.stem
 elif case=='rebase-pick':
@@ -147,7 +147,7 @@ elif case=='rebase-pick':
  p=ok('git','rebase','--onto',onto,t);short=head()[:7]
  assert head()!=oldred and logbytes()==before and trace()==calls
  expected=[f'shipcraft: commit {short} (rebase (pick)) was not judged by the hook, with lock {lock.stem} open; checking it now against the locks, without the suite (CI judges it in full).',f'shipcraft: commit {short} keeps the locks\' files (the suite did not run); if the locked cases pass now, a commit through the hook closes the lock: git commit --allow-empty -m "close lock"']
- assert notices(p)==expected,(p.stdout,p.stderr,expected)
+ assert [l for l in p.stderr.splitlines() if l.startswith('shipcraft: commit ')]==expected,(p.stdout,p.stderr,expected)
 elif case=='rebase-fixup':
  t,lock=seed();red=head();write('tests/test_old.py','def test_old(): assert 9==9\n');bypass('bad141')
  write('extra141','fixup product');bypass('fixup! bad141')
@@ -156,7 +156,7 @@ elif case=='rebase-fixup':
  p=ok('git','-c','sequence.editor='+str(editor),'rebase','-i','--autosquash',red);short=head()[:7]
  assert logbytes()==before and trace()==calls
  expected=[f'shipcraft: commit {short} (rebase (fixup)) was not judged by the hook, with lock {lock.stem} open; checking it now against the locks, without the suite (CI judges it in full).',f'shipcraft: commit {short} would be refused by CI (test-changed): locked test tests/test_old.py changed after RED (in commit {short}); next: undo the change in tests/test_old.py; if the test looks wrong, stop and tell the RED author']
- assert notices(p)[-2:]==expected and len(notices(p))%2==0,(p.stdout,expected)
+ assert [l for l in p.stderr.splitlines() if l.startswith('shipcraft: commit ')][-2:]==expected and len([l for l in p.stderr.splitlines() if l.startswith('shipcraft: commit ')])%2==0,(p.stdout,p.stderr,expected)
 elif case=='rebase-continue':
  t,lock=seed();red=head();write('conflict141','item\n');bypass('item conflict')
  git('checkout','-qb','onto141',red);write('conflict141','onto\n');bypass('onto conflict')
@@ -165,14 +165,14 @@ elif case=='rebase-continue':
  before=logbytes();calls=trace();p=ok('git','-c','core.editor=true','rebase','--continue');short=head()[:7]
  assert logbytes()==before and trace()==calls
  expected=[f'shipcraft: commit {short} (rebase (continue)) was not judged by the hook, with lock {lock.stem} open; checking it now against the locks, without the suite (CI judges it in full).',f'shipcraft: commit {short} would be refused by CI (test-changed): locked test tests/test_old.py changed after RED (in commit {short}); next: undo the change in tests/test_old.py; if the test looks wrong, stop and tell the RED author']
- assert notices(p)==expected,(p.stdout,p.stderr,expected)
+ assert [l for l in p.stderr.splitlines() if l.startswith('shipcraft: commit ')]==expected,(p.stdout,p.stderr,expected)
 elif case=='bypass-refused':
  t,lock=seed();write('tests/test_old.py','def test_old(): assert 12==12\n');git('add','-A')
  p=run('git','commit','-qm','refused141');assert p.returncode==1 and rows()[-1]['result']=='refused'
  before=logbytes();calls=trace();p=bypass();short=head()[:7]
  assert logbytes()==before and trace()==calls
  expected=[f'shipcraft: commit {short} (commit) was not judged by the hook, with lock {lock.stem} open; checking it now against the locks, without the suite (CI judges it in full).',f'shipcraft: commit {short} would be refused by CI (test-changed): locked test tests/test_old.py changed after RED (in commit {short}); next: undo the change in tests/test_old.py; if the test looks wrong, stop and tell the RED author']
- assert notices(p)==expected,(p.stdout,expected)
+ assert [l for l in p.stderr.splitlines() if l.startswith('shipcraft: commit ')]==expected,(p.stdout,p.stderr,expected)
 elif case=='close-repeat':
  t,lock=seed(both=True);red=head();write('loose141','unjudged');sha=snapshot('unjudged');short=sha[:7]
  expected=[f'shipcraft: commit {short} (fixture141) was not judged by the hook, with lock {lock.stem} open; checking it now against the locks, without the suite (CI judges it in full).',f'shipcraft: commit {short} keeps the locks\' files (the suite did not run); if the locked cases pass now, a commit through the hook closes the lock: git commit --allow-empty -m "close lock"']
@@ -226,7 +226,7 @@ elif case=='close-format':
  what=next(l.removeprefix('shipcraft refused: ') for l in lines if l.startswith('shipcraft refused: '))
  step=next(l.removeprefix('Next: ') for l in lines if l.startswith('Next: '))
  before=logbytes();calls=trace();p=localclose()
- expected=[f'shipcraft: commit {short} (fixture141) was not judged by the hook, with lock {lock.stem} open; checking it now against the locks, without the suite (CI judges it in full).',f'shipcraft: commit {short} would be refused by CI (lock-format): {what}; next: {step}']
+ expected=[f'shipcraft: commit {short} (fixture141) was not judged by the hook, with lock {lock.stem}, unknown open; checking it now against the locks, without the suite (CI judges it in full).',f'shipcraft: commit {short} would be refused by CI (lock-format): {what}; next: {step}']
  assert p.stdout.splitlines()==expected and p.stderr=='',(p.stdout,expected)
  assert logbytes()==before and trace()==calls
 elif case=='close-action':
@@ -245,10 +245,10 @@ elif case=='sha256':
  write('.gitignore','.venv/\n__pycache__/\n.pytest_cache/\n')
  (root/'.venv').symlink_to(original/'.venv',target_is_directory=True)
  write('requirements.txt','pytest\n');ok('shipcraft','init','--lang','python');commit('init SHA256')
- t,lock=seed();parent=head();r=rows()[-1];tree=git('rev-parse','HEAD^{tree}')
- assert len(tree)==64 and r.get('tree')==tree and r['commit']==git('rev-parse','HEAD^'),r
+ t,lock=seed();parent=head();r=rows()[-1];tree=git('rev-parse','HEAD^{tree}');previous=git('rev-parse','HEAD^')
  write('tests/test_old.py','# changed256\n');p=bypass();short=head()[:7]
- assert notices(p)[-1:]==[f'shipcraft: commit {short} would be refused by CI (test-changed): locked test tests/test_old.py changed after RED (in commit {short}); next: undo the change in tests/test_old.py; if the test looks wrong, stop and tell the RED author'],p.stdout
+ assert [l for l in p.stderr.splitlines() if l.startswith('shipcraft: commit ')][-1:]==[f'shipcraft: commit {short} would be refused by CI (test-changed): locked test tests/test_old.py changed after RED (in commit {short}); next: undo the change in tests/test_old.py; if the test looks wrong, stop and tell the RED author'],(p.stdout,p.stderr)
+ assert len(tree)==64 and r.get('tree')==tree and r['commit']==previous,r
 elif case=='parent-lock':
  t,lock=seed();git('rm','--cached',str(lock))
  tree=git('write-tree');sha=git('commit-tree',tree,'-p',head(),'-m','removed lock');git('update-ref','-m','fixture141: removed lock','HEAD',sha);short=sha[:7]
