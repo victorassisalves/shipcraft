@@ -37,7 +37,7 @@ def fresh(name,real=False,root='.',command=None):
  write('src/sum.test.js','const {sum}=require("./sum");test("adds",()=>expect(sum()).toBe(3));\n')
  write('src/other.test.js','test("control140",()=>expect(2+2).toBe(4));\n')
  write('src/setup.js','// no mock\n')
- if real:ok('npm','install','--offline','--ignore-scripts','--no-audit','--no-fund','--loglevel=error')
+ if real:ok('npm','install','--ignore-scripts','--no-audit','--no-fund','--loglevel=error')
  else:
   write(root+'/node_modules/.bin/jest',FAKE);Path(root+'/node_modules/.bin/jest').chmod(0o755)
   write(root+'/tools/runner',FAKE);Path(root+'/tools/runner').chmod(0o755)
