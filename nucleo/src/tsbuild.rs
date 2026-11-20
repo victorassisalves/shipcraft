@@ -7,7 +7,7 @@ use crate::config::CONFIG_FILE;
 use crate::git::{Repo, Snapshot};
 use crate::glob;
 use crate::jsonc;
-use crate::refusal::{short_list, warn, Result};
+use crate::refusal::{short_list, Result};
 use crate::suite;
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -26,8 +26,10 @@ pub fn infer(repo: &Repo) -> Result<Option<(String, Vec<String>)>> {
         let file = if dir == "." { "tsconfig.json".to_string() } else { format!("{dir}/tsconfig.json") };
         let Some(text) = indexed(repo, &file)? else { continue };
         let Some(config) = jsonc::parse(&text) else {
-            println!("shipcraft: did not write [build]: cannot read {file} as JSONC");
-            return Ok(None);
+            return Ok(left_out(
+                format!("cannot read {} as JSONC", fold(&file)),
+                "init infers [build] only from tsconfig files it can read, and does not guess which folders the build needs",
+            ));
         };
         if config.get("references").is_some() || config["compilerOptions"]["composite"] == Value::Bool(true) {
             dirs.push(dir);
@@ -45,11 +47,13 @@ pub fn infer(repo: &Repo) -> Result<Option<(String, Vec<String>)>> {
     let probed = suite::probe_build(&command, repo.root())?;
     if let Err((how, line)) = &probed {
         let line = line.as_ref().map(|l| format!(": {}", fold(l))).unwrap_or_default();
-        println!("shipcraft: skipped the optional [build] step: `{command}` {how}{line}");
-        println!("Why: init writes [build] only after it passes in the tree; a failing [build] would refuse every shipcraft ci and shipcraft red, so init goes on without it");
-        println!(
-            "Next: when `{command}` passes (run it to see the errors), add a [build] section to {CONFIG_FILE} with command = {}",
-            basic_string(&command)
+        skipped(
+            &format!("`{command}` {how}{line}"),
+            "init writes [build] only after it passes in the tree; a failing [build] would refuse every shipcraft ci and shipcraft red",
+            &format!(
+                "when `{command}` passes (run it to see the errors), add a [build] section to {CONFIG_FILE} with command = {}",
+                basic_string(&command)
+            ),
         );
     }
     if let (Some(before), Some(after)) = (before, untracked(repo)) {
@@ -114,7 +118,7 @@ fn packages(repo: &Repo, tracked: &BTreeSet<String>) -> Result<Option<BTreeSet<S
     for (file, globs) in manifests {
         if let Some(glob) = globs.iter().find(|g| UNKNOWN.iter().any(|w| g.contains(w))) {
             return Ok(left_out(
-                format!("did not write [build]: cannot understand glob `{glob}` in {file}"),
+                format!("cannot understand glob `{}` in {file}", fold(glob)),
                 "shipcraft only matches `*`, `?`, `**` and exclusion `!`; another wildcard would mean guessing which packages are included",
             ));
         }
@@ -149,7 +153,7 @@ fn manifests(repo: &Repo) -> Result<Option<Vec<Manifest>>> {
     for (file, globs) in all {
         let Some(globs) = globs else {
             return Ok(left_out(
-                format!("did not write [build]: cannot read {file}, or its package list is not a list of strings"),
+                format!("cannot read {file}, or its package list is not a list of strings"),
                 "[build] comes from workspace packages, and shipcraft does not guess which ones",
             ));
         };
@@ -186,13 +190,19 @@ fn shell_word(dir: &str) -> String {
     }
 }
 
+/// Item 147: the JSONC, glob and manifest notices, in item 131's skip form.
 fn left_out<T>(what: String, why: &str) -> Option<T> {
-    warn(what, why, by_hand("npx --no -- tsc -b <directories with project references>"));
+    skipped(&what, why, BY_HAND);
     None
 }
 
-fn by_hand(command: &str) -> String {
-    format!("manually add a [build] section to {CONFIG_FILE} with command = \"{command}\"")
+const BY_HAND: &str = "when the tests need a build first, add a [build] section to .shipcraft.toml with command = \"npx --no -- tsc -b <directories with project references>\", and remove the check of each suite in those directories, since tsc --noEmit refuses a composite project (TS6310)";
+
+/// Items 131 and 147: every `[build]` notice after which init goes on.
+fn skipped(what: &str, why: &str, next: &str) {
+    println!("shipcraft: skipped the optional [build] step: {what}");
+    println!("Why: {why}, so init goes on without it");
+    println!("Next: {next}");
 }
 
 #[cfg(test)]
