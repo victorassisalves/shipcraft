@@ -52,6 +52,11 @@ def frozen85():
 f85=frozen85()
 NEW_LINE=b"- To contribute to a project that does not use Shipcraft (its default branch has no `.shipcraft.toml` or `.sc2.toml`), open the PR from the branch `shipcraft export --base <base> <new branch>` writes once the lock is closed and `shipcraft ci --base <base>` passes on this branch: it leaves out Shipcraft's files and this block, and the project's own checks still apply to it. `shipcraft pr` is for projects that use Shipcraft.\n"
 PIN=f85['NEW'].replace(b'- A behavior change:',NEW_LINE+b'- A behavior change:',1)
+pin_source=(acceptance/'lib/item86.sh').read_text().split("<<'PY86'\n",1)[1].split('\nPY86',1)[0]
+pin_ns={'item85':f85}
+for node in ast.parse(pin_source).body:
+ if isinstance(node,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='PIN' for t in node.targets):exec(compile(ast.Module(body=[node],type_ignores=[]),'pin86','exec'),pin_ns)
+CURRENT_PIN=pin_ns['PIN']
 IMPORT=b'<!-- shipcraft -->\nShipcraft workflow (required): @AGENTS.md\n<!-- /shipcraft -->\n'
 def init(call=binary):
  return ok(call,'init','--lang','other','--command','sh run-tests.sh {junit}','--glob','tests/*.sh')
@@ -209,15 +214,15 @@ elif case=='late-failure':
  change({'AGENTS.md':b'<!-- shipcraft -->\n','src/calc.txt':'2\n'});git('branch','clean142/child',f);p=export()
  assert p.returncode==2 and p.stdout==b'' and p.stderr.startswith(b'shipcraft: error:')
 elif case=='fresh-bare':
- init();actual=Path('AGENTS.md').read_bytes();assert actual==b'# Upstream rules\n\n- Keep it small.\n\n'+PIN
+ init();actual=Path('AGENTS.md').read_bytes();assert actual==b'# Upstream rules\n\n- Keep it small.\n\n'+CURRENT_PIN
 elif case=='fresh-local':
  target=Path('node_modules/shipcraft-fixture/bin/shipcraft');target.parent.mkdir(parents=True);shutil.copy2(binary,target);target=target.resolve();call=Path('node_modules/.bin/shipcraft');call.parent.mkdir();call.symlink_to(target);init(call.resolve())
- assert Path('AGENTS.md').read_bytes()==b'# Upstream rules\n\n- Keep it small.\n\n'+f85['variant'](PIN,True)
+ assert Path('AGENTS.md').read_bytes()==b'# Upstream rules\n\n- Keep it small.\n\n'+f85['variant'](CURRENT_PIN,True)
 elif case=='upgrade':
  init()
  for local in (False,True):
   put('AGENTS.md',b'prefix142\n'+f85['variant'](f85['NEW'],local)+b'suffix142');init()
-  assert Path('AGENTS.md').read_bytes()==b'prefix142\n'+PIN+b'suffix142'
+  assert Path('AGENTS.md').read_bytes()==b'prefix142\n'+CURRENT_PIN+b'suffix142'
 elif case=='old-status':
  init();put('AGENTS.md',f85['NEW']);env,trace=gh_stub();p=status(env)
  assert p.returncode==0 and b'shipcraft: AGENTS.md block: from an earlier version; run `shipcraft init` to update it' in p.stdout
@@ -261,7 +266,7 @@ elif case=='docs-section':
  readme=(acceptance.parent/'README.md').read_text();assert "(config, locks, briefs, Shipcraft's block in `AGENTS.md` and `CLAUDE.md`, hook manager files)" in readme
 elif case=='fixture-control':
  init();assert Path('CLAUDE.md').read_bytes()==IMPORT
- assert Path('AGENTS.md').read_bytes() in (b'# Upstream rules\n\n- Keep it small.\n\n'+f85['NEW'],b'# Upstream rules\n\n- Keep it small.\n\n'+PIN)
+ assert Path('AGENTS.md').read_bytes() ==b'# Upstream rules\n\n- Keep it small.\n\n'+CURRENT_PIN
  commit('setup control142')
  put('tests/sub.sh','test "$(cat src/calc.txt)" = 2\n');ok(binary,'red');commit('test control142');change({'src/calc.txt':'2\n'},'green control142')
  lock=list(Path('.shipcraft/locks').glob('*.json'));assert len(lock)==1 and json.loads(lock[0].read_text())['state']=='closed'
@@ -270,7 +275,7 @@ elif case=='fixture-control':
  assert git('rev-list','--count',f+'..clean142')=='2' and blob('tests/sub.sh')==b'test "$(cat src/calc.txt)" = 2\n'
  localroot=cw/'local-control142';localroot.mkdir();os.chdir(localroot);git('init','-q','-b','main')
  target=Path('node_modules/shipcraft-fixture/bin/shipcraft');target.parent.mkdir(parents=True);shutil.copy2(binary,target);target=target.resolve();call=Path('node_modules/.bin/shipcraft');call.parent.mkdir();call.symlink_to(target);init(call.resolve())
- assert Path('AGENTS.md').read_bytes() in (f85['variant'](f85['NEW'],True),f85['variant'](PIN,True))
+ assert Path('AGENTS.md').read_bytes() ==f85['variant'](CURRENT_PIN,True)
  assert Path('CLAUDE.md').read_bytes()==IMPORT
 else:raise AssertionError('unrouted '+case)
 PY142

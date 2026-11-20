@@ -231,16 +231,16 @@ PY
       pass;return ;;
     status-*|min-*)
       v1_start codex; setup_init
-      want="red not set (the orchestrator's choice); green not set (the orchestrator's choice); review codex"
+      want="red not set (the session that starts the RED and GREEN chooses); green not set (the session that starts the RED and GREEN chooses); review codex"
       case "$c" in
         status-default) i64_config '' absent ;;
-        status-off) tset execution review '"off"';want="red not set (the orchestrator's choice); green not set (the orchestrator's choice); review off" ;;
+        status-off) tset execution review '"off"';want="red not set (the session that starts the RED and GREEN chooses); green not set (the session that starts the RED and GREEN chooses); review off" ;;
         status-strings) i64_config $'[roles]\nred = "gemini"\ngreen = "claude"\nreview = "codex"';want='red gemini; green claude; review codex' ;;
         status-inline) i64_config $'[roles]\nred = {agent="codex",model="r64",effort="minimal"}\ngreen = {agent="claude",model="g64",effort="max"}\nreview = {agent="gemini",model="v64"}';want='red codex (r64, effort minimal); green claude (g64, effort max); review gemini (v64)' ;;
-        status-section) i64_config $'[roles.review]\nagent="claude"\nmodel="m64"\neffort="xhigh"';want="red not set (the orchestrator's choice); green not set (the orchestrator's choice); review claude (m64, effort xhigh)" ;;
+        status-section) i64_config $'[roles.review]\nagent="claude"\nmodel="m64"\neffort="xhigh"';want="red not set (the session that starts the RED and GREEN chooses); green not set (the session that starts the RED and GREEN chooses); review claude (m64, effort xhigh)" ;;
         status-dotted) i64_config $'roles.red.agent="gemini"\nroles.green.agent="claude"\nroles.review.agent="codex"';want='red gemini; green claude; review codex' ;;
-        status-model) i64_config $'[roles]\nreview={agent="codex",model="opaque/模型:v64"}';want="red not set (the orchestrator's choice); green not set (the orchestrator's choice); review codex (opaque/模型:v64)" ;;
-        status-effort) i64_config $'[roles]\nreview={agent="claude",effort="max"}';want="red not set (the orchestrator's choice); green not set (the orchestrator's choice); review claude (effort max)" ;;
+        status-model) i64_config $'[roles]\nreview={agent="codex",model="opaque/模型:v64"}';want="red not set (the session that starts the RED and GREEN chooses); green not set (the session that starts the RED and GREEN chooses); review codex (opaque/模型:v64)" ;;
+        status-effort) i64_config $'[roles]\nreview={agent="claude",effort="max"}';want="red not set (the session that starts the RED and GREEN chooses); green not set (the session that starts the RED and GREEN chooses); review claude (effort max)" ;;
         status-table-agent) i64_config $'[roles]\nred={agent="codex"}\ngreen={agent="claude"}\nreview={agent="gemini"}';want='red codex; green claude; review gemini' ;;
         min-valid|min-patch|min-leading-zero)
           local minimum=2.20;[ "$c" != min-patch ] || minimum=2.20.0;[ "$c" != min-leading-zero ] || minimum=02.020
