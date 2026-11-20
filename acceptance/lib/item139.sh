@@ -142,11 +142,17 @@ elif case=='tail-separators':
  assert len(cuts(p))==2,cuts(p)
  assert screen_tail(p)==b'H'*4096+b'\n'+tail+b'\n' and len(cuts(p))==2 and all(b'last 2 line(s)' in c for c in cuts(p))
 elif case=='two-streams':
- a=bytes(range(65,91))*400;b=bytes(range(97,123))*400;payload(a,b);p=red();assert logpath().is_file(),'missing red log';f=logpath().read_bytes()
+ # Record the actual sh -c argument, including the runner's JUnit substitution.
+ realsh=shutil.which('sh');shelltrace=cw/'shell139.jsonl'
+ write(tools/'sh','#!'+sys.executable+'\nimport json,os,sys\nwith open('+repr(str(shelltrace))+',"a") as f:f.write(json.dumps(sys.argv[1:])+"\\n")\nos.execv('+repr(realsh)+',['+repr(realsh)+',*sys.argv[1:]])\n')
+ (tools/'sh').chmod(0o755)
+ a=bytes(range(65,91))*400;b=bytes(range(97,123))*400;payload(a,b);p=red(extra={'PATH':str(tools)+os.pathsep+env['PATH']});assert logpath().is_file(),'missing red log';f=logpath().read_bytes()
  # No global inter-stream ordering asserted. Each stream retains its byte sequence.
  parts=f.split(b'shipcraft: `')[1:]
  assert len(parts)==2 and len(cuts(p))==2
- assert all(part.split(b'`\n',1)[0].decode()==command.replace('{junit}',entry['argv'][0]) for part,entry in zip(parts,entries()))
+ shellargs=[json.loads(line) for line in shelltrace.read_text().splitlines()]
+ assert len(shellargs)==2 and all(args[0]=='-c' and len(args)==2 for args in shellargs),shellargs
+ assert [part.split(b'`\n',1)[0].decode() for part in parts]==[args[1] for args in shellargs]
  assert screen_tail(p)==parts[0].split(b'`\n',1)[1][:4096]+b'\n'+parts[0].split(b'`\n',1)[1][-4097:-1]+b'\n'
  for part in parts:
   body=part.split(b'`\n',1)[1]
@@ -224,8 +230,8 @@ elif case=='worktree':
  assert not (main/'.git/shipcraft/output/red.log').exists() and f.read_bytes().count(b'W'*10000)==2
 elif case=='no-report':
  payload(b'O'*12000,b' '*8000+b'\nfirst diagnostic139\nwrong last139\n');write(cw/'no-report','yes');p=red()
- assert p.returncode==1 and not locks() and len(cuts(p))==1 and b'first diagnostic139' in p.stderr.split(b'shipcraft refused:')[-1] and b'wrong last139' not in p.stderr.split(b'shipcraft refused:')[-1]
- assert logpath().read_bytes().count(b'O'*12000)==1 and rows()[-1]['code']=='no-report'
+ assert p.returncode==1 and not locks() and len(cuts(p))==2 and b'first diagnostic139' in p.stderr.split(b'shipcraft refused:')[-1] and b'wrong last139' not in p.stderr.split(b'shipcraft refused:')[-1]
+ assert logpath().read_bytes().count(b'O'*12000)==2 and rows()[-1]['code']=='no-report'
 elif case=='check-failure':
  payload(b' '*8000+b'\nstdout diagnostic139\n',b' '*9000+b'\nstderr diagnostic139\nwrong139\n',mode='check');write(cw/'check.fail','yes');p=red()
  assert p.returncode==1 and len(cuts(p))==1 and [x['mode'] for x in entries()]==['check'] and not locks()

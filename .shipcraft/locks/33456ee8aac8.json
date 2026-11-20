@@ -64,7 +64,7 @@
     "acceptance/lib/item136.sh": "sha256:97e2cd0173dbb963de9813138e988fcf6d5762a28f10d20fa471ca9088231865",
     "acceptance/lib/item137.sh": "sha256:5ddf0596c74b61144e667770a3cdc5d7c043c81bd6a42fc8add18c5f59fbc72a",
     "acceptance/lib/item138.sh": "sha256:dc9f1e96ac57aa6903fd3ef4a8a541c8aa201dc92bf47a64daaa8383af9d66e4",
-    "acceptance/lib/item139.sh": "sha256:ec6f43f6f5827de3b7a49b21f919974920237de9ec739c8b6bbd6cf9b069df94",
+    "acceptance/lib/item139.sh": "sha256:5433374efc419f578743ba76be7a258aabf370ace3d30771109d41046f71fee7",
     "acceptance/lib/item16a.sh": "sha256:d83f4146699d5f19ce369613c49449b2c6b4de1bd96c66e17d7a4f2ce350e125",
     "acceptance/lib/item16b.sh": "sha256:dc35a66c9f04935c9c30086066745469119cb8f4a220e7bb83abc636ebca8119",
     "acceptance/lib/item17.sh": "sha256:5efdcfc0c8b419625cbc0e96a6aaac226387a5a7dad57f8ac90d64cdedbee4c1",
@@ -330,11 +330,24 @@
     "acceptance:acceptance/lib/item139.sh::node::v1-139.node"
   ],
   "failing_at_red": [
+    "acceptance:acceptance/lib/item139.sh::core::v1-139.midwrite",
+    "acceptance:acceptance/lib/item139.sh::core::v1-139.no-report"
+  ],
+  "controls": [
+    "acceptance:acceptance/lib/item139.sh::core::v1-139.blocked-parent",
+    "acceptance:acceptance/lib/item139.sh::core::v1-139.boundary4096",
     "acceptance:acceptance/lib/item139.sh::core::v1-139.boundary4097",
     "acceptance:acceptance/lib/item139.sh::core::v1-139.check-failure",
+    "acceptance:acceptance/lib/item139.sh::core::v1-139.ci",
     "acceptance:acceptance/lib/item139.sh::core::v1-139.commands",
+    "acceptance:acceptance/lib/item139.sh::core::v1-139.control-fixture",
+    "acceptance:acceptance/lib/item139.sh::core::v1-139.control-git",
     "acceptance:acceptance/lib/item139.sh::core::v1-139.env-values",
+    "acceptance:acceptance/lib/item139.sh::core::v1-139.full-hook",
+    "acceptance:acceptance/lib/item139.sh::core::v1-139.full-nonregular",
+    "acceptance:acceptance/lib/item139.sh::core::v1-139.full-red",
     "acceptance:acceptance/lib/item139.sh::core::v1-139.git-path",
+    "acceptance:acceptance/lib/item139.sh::core::v1-139.git-resolution",
     "acceptance:acceptance/lib/item139.sh::core::v1-139.head",
     "acceptance:acceptance/lib/item139.sh::core::v1-139.hook-green",
     "acceptance:acceptance/lib/item139.sh::core::v1-139.hook-red",
@@ -342,10 +355,12 @@
     "acceptance:acceptance/lib/item139.sh::core::v1-139.later-lock-failure",
     "acceptance:acceptance/lib/item139.sh::core::v1-139.leftover",
     "acceptance:acceptance/lib/item139.sh::core::v1-139.log-row-failure",
-    "acceptance:acceptance/lib/item139.sh::core::v1-139.midwrite",
-    "acceptance:acceptance/lib/item139.sh::core::v1-139.no-report",
+    "acceptance:acceptance/lib/item139.sh::core::v1-139.no-command",
+    "acceptance:acceptance/lib/item139.sh::core::v1-139.nonregular",
+    "acceptance:acceptance/lib/item139.sh::core::v1-139.readonly",
     "acceptance:acceptance/lib/item139.sh::core::v1-139.redo",
     "acceptance:acceptance/lib/item139.sh::core::v1-139.repro",
+    "acceptance:acceptance/lib/item139.sh::core::v1-139.spawn-failure",
     "acceptance:acceptance/lib/item139.sh::core::v1-139.tail-invalid",
     "acceptance:acceptance/lib/item139.sh::core::v1-139.tail-nolf",
     "acceptance:acceptance/lib/item139.sh::core::v1-139.tail-separators",
@@ -358,23 +373,8 @@
     "acceptance:acceptance/lib/item139.sh::go::v1-139.go",
     "acceptance:acceptance/lib/item139.sh::node::v1-139.node"
   ],
-  "controls": [
-    "acceptance:acceptance/lib/item139.sh::core::v1-139.blocked-parent",
-    "acceptance:acceptance/lib/item139.sh::core::v1-139.boundary4096",
-    "acceptance:acceptance/lib/item139.sh::core::v1-139.ci",
-    "acceptance:acceptance/lib/item139.sh::core::v1-139.control-fixture",
-    "acceptance:acceptance/lib/item139.sh::core::v1-139.control-git",
-    "acceptance:acceptance/lib/item139.sh::core::v1-139.full-hook",
-    "acceptance:acceptance/lib/item139.sh::core::v1-139.full-nonregular",
-    "acceptance:acceptance/lib/item139.sh::core::v1-139.full-red",
-    "acceptance:acceptance/lib/item139.sh::core::v1-139.git-resolution",
-    "acceptance:acceptance/lib/item139.sh::core::v1-139.no-command",
-    "acceptance:acceptance/lib/item139.sh::core::v1-139.nonregular",
-    "acceptance:acceptance/lib/item139.sh::core::v1-139.readonly",
-    "acceptance:acceptance/lib/item139.sh::core::v1-139.spawn-failure"
-  ],
   "kind": "feature",
   "reported_at": null,
   "fixes_release": null,
-  "seal": "7649ee6b82a4dd42acc68c29361130dc5b5195f73f5b52e9df371716d6108463"
+  "seal": "3f13e66337ea18fb18c340c92e29d7d5c288c283473f4a6074067b5e8e5f54be"
 }
