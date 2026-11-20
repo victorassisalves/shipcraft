@@ -105,19 +105,19 @@ elif case=='equal-new-bare':
  assert Path('AGENTS.md').read_bytes()==expected and stat.S_IMODE(Path('AGENTS.md').stat().st_mode)==0o751
  assert 'AGENTS.md already has the shipcraft block, kept' in output(p),'missing already-has notice'
 elif case=='green-bare':
- call=fixture(False);expected=HISTORICAL_BRIEFS[False]['green.md'].replace(OLD_GREEN_LINE,GREEN_LINE)+STAMP
+ call=fixture(False);expected=HISTORICAL_BRIEFS[False]['green.md'].replace(OLD_GREEN_LINE,GREEN_LINE).replace(b'- Never edit a locked file or a lock (`.shipcraft/locks/*`).\n', b'- Never edit a locked file or a lock (`.shipcraft/locks/*`).\n- Never change the interface the locked tests call (names, arguments, results, and the errors, exit codes or messages they check); the code behind it is yours. If it looks wrong, stop and report it as a wrong test.\n')+STAMP
  p=run(call,'init')
  assert p.returncode==0,output(p)
  assert Path('.shipcraft/briefs/green.md').read_bytes().rsplit(b'<!-- written by shipcraft ',1)[0]==expected.rsplit(b'<!-- written by shipcraft ',1)[0],'GREEN brief body not exact'
  assert Path('.shipcraft/briefs/green.md').read_bytes()==expected,'GREEN brief stamp not exact'
 elif case=='red-body-control-bare':
- call=fixture(False);expected=HISTORICAL_BRIEFS[False]['red.md']
+ call=fixture(False);expected=HISTORICAL_BRIEFS[False]['red.md'].replace(b'- Commit the tests, their stubs and the lock in one commit, and stop.\n', b'- The tests call the interface your prompt fixes (names, arguments, results, and the errors, exit codes or messages they check), and the stubs have it. What the prompt leaves out, choose, list with the ambiguities and name in your report, so the GREEN gets it; where the prompt contradicts the intent or the existing tests, stop and report it before `shipcraft red`.\n- Commit the tests, their stubs and the lock in one commit, and stop.\n')
  p=run(call,'init')
  assert p.returncode==0,output(p)
  actual=Path('.shipcraft/briefs/red.md').read_bytes()
  assert actual.rsplit(b'<!-- written by shipcraft ',1)[0]==expected,'RED body changed'
 elif case=='red-stamp-bare':
- call=fixture(False);expected=HISTORICAL_BRIEFS[False]['red.md']+STAMP
+ call=fixture(False);expected=HISTORICAL_BRIEFS[False]['red.md'].replace(b'- Commit the tests, their stubs and the lock in one commit, and stop.\n', b'- The tests call the interface your prompt fixes (names, arguments, results, and the errors, exit codes or messages they check), and the stubs have it. What the prompt leaves out, choose, list with the ambiguities and name in your report, so the GREEN gets it; where the prompt contradicts the intent or the existing tests, stop and report it before `shipcraft red`.\n- Commit the tests, their stubs and the lock in one commit, and stop.\n')+STAMP
  p=run(call,'init')
  assert p.returncode==0,output(p)
  assert Path('.shipcraft/briefs/red.md').read_bytes()==expected,'RED body or running-version stamp changed'
@@ -222,19 +222,19 @@ elif case=='equal-new-local':
  assert Path('AGENTS.md').read_bytes()==expected and stat.S_IMODE(Path('AGENTS.md').stat().st_mode)==0o751
  assert 'AGENTS.md already has the shipcraft block, kept' in output(p),'missing already-has notice'
 elif case=='green-local':
- call=fixture(True);expected=HISTORICAL_BRIEFS[True]['green.md'].replace(OLD_GREEN_LINE,GREEN_LINE)+STAMP
+ call=fixture(True);expected=HISTORICAL_BRIEFS[True]['green.md'].replace(OLD_GREEN_LINE,GREEN_LINE).replace(b'- Never edit a locked file or a lock (`.shipcraft/locks/*`).\n', b'- Never edit a locked file or a lock (`.shipcraft/locks/*`).\n- Never change the interface the locked tests call (names, arguments, results, and the errors, exit codes or messages they check); the code behind it is yours. If it looks wrong, stop and report it as a wrong test.\n')+STAMP
  p=run(call,'init')
  assert p.returncode==0,output(p)
  assert Path('.shipcraft/briefs/green.md').read_bytes().rsplit(b'<!-- written by shipcraft ',1)[0]==expected.rsplit(b'<!-- written by shipcraft ',1)[0],'GREEN brief body not exact'
  assert Path('.shipcraft/briefs/green.md').read_bytes()==expected,'GREEN brief stamp not exact'
 elif case=='red-body-control-local':
- call=fixture(True);expected=HISTORICAL_BRIEFS[True]['red.md']
+ call=fixture(True);expected=HISTORICAL_BRIEFS[True]['red.md'].replace(b'- Commit the tests, their stubs and the lock in one commit, and stop.\n', b'- The tests call the interface your prompt fixes (names, arguments, results, and the errors, exit codes or messages they check), and the stubs have it. What the prompt leaves out, choose, list with the ambiguities and name in your report, so the GREEN gets it; where the prompt contradicts the intent or the existing tests, stop and report it before `npx -- shipcraft red`.\n- Commit the tests, their stubs and the lock in one commit, and stop.\n')
  p=run(call,'init')
  assert p.returncode==0,output(p)
  actual=Path('.shipcraft/briefs/red.md').read_bytes()
  assert actual.rsplit(b'<!-- written by shipcraft ',1)[0]==expected,'RED body changed'
 elif case=='red-stamp-local':
- call=fixture(True);expected=HISTORICAL_BRIEFS[True]['red.md']+STAMP
+ call=fixture(True);expected=HISTORICAL_BRIEFS[True]['red.md'].replace(b'- Commit the tests, their stubs and the lock in one commit, and stop.\n', b'- The tests call the interface your prompt fixes (names, arguments, results, and the errors, exit codes or messages they check), and the stubs have it. What the prompt leaves out, choose, list with the ambiguities and name in your report, so the GREEN gets it; where the prompt contradicts the intent or the existing tests, stop and report it before `npx -- shipcraft red`.\n- Commit the tests, their stubs and the lock in one commit, and stop.\n')+STAMP
  p=run(call,'init')
  assert p.returncode==0,output(p)
  assert Path('.shipcraft/briefs/red.md').read_bytes()==expected,'RED body or running-version stamp changed'

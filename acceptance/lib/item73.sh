@@ -62,7 +62,7 @@ assert p.returncode==0,(p.returncode,p.stderr)
 assert snapshot()==before,'status wrote files'
 ls=p.stdout.splitlines();layers=[s for s in ls if s.startswith('shipcraft: layers:')]
 assert layers==['shipcraft: layers: ci github; review off'],p.stdout
-roles='red gemini; green claude' if mode=='status-table' else "red not set (the orchestrator's choice); green not set (the orchestrator's choice)"
+roles='red gemini; green claude' if mode=='status-table' else "red not set (the session that starts the RED and GREEN chooses); green not set (the session that starts the RED and GREEN chooses)"
 want='shipcraft: roles: '+roles+'; review off'
 assert ls.count(want)==1 and ls.index(want)==ls.index(layers[0])+1,p.stdout
 for phrase in ('shipcraft: branch','shipcraft: open locks:','hook','protection'):assert any(phrase in s for s in ls),p.stdout
