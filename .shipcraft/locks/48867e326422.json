@@ -61,7 +61,7 @@
     "acceptance/lib/item133.sh": "sha256:7b4ad0bfd0c3bc8e49e659ccbb4f8da6338ca405c127c9a8b322dd7737ff4e60",
     "acceptance/lib/item134.sh": "sha256:1dd2b4ef4b64ceee0dc259ff2b5bee271bb7217ee416fb7bbcd8ce9b1ca43048",
     "acceptance/lib/item135.sh": "sha256:070e0b64bced1e60f2b4db00588d1f23af347be7a4c49c988c9649814cd2033f",
-    "acceptance/lib/item138.sh": "sha256:2be7850cbd56d05ce1b950395b023be71ecc8eaf43894ec7206deb21e24d0395",
+    "acceptance/lib/item138.sh": "sha256:dc9f1e96ac57aa6903fd3ef4a8a541c8aa201dc92bf47a64daaa8383af9d66e4",
     "acceptance/lib/item16a.sh": "sha256:d83f4146699d5f19ce369613c49449b2c6b4de1bd96c66e17d7a4f2ce350e125",
     "acceptance/lib/item16b.sh": "sha256:dc35a66c9f04935c9c30086066745469119cb8f4a220e7bb83abc636ebca8119",
     "acceptance/lib/item17.sh": "sha256:5efdcfc0c8b419625cbc0e96a6aaac226387a5a7dad57f8ac90d64cdedbee4c1",
@@ -370,5 +370,5 @@
   "kind": "fix",
   "reported_at": "2026-11-19T11:28-03:00",
   "fixes_release": "v2.0.0",
-  "seal": "37ef5421691be25d55f529a8ca15e6692f109561ef0cbae32d7ebf6087022b32"
+  "seal": "9195d4a20f7297df01aff0462009c649af949acf3825f2b68fff7f6151528c08"
 }

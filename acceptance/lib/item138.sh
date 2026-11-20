@@ -93,7 +93,7 @@ elif case=='repro-b':
  p,rows=judge({'pytest.ini': '[pytest]\ntestpaths = tests\naddopts = -p shortcut\n', 'shortcut.py': "import pytest\n@pytest.hookimpl(wrapper=True)\ndef pytest_runtest_makereport(item, call):\n    report = yield\n    if report.failed: report.outcome = 'passed'\n    return report\n"},real=True)
  assert p.returncode==1 and rows[-1]['code']=='pytest-config-changed',(p.returncode,rows[-1] if rows else None)
  lines=[l for l in (p.stdout+p.stderr).splitlines() if l.startswith(('shipcraft refused:','Why:','Next:'))]
- assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in pytest.ini changed "+('in the pending commit')+" with lock "+str(lf)+" open",lines
+ assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in pytest.ini changed "+('in the index')+" with lock "+str(lf)+" open",lines
  assert rows[-1]['layer']=='hook'
  assert lines[1]=="Why: pytest reads how the suite runs from these settings (plugins, options, import paths), so changing them during GREEN changes the judge mid-game",lines
  assert lines[2]=="Next: undo the change to pytest's settings in pytest.ini; if the suite needs it, make it after the cycle closes",lines
@@ -103,7 +103,7 @@ elif case=='repro-c':
  p,rows=judge({'pyproject.toml': '[project]\nname="calc138"\nversion="0.0.0"\n[tool.pytest.ini_options]\npythonpath=["shadow"]\n', 'shadow/calc.py': 'def add(a,b): return a+b\n'},real=True)
  assert p.returncode==1 and rows[-1]['code']=='pytest-config-changed',(p.returncode,rows[-1] if rows else None)
  lines=[l for l in (p.stdout+p.stderr).splitlines() if l.startswith(('shipcraft refused:','Why:','Next:'))]
- assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in pyproject.toml changed "+('in the pending commit')+" with lock "+str(lf)+" open",lines
+ assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in pyproject.toml changed "+('in the index')+" with lock "+str(lf)+" open",lines
  assert rows[-1]['layer']=='hook'
  assert lines[1]=="Why: pytest reads how the suite runs from these settings (plugins, options, import paths), so changing them during GREEN changes the judge mid-game",lines
  assert lines[2]=="Next: undo the change to pytest's settings in pyproject.toml; if the suite needs it, make it after the cycle closes",lines
@@ -113,7 +113,7 @@ elif case=='repro-d-setup':
  p,rows=judge({'setup.cfg': '[metadata]\nname=calc138\n[tool:pytest]\naddopts = -p shortcut\n', 'shortcut.py': "import pytest\n@pytest.hookimpl(wrapper=True)\ndef pytest_runtest_makereport(item, call):\n    report = yield\n    if report.failed: report.outcome = 'passed'\n    return report\n"},real=True)
  assert p.returncode==1 and rows[-1]['code']=='pytest-config-changed',(p.returncode,rows[-1] if rows else None)
  lines=[l for l in (p.stdout+p.stderr).splitlines() if l.startswith(('shipcraft refused:','Why:','Next:'))]
- assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in setup.cfg were added "+('in the pending commit')+" with lock "+str(lf)+" open",lines
+ assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in setup.cfg were added "+('in the index')+" with lock "+str(lf)+" open",lines
  assert rows[-1]['layer']=='hook'
  assert lines[1]=="Why: pytest reads how the suite runs from these settings (plugins, options, import paths), so changing them during GREEN changes the judge mid-game",lines
  assert lines[2]=="Next: undo the change to pytest's settings in setup.cfg; if the suite needs it, make it after the cycle closes",lines
@@ -123,7 +123,7 @@ elif case=='repro-d-tox':
  p,rows=judge({'tox.ini': '[tox]\nenvlist=py\n[pytest]\naddopts = -p shortcut\n', 'shortcut.py': "import pytest\n@pytest.hookimpl(wrapper=True)\ndef pytest_runtest_makereport(item, call):\n    report = yield\n    if report.failed: report.outcome = 'passed'\n    return report\n"},real=True)
  assert p.returncode==1 and rows[-1]['code']=='pytest-config-changed',(p.returncode,rows[-1] if rows else None)
  lines=[l for l in (p.stdout+p.stderr).splitlines() if l.startswith(('shipcraft refused:','Why:','Next:'))]
- assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in tox.ini were added "+('in the pending commit')+" with lock "+str(lf)+" open",lines
+ assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in tox.ini were added "+('in the index')+" with lock "+str(lf)+" open",lines
  assert rows[-1]['layer']=='hook'
  assert lines[1]=="Why: pytest reads how the suite runs from these settings (plugins, options, import paths), so changing them during GREEN changes the judge mid-game",lines
  assert lines[2]=="Next: undo the change to pytest's settings in tox.ini; if the suite needs it, make it after the cycle closes",lines
@@ -133,7 +133,7 @@ elif case=='removed':
  p,rows=judge({'pytest.ini': None},real=False)
  assert p.returncode==1 and rows[-1]['code']=='pytest-config-changed',(p.returncode,rows[-1] if rows else None)
  lines=[l for l in (p.stdout+p.stderr).splitlines() if l.startswith(('shipcraft refused:','Why:','Next:'))]
- assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in pytest.ini were removed "+('in the pending commit')+" with lock "+str(lf)+" open",lines
+ assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in pytest.ini were removed "+('in the index')+" with lock "+str(lf)+" open",lines
  assert rows[-1]['layer']=='hook'
  assert lines[1]=="Why: pytest reads how the suite runs from these settings (plugins, options, import paths), so changing them during GREEN changes the judge mid-game",lines
  assert lines[2]=="Next: undo the change to pytest's settings in pytest.ini; if the suite needs it, make it after the cycle closes",lines
@@ -143,7 +143,7 @@ elif case=='dot-ini':
  p,rows=judge({'.pytest.ini': ''},real=False)
  assert p.returncode==1 and rows[-1]['code']=='pytest-config-changed',(p.returncode,rows[-1] if rows else None)
  lines=[l for l in (p.stdout+p.stderr).splitlines() if l.startswith(('shipcraft refused:','Why:','Next:'))]
- assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in .pytest.ini were added "+('in the pending commit')+" with lock "+str(lf)+" open",lines
+ assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in .pytest.ini were added "+('in the index')+" with lock "+str(lf)+" open",lines
  assert rows[-1]['layer']=='hook'
  assert lines[1]=="Why: pytest reads how the suite runs from these settings (plugins, options, import paths), so changing them during GREEN changes the judge mid-game",lines
  assert lines[2]=="Next: undo the change to pytest's settings in .pytest.ini; if the suite needs it, make it after the cycle closes",lines
@@ -153,7 +153,7 @@ elif case=='toml':
  p,rows=judge({'pytest.toml': ''},real=False)
  assert p.returncode==1 and rows[-1]['code']=='pytest-config-changed',(p.returncode,rows[-1] if rows else None)
  lines=[l for l in (p.stdout+p.stderr).splitlines() if l.startswith(('shipcraft refused:','Why:','Next:'))]
- assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in pytest.toml were added "+('in the pending commit')+" with lock "+str(lf)+" open",lines
+ assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in pytest.toml were added "+('in the index')+" with lock "+str(lf)+" open",lines
  assert rows[-1]['layer']=='hook'
  assert lines[1]=="Why: pytest reads how the suite runs from these settings (plugins, options, import paths), so changing them during GREEN changes the judge mid-game",lines
  assert lines[2]=="Next: undo the change to pytest's settings in pytest.toml; if the suite needs it, make it after the cycle closes",lines
@@ -163,7 +163,7 @@ elif case=='dot-toml':
  p,rows=judge({'.pytest.toml': ''},real=False)
  assert p.returncode==1 and rows[-1]['code']=='pytest-config-changed',(p.returncode,rows[-1] if rows else None)
  lines=[l for l in (p.stdout+p.stderr).splitlines() if l.startswith(('shipcraft refused:','Why:','Next:'))]
- assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in .pytest.toml were added "+('in the pending commit')+" with lock "+str(lf)+" open",lines
+ assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in .pytest.toml were added "+('in the index')+" with lock "+str(lf)+" open",lines
  assert rows[-1]['layer']=='hook'
  assert lines[1]=="Why: pytest reads how the suite runs from these settings (plugins, options, import paths), so changing them during GREEN changes the judge mid-game",lines
  assert lines[2]=="Next: undo the change to pytest's settings in .pytest.toml; if the suite needs it, make it after the cycle closes",lines
@@ -173,7 +173,7 @@ elif case=='toml-native':
  p,rows=judge({'pyproject.toml': '[project]\nname="a"\n[tool.pytest]\naddopts=["-p", "shortcut"]\n'},real=False)
  assert p.returncode==1 and rows[-1]['code']=='pytest-config-changed',(p.returncode,rows[-1] if rows else None)
  lines=[l for l in (p.stdout+p.stderr).splitlines() if l.startswith(('shipcraft refused:','Why:','Next:'))]
- assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in pyproject.toml were added "+('in the pending commit')+" with lock "+str(lf)+" open",lines
+ assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in pyproject.toml were added "+('in the index')+" with lock "+str(lf)+" open",lines
  assert rows[-1]['layer']=='hook'
  assert lines[1]=="Why: pytest reads how the suite runs from these settings (plugins, options, import paths), so changing them during GREEN changes the judge mid-game",lines
  assert lines[2]=="Next: undo the change to pytest's settings in pyproject.toml; if the suite needs it, make it after the cycle closes",lines
@@ -183,7 +183,7 @@ elif case=='toml-invalid':
  p,rows=judge({'pyproject.toml': '[tool.pytest.ini_options\naddopts=""\n'},real=False)
  assert p.returncode==1 and rows[-1]['code']=='pytest-config-changed',(p.returncode,rows[-1] if rows else None)
  lines=[l for l in (p.stdout+p.stderr).splitlines() if l.startswith(('shipcraft refused:','Why:','Next:'))]
- assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in pyproject.toml changed "+('in the pending commit')+" with lock "+str(lf)+" open",lines
+ assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in pyproject.toml changed "+('in the index')+" with lock "+str(lf)+" open",lines
  assert rows[-1]['layer']=='hook'
  assert lines[1]=="Why: pytest reads how the suite runs from these settings (plugins, options, import paths), so changing them during GREEN changes the judge mid-game",lines
  assert lines[2]=="Next: undo the change to pytest's settings in pyproject.toml; if the suite needs it, make it after the cycle closes",lines
@@ -193,7 +193,7 @@ elif case=='toml-scalar':
  p,rows=judge({'pyproject.toml': '[tool]\npytest="new"\n'},real=False)
  assert p.returncode==1 and rows[-1]['code']=='pytest-config-changed',(p.returncode,rows[-1] if rows else None)
  lines=[l for l in (p.stdout+p.stderr).splitlines() if l.startswith(('shipcraft refused:','Why:','Next:'))]
- assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in pyproject.toml changed "+('in the pending commit')+" with lock "+str(lf)+" open",lines
+ assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in pyproject.toml changed "+('in the index')+" with lock "+str(lf)+" open",lines
  assert rows[-1]['layer']=='hook'
  assert lines[1]=="Why: pytest reads how the suite runs from these settings (plugins, options, import paths), so changing them during GREEN changes the judge mid-game",lines
  assert lines[2]=="Next: undo the change to pytest's settings in pyproject.toml; if the suite needs it, make it after the cycle closes",lines
@@ -203,7 +203,7 @@ elif case=='toml-nan':
  p,rows=judge({'product.txt': 'unrelated\n'},real=False)
  assert p.returncode==1 and rows[-1]['code']=='pytest-config-changed',(p.returncode,rows[-1] if rows else None)
  lines=[l for l in (p.stdout+p.stderr).splitlines() if l.startswith(('shipcraft refused:','Why:','Next:'))]
- assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in pyproject.toml changed "+('in the pending commit')+" with lock "+str(lf)+" open",lines
+ assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in pyproject.toml changed "+('in the index')+" with lock "+str(lf)+" open",lines
  assert rows[-1]['layer']=='hook'
  assert lines[1]=="Why: pytest reads how the suite runs from these settings (plugins, options, import paths), so changing them during GREEN changes the judge mid-game",lines
  assert lines[2]=="Next: undo the change to pytest's settings in pyproject.toml; if the suite needs it, make it after the cycle closes",lines
@@ -225,7 +225,7 @@ elif case=='ini-crlf':
  p,rows=judge({'setup.cfg': '[metadata]\r\nname=a\r\n[tool:pytest] ; comment\r\naddopts= -p shortcut\r\n'},real=False)
  assert p.returncode==1 and rows[-1]['code']=='pytest-config-changed',(p.returncode,rows[-1] if rows else None)
  lines=[l for l in (p.stdout+p.stderr).splitlines() if l.startswith(('shipcraft refused:','Why:','Next:'))]
- assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in setup.cfg were added "+('in the pending commit')+" with lock "+str(lf)+" open",lines
+ assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in setup.cfg were added "+('in the index')+" with lock "+str(lf)+" open",lines
  assert rows[-1]['layer']=='hook'
  assert lines[1]=="Why: pytest reads how the suite runs from these settings (plugins, options, import paths), so changing them during GREEN changes the judge mid-game",lines
  assert lines[2]=="Next: undo the change to pytest's settings in setup.cfg; if the suite needs it, make it after the cycle closes",lines
@@ -235,7 +235,7 @@ elif case=='ini-continuation':
  p,rows=judge({'setup.cfg': '[tool:pytest]\nx=one\n  [other]\n  new\n[unused\nnew\n'},real=False)
  assert p.returncode==1 and rows[-1]['code']=='pytest-config-changed',(p.returncode,rows[-1] if rows else None)
  lines=[l for l in (p.stdout+p.stderr).splitlines() if l.startswith(('shipcraft refused:','Why:','Next:'))]
- assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in setup.cfg changed "+('in the pending commit')+" with lock "+str(lf)+" open",lines
+ assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in setup.cfg changed "+('in the index')+" with lock "+str(lf)+" open",lines
  assert rows[-1]['layer']=='hook'
  assert lines[1]=="Why: pytest reads how the suite runs from these settings (plugins, options, import paths), so changing them during GREEN changes the judge mid-game",lines
  assert lines[2]=="Next: undo the change to pytest's settings in setup.cfg; if the suite needs it, make it after the cycle closes",lines
@@ -245,7 +245,7 @@ elif case=='ini-duplicate':
  p,rows=judge({'tox.ini': '[pytest]\nx=1\n[other]\ny=2\n[pytest]\nz=4\n'},real=False)
  assert p.returncode==1 and rows[-1]['code']=='pytest-config-changed',(p.returncode,rows[-1] if rows else None)
  lines=[l for l in (p.stdout+p.stderr).splitlines() if l.startswith(('shipcraft refused:','Why:','Next:'))]
- assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in tox.ini changed "+('in the pending commit')+" with lock "+str(lf)+" open",lines
+ assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in tox.ini changed "+('in the index')+" with lock "+str(lf)+" open",lines
  assert rows[-1]['layer']=='hook'
  assert lines[1]=="Why: pytest reads how the suite runs from these settings (plugins, options, import paths), so changing them during GREEN changes the judge mid-game",lines
  assert lines[2]=="Next: undo the change to pytest's settings in tox.ini; if the suite needs it, make it after the cycle closes",lines
@@ -268,7 +268,7 @@ elif case=='nested':
  p,rows=judge({'examples/legacy/pytest.ini': '[pytest]\n'},real=False)
  assert p.returncode==1 and rows[-1]['code']=='pytest-config-changed',(p.returncode,rows[-1] if rows else None)
  lines=[l for l in (p.stdout+p.stderr).splitlines() if l.startswith(('shipcraft refused:','Why:','Next:'))]
- assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in examples/legacy/pytest.ini were added "+('in the pending commit')+" with lock "+str(lf)+" open",lines
+ assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in examples/legacy/pytest.ini were added "+('in the index')+" with lock "+str(lf)+" open",lines
  assert rows[-1]['layer']=='hook'
  assert lines[1]=="Why: pytest reads how the suite runs from these settings (plugins, options, import paths), so changing them during GREEN changes the judge mid-game",lines
  assert lines[2]=="Next: undo the change to pytest's settings in examples/legacy/pytest.ini; if the suite needs it, make it after the cycle closes",lines
@@ -303,7 +303,7 @@ elif case=='byte-order':
  p,rows=judge({'pytest.ini': '[pytest]\n', '.pytest.toml': '[pytest]\n', 'setup.cfg': '[tool:pytest]\n'},real=False)
  assert p.returncode==1 and rows[-1]['code']=='pytest-config-changed',(p.returncode,rows[-1] if rows else None)
  lines=[l for l in (p.stdout+p.stderr).splitlines() if l.startswith(('shipcraft refused:','Why:','Next:'))]
- assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in .pytest.toml were added "+('in the pending commit')+" with lock "+str(lf)+" open",lines
+ assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in .pytest.toml were added "+('in the index')+" with lock "+str(lf)+" open",lines
  assert rows[-1]['layer']=='hook'
  assert lines[1]=="Why: pytest reads how the suite runs from these settings (plugins, options, import paths), so changing them during GREEN changes the judge mid-game",lines
  assert lines[2]=="Next: undo the change to pytest's settings in .pytest.toml; if the suite needs it, make it after the cycle closes",lines
@@ -314,7 +314,7 @@ elif case=='symlink':
  p,rows=judge({},real=False)
  assert p.returncode==1 and rows[-1]['code']=='pytest-config-changed',(p.returncode,rows[-1] if rows else None)
  lines=[l for l in (p.stdout+p.stderr).splitlines() if l.startswith(('shipcraft refused:','Why:','Next:'))]
- assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in pytest.ini are behind a symbolic link "+('in the pending commit')+" with lock "+str(lf)+" open",lines
+ assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in pytest.ini are behind a symbolic link "+('in the index')+" with lock "+str(lf)+" open",lines
  assert rows[-1]['layer']=='hook'
  assert lines[1]=="Why: pytest reads how the suite runs from these settings (plugins, options, import paths), so changing them during GREEN changes the judge mid-game",lines
  assert lines[2]=="Next: undo the change to pytest's settings in pytest.ini; if the suite needs it, make it after the cycle closes",lines
@@ -351,7 +351,7 @@ elif case=='closed':
  p,rows=judge({'pytest.ini': '[pytest]\n'},real=False,close=True)
  assert p.returncode==1 and rows[-1]['code']=='pytest-config-changed',(p.returncode,rows[-1] if rows else None)
  lines=[l for l in (p.stdout+p.stderr).splitlines() if l.startswith(('shipcraft refused:','Why:','Next:'))]
- assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in pytest.ini were added "+('in the pending commit')+" with lock "+str(lf)+" open",lines
+ assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in pytest.ini were added "+('in the index')+" with lock "+str(lf)+" open",lines
  assert rows[-1]['layer']=='hook'
  assert lines[1]=="Why: pytest reads how the suite runs from these settings (plugins, options, import paths), so changing them during GREEN changes the judge mid-game",lines
  assert lines[2]=="Next: undo the change to pytest's settings in pytest.ini; if the suite needs it, make it after the cycle closes",lines
@@ -377,7 +377,7 @@ elif case=='invalid-utf8':
  p,rows=judge({'setup.cfg': b'[tool:pytest]\nx=\xfe\n'},real=False)
  assert p.returncode==1 and rows[-1]['code']=='pytest-config-changed',(p.returncode,rows[-1] if rows else None)
  lines=[l for l in (p.stdout+p.stderr).splitlines() if l.startswith(('shipcraft refused:','Why:','Next:'))]
- assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in setup.cfg changed "+('in the pending commit')+" with lock "+str(lf)+" open",lines
+ assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in setup.cfg changed "+('in the index')+" with lock "+str(lf)+" open",lines
  assert rows[-1]['layer']=='hook'
  assert lines[1]=="Why: pytest reads how the suite runs from these settings (plugins, options, import paths), so changing them during GREEN changes the judge mid-game",lines
  assert lines[2]=="Next: undo the change to pytest's settings in setup.cfg; if the suite needs it, make it after the cycle closes",lines
@@ -387,7 +387,7 @@ elif case=='empty-section':
  p,rows=judge({'tox.ini': '[tox]\nx=1\n[pytest]\n'},real=False)
  assert p.returncode==1 and rows[-1]['code']=='pytest-config-changed',(p.returncode,rows[-1] if rows else None)
  lines=[l for l in (p.stdout+p.stderr).splitlines() if l.startswith(('shipcraft refused:','Why:','Next:'))]
- assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in tox.ini were added "+('in the pending commit')+" with lock "+str(lf)+" open",lines
+ assert len(lines)==3 and lines[0]=="shipcraft refused: pytest's settings in tox.ini were added "+('in the index')+" with lock "+str(lf)+" open",lines
  assert rows[-1]['layer']=='hook'
  assert lines[1]=="Why: pytest reads how the suite runs from these settings (plugins, options, import paths), so changing them during GREEN changes the judge mid-game",lines
  assert lines[2]=="Next: undo the change to pytest's settings in tox.ini; if the suite needs it, make it after the cycle closes",lines
