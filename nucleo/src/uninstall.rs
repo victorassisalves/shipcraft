@@ -113,7 +113,8 @@ pub fn run(dry: bool) -> Result<()> {
             (Step::Line(line), _) => println!("{line}"),
             (Step::Change { what, .. }, None) => println!("shipcraft: would remove {what}"),
             (Step::Change { path, shown, old, new, what }, Some(folder)) => {
-                let hook = shown.starts_with(".git/") || shown.starts_with('/');
+                let hook = shown.starts_with(".git/")
+                    || Path::new(shown).components().any(|c| !matches!(c, std::path::Component::Normal(_)));
                 let name = path.file_name().unwrap_or_default().to_string_lossy();
                 keep_copy(&folder.join(if hook { format!("hooks/{name}") } else { shown.clone() }), old)?;
                 match new {
@@ -286,7 +287,11 @@ fn plan(repo: &Repo) -> Result<Plan> {
         if HUSKY.iter().any(|(file, _)| repo.path(file) == path) {
             continue;
         }
-        let shown = path.strip_prefix(repo.root()).unwrap_or(&path).display().to_string();
+        // Resolved through its folder, so a `core.hooksPath` with `..` is shown absolute outside the root.
+        let dir = path.parent().and_then(|d| fs::canonicalize(d).ok());
+        let real = dir.map_or(path.clone(), |d| d.join(name));
+        let root = fs::canonicalize(repo.root()).unwrap_or_else(|_| repo.root().to_path_buf());
+        let shown = real.strip_prefix(&root).unwrap_or(&real).display().to_string();
         let reason = match kind(&path, &shown)? {
             Kind::File(bytes, mode) if written_hook(msg, &bytes) => {
                 plan.change(path, &shown, (bytes, mode), None, String::new());
@@ -323,10 +328,14 @@ fn plan(repo: &Repo) -> Result<Plan> {
         plan.steps.push(Step::Line("shipcraft: pre-commit's commit-msg and post-commit launchers stay in the hooks folder, and run any of the project's hooks with no stages at those stages: if nothing else needs them, pre-commit uninstall -t commit-msg -t post-commit (or prek uninstall ...)".into()));
     }
     for file in LEFTHOOK_FILES {
-        if matches!(kind(&repo.path(file), file)?, Kind::File(bytes, _) if contains(&bytes, b"shipcraft")) {
-            let reason = "uninstall does not edit lefthook files yet: remove the shipcraft commands under commit-msg and post-commit";
-            plan.left(file, reason, true);
-        }
+        let reason = match kind(&repo.path(file), file)? {
+            Kind::File(bytes, _) if contains(&bytes, b"shipcraft") => {
+                "uninstall does not edit lefthook files yet: remove the shipcraft commands under commit-msg and post-commit"
+            }
+            Kind::File(..) | Kind::Missing => continue,
+            _ => NOT_FILE,
+        };
+        plan.left(file, reason, true);
     }
     if plan.folder(repo, ".shipcraft")? {
         let mut known = Vec::new();
