@@ -134,12 +134,24 @@ fn package_json(dir: &Path) -> Option<serde_json::Value> {
     serde_json::from_str(&fs::read_to_string(dir.join("package.json")).ok()?).ok()
 }
 
+/// Whether a package.json declares `name` under `dependencies` or
+/// `devDependencies`, with any value.
+fn declares(package: &serde_json::Value, name: &str) -> bool {
+    ["dependencies", "devDependencies"].iter().any(|section| package[section].get(name).is_some())
+}
+
 /// "vitest" or "jest" when package.json depends on one of them.
 pub fn node_runner(dir: &Path) -> Option<&'static str> {
     let package = package_json(dir)?;
-    let depends_on =
-        |name: &str| ["dependencies", "devDependencies"].iter().any(|section| package[section].get(name).is_some());
-    ["vitest", "jest"].into_iter().find(|runner| depends_on(runner))
+    ["vitest", "jest"].into_iter().find(|runner| declares(&package, runner))
+}
+
+/// Item 147: package.json declares `react`, neither `jsdom` nor `happy-dom`,
+/// and its runner (as `node_runner` reads it) is not jest.
+pub fn react_without_dom(dir: &Path) -> bool {
+    let Some(package) = package_json(dir) else { return false };
+    let has = |name: &str| declares(&package, name);
+    has("react") && !has("jsdom") && !has("happy-dom") && (has("vitest") || !has("jest"))
 }
 
 /// A workspace (item 9): its language and the package patterns, from
@@ -178,4 +190,32 @@ pub fn workspace(root: &Path) -> Option<(Lang, Vec<String>)> {
         }
     }
     Some((Lang::Go, dirs))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::react_without_dom;
+    use std::fs;
+
+    #[test]
+    fn react_without_dom_reads_package_json_like_node_runner() {
+        let dir = std::env::temp_dir().join(format!("sc-react-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let cases = [
+            (r#"{"dependencies":{"react":"18"},"devDependencies":{"vitest":"2"}}"#, true),
+            (r#"{"devDependencies":{"react":null}}"#, true),
+            (r#"{"dependencies":{"react":"18"},"devDependencies":{"vitest":"2","jest":"29"}}"#, true),
+            (r#"{"dependencies":{"react":"18"},"devDependencies":{"jest":"29"}}"#, false),
+            (r#"{"dependencies":{"react":"18","jsdom":"24"}}"#, false),
+            (r#"{"dependencies":{"react":"18"},"devDependencies":{"happy-dom":"1"}}"#, false),
+            (r#"{"dependencies":{"react-dom":"18"}}"#, false),
+            (r#"{"dependencies":{"react":"18"}"#, false),
+        ];
+        for (text, expected) in cases {
+            fs::write(dir.join("package.json"), text).unwrap();
+            assert_eq!(react_without_dom(&dir), expected, "{text}");
+        }
+        fs::remove_dir_all(&dir).unwrap();
+        assert!(!react_without_dom(&dir));
+    }
 }

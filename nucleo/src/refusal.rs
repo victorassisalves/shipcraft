@@ -50,12 +50,6 @@ pub fn refuse<T>(
     Err(Stop::Refused(Refusal { code, what: what.into(), why: why.into(), how: how.into() }))
 }
 
-/// A refusal that does not stop the command: its three lines, printed, and the
-/// command goes on without the step it refused (rule 17).
-pub fn warn(what: impl Into<String>, why: impl Into<String>, how: impl Into<String>) {
-    println!("{}", Refusal { code: "", what: what.into(), why: why.into(), how: how.into() });
-}
-
 pub fn failed(message: impl Into<String>) -> Stop {
     Stop::Failed(message.into())
 }

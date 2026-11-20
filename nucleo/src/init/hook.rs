@@ -107,21 +107,26 @@ fn regular(path: &Path) -> bool {
 }
 
 /// Item 131: the command that installs vitest, by the first regular lockfile at the root.
-pub(super) fn install_vitest(root: &Path) -> &'static str {
+pub(super) fn install_vitest(root: &Path) -> String {
+    format!("{} vitest", install_prefix(root))
+}
+
+/// Item 131's lockfile rule without the packages (item 147 adds its own).
+pub(super) fn install_prefix(root: &Path) -> &'static str {
     if regular(&root.join("pnpm-lock.yaml")) {
         return if root.join("pnpm-workspace.yaml").symlink_metadata().is_ok() {
-            "pnpm add -D -w vitest"
+            "pnpm add -D -w"
         } else {
-            "pnpm add -D vitest"
+            "pnpm add -D"
         };
     }
     if regular(&root.join("yarn.lock")) {
-        return "yarn add -D vitest";
+        return "yarn add -D";
     }
     if regular(&root.join("bun.lock")) || regular(&root.join("bun.lockb")) {
-        return "bun add -d vitest";
+        return "bun add -d";
     }
-    "npm install -D vitest"
+    "npm install -D"
 }
 
 /// Item 131: the root manifest and lockfiles, regular files that git reports as
@@ -323,5 +328,22 @@ mod tests {
                 assert!(!written_hook(msg, edited.as_bytes()), "{edited:?}");
             }
         }
+    }
+
+    #[test]
+    fn install_prefix_follows_the_lockfile_rule() {
+        let dir = std::env::temp_dir().join(format!("sc-prefix-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        assert_eq!(install_prefix(&dir), "npm install -D");
+        assert_eq!(install_vitest(&dir), "npm install -D vitest");
+        for (lock, prefix) in
+            [("bun.lockb", "bun add -d"), ("yarn.lock", "yarn add -D"), ("pnpm-lock.yaml", "pnpm add -D")]
+        {
+            fs::write(dir.join(lock), "").unwrap();
+            assert_eq!(install_prefix(&dir), prefix);
+        }
+        fs::write(dir.join("pnpm-workspace.yaml"), "").unwrap();
+        assert_eq!(install_vitest(&dir), "pnpm add -D -w vitest");
+        fs::remove_dir_all(&dir).unwrap();
     }
 }
