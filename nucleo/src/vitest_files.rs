@@ -222,7 +222,7 @@ pub fn print_beside(config: &Config, lock: &Lock) {
 }
 
 /// The paths of a snapshot.
-fn snapshot_paths(repo: &Repo, snapshot: &Snapshot) -> Result<Vec<String>> {
+pub(crate) fn snapshot_paths(repo: &Repo, snapshot: &Snapshot) -> Result<Vec<String>> {
     let out = match snapshot {
         Snapshot::Tree => return repo.files(),
         Snapshot::Index => repo.run(&["ls-files", "-z", "--cached"])?,
