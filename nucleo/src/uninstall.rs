@@ -23,7 +23,7 @@ type Cut = Option<Option<Vec<u8>>>;
 
 /// A planned line: a file copied, then removed (`new` None) or rewritten, or a line printed as is.
 enum Step {
-    Change { path: PathBuf, shown: String, old: (Vec<u8>, u32), new: Option<Vec<u8>>, what: String },
+    Change { path: PathBuf, shown: String, old: (Vec<u8>, u32), new: Option<Vec<u8>>, what: String, hook: bool },
     Line(String),
 }
 
@@ -49,7 +49,7 @@ impl Plan {
             Some(new) if !new.is_empty() => (Some(new), what),
             _ => (None, shown.to_string()),
         };
-        self.steps.push(Step::Change { path, shown: shown.to_string(), old, new, what });
+        self.steps.push(Step::Change { path, shown: shown.to_string(), old, new, what, hook: false });
     }
 
     /// Shipcraft's own file, removed whatever its content; whether it was.
@@ -66,7 +66,8 @@ impl Plan {
     fn folder(&mut self, repo: &Repo, dir: &str) -> Result<bool> {
         let found = kind(&repo.path(dir), dir)?;
         if !matches!(found, Kind::Folder | Kind::Missing) {
-            self.left(dir, "not a regular folder", false);
+            // A linked `.husky` may hold active hook calls: the config stays.
+            self.left(dir, "not a regular folder", dir == ".husky");
         }
         Ok(matches!(found, Kind::Folder))
     }
@@ -112,11 +113,9 @@ pub fn run(dry: bool) -> Result<()> {
         match (step, &folder) {
             (Step::Line(line), _) => println!("{line}"),
             (Step::Change { what, .. }, None) => println!("shipcraft: would remove {what}"),
-            (Step::Change { path, shown, old, new, what }, Some(folder)) => {
-                let hook = shown.starts_with(".git/")
-                    || Path::new(shown).components().any(|c| !matches!(c, std::path::Component::Normal(_)));
+            (Step::Change { path, shown, old, new, what, hook }, Some(folder)) => {
                 let name = path.file_name().unwrap_or_default().to_string_lossy();
-                keep_copy(&folder.join(if hook { format!("hooks/{name}") } else { shown.clone() }), old)?;
+                keep_copy(&folder.join(if *hook { format!("hooks/{name}") } else { shown.clone() }), old)?;
                 match new {
                     None => fs::remove_file(path).map_err(|e| failed(format!("remove {shown}: {e}")))?,
                     Some(new) => rewrite(path, new).map_err(|e| failed(format!("rewrite {shown}: {e}")))?,
@@ -295,6 +294,9 @@ fn plan(repo: &Repo) -> Result<Plan> {
         let reason = match kind(&path, &shown)? {
             Kind::File(bytes, mode) if written_hook(msg, &bytes) => {
                 plan.change(path, &shown, (bytes, mode), None, String::new());
+                if let Some(Step::Change { hook, .. }) = plan.steps.last_mut() {
+                    *hook = true;
+                }
                 continue;
             }
             Kind::File(bytes, _) if contains(&bytes, HOOK_MARK.as_bytes()) => "a shipcraft hook edited by hand",
