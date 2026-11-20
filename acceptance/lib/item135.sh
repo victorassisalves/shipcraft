@@ -58,11 +58,11 @@ git('checkout','-qb','work135')
 args=['export','--base','main','clean135'];branch='clean135';base='main';kept=[];omitted=[];original=[];trees=[];want=0;err=None;repeat=False;ci_after=False;docs=False;lock_variants=[];observe=False
 # Expected trees are explicit fixture edits, not a second implementation of export.
 if case=='history':
- a=commit({'.shipcraft.toml':'invalid config is not read','CLAUDE.md':'installed'},'add shipcraft');omitted.append((a,'add shipcraft'))
+ a=commit({'.shipcraft.toml':'invalid config is not read','CLAUDE.md':'installed'},'add shipcraft');original.append(a)
  b=commit({'tests/test_sub.py':'def test_sub(): assert True\n','.shipcraft/locks/x.json':'{"state":"open"}'},'test: sub');original.append(b)
  c=commit({'src/calc.py':'value = 2\n'},'feat: sub');original.append(c)
  d=commit({'.shipcraft/locks/x.json':'{"state":"closed"}'},'chore(shipcraft): close lock x');omitted.append((d,'chore(shipcraft): close lock x'))
- trees=[{'tests/test_sub.py':'def test_sub(): assert True\n'},{'tests/test_sub.py':'def test_sub(): assert True\n','src/calc.py':'value = 2\n'}];kept=['.shipcraft.toml','.shipcraft/','CLAUDE.md']
+ trees=[{'CLAUDE.md':'installed'},{'CLAUDE.md':'installed','tests/test_sub.py':'def test_sub(): assert True\n'},{'CLAUDE.md':'installed','tests/test_sub.py':'def test_sub(): assert True\n','src/calc.py':'value = 2\n'}];kept=['.shipcraft.toml','.shipcraft/']
 elif case=='untouched':
  observe=True
  original=[commit({'src/calc.py':'value = 3\n'},'dirty export')];trees=[{'src/calc.py':'value = 3\n'}]
@@ -71,7 +71,7 @@ elif case=='untouched':
  for hook in ('commit-msg','post-commit','reference-transaction'):
   put('.git/hooks/'+hook,'#!/bin/sh\necho ran >> "'+str(cw/'hook-marker')+'"\n');Path('.git/hooks/'+hook).chmod(0o755)
 elif case=='agents':
- original=[commit({'AGENTS.md':'replaced rules','CLAUDE.md':'new agent','src/new':'yes'})];trees=[{'src/new':'yes'}];kept=['AGENTS.md','CLAUDE.md']
+ original=[commit({'AGENTS.md':'replaced rules','CLAUDE.md':'new agent','src/new':'yes'})];trees=[{'AGENTS.md':'replaced rules','CLAUDE.md':'new agent','src/new':'yes'}];kept=[]
 elif case=='managers':
  names=['.pre-commit-config.yaml','.husky/commit-msg','.husky/post-commit','lefthook.yml','.lefthook.yml','lefthook.yaml','.lefthook.yaml','lefthook-local.yml','.lefthook-local.yml','lefthook-local.yaml','.lefthook-local.yaml']
  git('checkout','-q','main');f=commit({n:'base '+n for n in names},'managers base');git('checkout','-q','work135');git('reset','--hard',f)
@@ -96,8 +96,8 @@ elif case=='order':
 elif case=='plain':
  original=[commit({'src/new':'one'}),commit({'src/new':'two'})];trees=[{'src/new':'one'},{'src/new':'two'}]
 elif case=='paths':
- a=commit({'.shipcraft/z':'z','.shipcraft/a':'a','AGENTS.md':'changed','.sc2.toml':'legacy'},'setup paths');omitted=[(a,'setup paths')]
- original=[commit({'.shipcraft/z':None,'AGENTS.md':b'# Upstream rules\r\n\x00','src/new':'paths'})];trees=[{'src/new':'paths'}];kept=['.sc2.toml','.shipcraft/','AGENTS.md']
+ a=commit({'.shipcraft/z':'z','.shipcraft/a':'a','AGENTS.md':'changed','.sc2.toml':'legacy'},'setup paths')
+ original=[a,commit({'.shipcraft/z':None,'AGENTS.md':b'# Upstream rules\r\n\x00','src/new':'paths'})];trees=[{'AGENTS.md':'changed'},{'src/new':'paths'}];kept=['.sc2.toml','.shipcraft/']
 elif case=='messages':
  a=commit({},b'bad\t\x7f\xc2\x85\xff subject\nbody\n');b=commit({},b'\nempty first\n');omitted=[(a,'bad   \ufffd subject'),(b,'(no subject)')]
  original=[commit({'src/new':'message'},b'multi\n\nbody\r\nlast without newline')];trees=[{'src/new':'message'}]
@@ -195,8 +195,8 @@ if docs:
  readme=(source/'README.md').read_text()
  heading="### Contributing to a project that doesn't use Shipcraft"
  assert readme.count(heading)==1 and readme.index(heading)<readme.index('### Removing Shipcraft'),'README subsection missing'
- row="| `shipcraft export --base <ref> <branch>` | For a project that doesn't use Shipcraft: writes `<branch>` with your commits since `<ref>`, without Shipcraft's files (config, locks, briefs, `AGENTS.md`, `CLAUDE.md`, hook manager files) and without the commits that change only them. Push it to your fork and open the PR from it. |"
- assert readme.count('Work as usual on your branch: `init`, RED, GREEN, `shipcraft ci --base <base>`. The setup, the locks and the closing commits stay on that branch, which keeps the guarantee and its history. When the lock is closed, `shipcraft export --base <base> <branch>` writes `<branch>`: the same commits on the same base, without `.shipcraft.toml`, `.shipcraft/`, `AGENTS.md`, `CLAUDE.md` and the hook manager files, and without the commits that change only them. It lists what it left out; a change of yours to one of those files has to be added by hand. Push `<branch>` to your fork and open the PR from it; `shipcraft pr` is for projects that use Shipcraft.')==1
+ row="| `shipcraft export --base <ref> <branch>` | For a project that doesn't use Shipcraft: writes `<branch>` with your commits since `<ref>`, without Shipcraft's files (config, locks, briefs, Shipcraft's block in `AGENTS.md` and `CLAUDE.md`, hook manager files) and without the commits that change only them. Push it to your fork and open the PR from it. |"
+ assert readme.count("Work as usual on your branch: `init`, RED, GREEN, `shipcraft ci --base <base>`. The setup, the locks and the closing commits stay on that branch, which keeps the guarantee and its history. When the lock is closed, `shipcraft export --base <base> <branch>` writes `<branch>`: the same commits on the same base, without `.shipcraft.toml`, `.shipcraft/`, the hook manager files and Shipcraft's block in `AGENTS.md` and `CLAUDE.md`, and without the commits that change only them. Your own changes to `AGENTS.md` and `CLAUDE.md` stay. It lists what it left out; a change of yours to the other files has to be added by hand. Push `<branch>` to your fork and open the PR from it; `shipcraft pr` is for projects that use Shipcraft.")==1
  assert readme.count(row)==1 and readme.index('| `shipcraft ci')<readme.index(row)
  spec=(source/'docs/spec.md').read_text();table=spec.split('## 7. Refusals',1)[1].split('## 8.',1)[0]
  labels=['execution-invalid','export-branch-exists','export-empty','export-lock-open','export-merge','export-uses-shipcraft','foreign-hook'];positions=[table.index('| `'+label+'`') for label in labels];assert positions==sorted(positions)
