@@ -22,7 +22,7 @@ def load(item,marker,names,functions):
 item85=load('item85.sh','PY85',{'OLD84','ROOT_LINE','CLEANUP','NEW'},{'variant'})
 clean_block=load('item61.sh','PY61',set(),{'clean_block'})['clean_block']
 # The block this version writes: item 85's frozen bytes, plus each later block line right here.
-PIN=item85['NEW']
+PIN=item85['NEW'].replace(b'- A behavior change:',b"- To contribute to a project that does not use Shipcraft (its default branch has no `.shipcraft.toml` or `.sc2.toml`), open the PR from the branch `shipcraft export --base <base> <new branch>` writes once the lock is closed and `shipcraft ci --base <base>` passes on this branch: it leaves out Shipcraft's files and this block, and the project's own checks still apply to it. `shipcraft pr` is for projects that use Shipcraft.\n"+b'- A behavior change:',1)
 MOVED='current block is not the pinned one: a line added on purpose goes in PIN in acceptance/lib/item86.sh'
 if case=='exact-bare':
  assert clean_block(binary,False)==item85['variant'](PIN,False),MOVED

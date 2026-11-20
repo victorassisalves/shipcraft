@@ -11,6 +11,7 @@ mod contract;
 mod deps;
 mod docs;
 mod export;
+mod export_block;
 mod fecha;
 mod fila;
 mod findings;

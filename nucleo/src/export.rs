@@ -3,6 +3,7 @@
 //! not use Shipcraft. It reads no config, writes no row and changes nothing but
 //! the new branch (and the objects it needs).
 
+use crate::export_block::{outcome, Outcome, BLOCK_NAMES};
 use crate::git::{self, short, TempDir};
 use crate::refusal::{failed, refuse, Result};
 use std::collections::BTreeSet;
@@ -105,11 +106,11 @@ fn parse_commit(bytes: &[u8]) -> Option<Raw> {
 }
 
 /// One `git ls-tree -z` entry.
-struct Entry {
-    mode: String,
-    kind: String,
-    oid: String,
-    path: Vec<u8>,
+pub(crate) struct Entry {
+    pub(crate) mode: String,
+    pub(crate) kind: String,
+    pub(crate) oid: String,
+    pub(crate) path: Vec<u8>,
 }
 
 fn entries(bytes: &[u8]) -> Result<Vec<Entry>> {
@@ -325,7 +326,7 @@ pub fn run(reference: &str, branch: &str) -> Result<()> {
         );
     }
 
-    let (tip, left_out, kept) = replay(&git, &range, &fork)?;
+    let (tip, left_out, mut kept, notes) = replay(&git, &range, &fork)?;
     let exported = range.len() - left_out.len();
     let Some(tip) = tip.filter(|_| exported > 0) else {
         return refuse(
@@ -346,6 +347,11 @@ pub fn run(reference: &str, branch: &str) -> Result<()> {
     for left in &left_out {
         println!("shipcraft: left out {} {}: no change outside Shipcraft's files", short(&left.commit), left.subject);
     }
+    // Item 142: a name every commit read the block out of is not reset.
+    kept.retain(|name| !BLOCK_NAMES.contains(name) || notes.rule135.contains(name));
+    for (name, commit) in &notes.unpaired {
+        println!("shipcraft: {name} in {} has a shipcraft block that is not one Shipcraft writes, or markers that do not pair, so it is kept as in {fork}", short(commit));
+    }
     if !kept.is_empty() {
         let kept: Vec<&str> = kept.into_iter().collect();
         println!("shipcraft: kept as in {fork}: {}; add any change of yours to them by hand", kept.join(", "));
@@ -356,13 +362,23 @@ pub fn run(reference: &str, branch: &str) -> Result<()> {
     Ok(())
 }
 
+/// Item 142: the names of `BLOCK_NAMES` some commit exported by item 135's
+/// rule, and those that took (c) with the oldest such commit, in that order.
+#[derive(Default)]
+struct BlockNotes {
+    rule135: BTreeSet<&'static str>,
+    unpaired: Vec<(&'static str, String)>,
+}
+
+type Replayed = (Option<String>, Vec<LeftOut>, BTreeSet<&'static str>, BlockNotes);
+
 /// Writes the exported commits on `fork`, oldest first: the tip (None when
-/// every commit is left out), the commits left out, and the Shipcraft names
-/// any commit of the range changes in the original history.
-fn replay(git: &Git, range: &[String], fork: &str) -> Result<(Option<String>, Vec<LeftOut>, BTreeSet<&'static str>)> {
+/// every commit is left out), the commits left out, the Shipcraft names
+/// any commit of the range changes in the original history, and item 142's notes.
+fn replay(git: &Git, range: &[String], fork: &str) -> Result<Replayed> {
     let (mut previous, mut previous_tree) = (fork.to_string(), git.line(&["rev-parse", &format!("{fork}^{{tree}}")])?);
     let fork_entries = git.shipcraft_entries(fork)?;
-    let (mut tip, mut left_out, mut kept) = (None, Vec::new(), BTreeSet::new());
+    let (mut tip, mut left_out, mut kept, mut notes) = (None, Vec::new(), BTreeSet::new(), BlockNotes::default());
     for commit in range {
         let raw = git.raw(commit)?;
         let parent = raw.parent.as_deref().map(git::text).unwrap_or_else(|| fork.to_string());
@@ -384,7 +400,7 @@ fn replay(git: &Git, range: &[String], fork: &str) -> Result<(Option<String>, Ve
         for path in git.run(&diff_args)?.split(|b| *b == 0).filter(|p| !p.is_empty()) {
             kept.extend(shipcraft_name(path));
         }
-        let tree = exported_tree(git, commit, &raw, &fork_entries)?;
+        let tree = exported_tree(git, commit, &raw, &fork_entries, &mut notes)?;
         if tree == previous_tree {
             left_out.push(LeftOut { commit: commit.clone(), subject: subject(&raw.message) });
             continue;
@@ -404,29 +420,58 @@ fn replay(git: &Git, range: &[String], fork: &str) -> Result<(Option<String>, Ve
         previous_tree = tree;
         tip = Some(previous.clone());
     }
-    Ok((tip, left_out, kept))
+    notes.unpaired.sort_by_key(|(name, _)| BLOCK_NAMES.iter().position(|n| n == name));
+    Ok((tip, left_out, kept, notes))
 }
 
-/// `commit`'s tree with Shipcraft's paths as in the fork point, built in the temporary index.
-fn exported_tree(git: &Git, commit: &str, raw: &Raw, fork_entries: &[Entry]) -> Result<String> {
+/// The entries of `list` at or under the Shipcraft path `name`.
+fn under<'a>(list: &'a [Entry], name: &str) -> Vec<&'a Entry> {
+    list.iter().filter(|e| shipcraft_name(&e.path) == Some(name)).collect()
+}
+
+/// `commit`'s tree with Shipcraft's paths as in the fork point, built in the
+/// temporary index; `AGENTS.md` and `CLAUDE.md` by item 142's point 1.
+fn exported_tree(git: &Git, commit: &str, raw: &Raw, fork_entries: &[Entry], notes: &mut BlockNotes) -> Result<String> {
     let tree = git::text(&raw.tree);
     git.checked(&["read-tree", &tree], true, None)?;
     // A non-folder `.husky` in the commit keeps its place: the fork point's hooks under it stay out.
     let husky_blocks =
         git.ls_tree(&["--full-tree", commit, "--", ".husky"])?.iter().any(|e| e.path == b".husky" && e.kind != "tree");
+    let commit_entries = git.shipcraft_entries(commit)?;
+    let mut own = Vec::new();
+    for name in BLOCK_NAMES {
+        let read = |oid: &str| git.run(&["cat-file", "blob", oid]);
+        match outcome(name, &under(&commit_entries, name), &under(fork_entries, name), read)? {
+            Outcome::Unpaired => {
+                notes.rule135.insert(name);
+                if !notes.unpaired.iter().any(|(n, _)| *n == name) {
+                    notes.unpaired.push((name, commit.to_string()));
+                }
+            }
+            Outcome::Rule135 => drop(notes.rule135.insert(name)),
+            other => own.push((name, other)),
+        }
+    }
+    let own_of = |path: &[u8]| own.iter().find(|(name, _)| shipcraft_name(path) == Some(*name)).map(|(_, o)| o);
     let mut info = Vec::new();
-    for entry in git.shipcraft_entries(commit)? {
+    for entry in commit_entries.iter().filter(|e| own_of(&e.path) != Some(&Outcome::AsIs)) {
         info.extend_from_slice(format!("0 {}\t", "0".repeat(entry.oid.len())).as_bytes());
         info.extend_from_slice(&entry.path);
         info.push(0);
     }
     for entry in fork_entries {
-        if husky_blocks && entry.path.starts_with(b".husky/") {
+        if (husky_blocks && entry.path.starts_with(b".husky/")) || own_of(&entry.path).is_some() {
             continue;
         }
         info.extend_from_slice(format!("{} {} {}\t", entry.mode, entry.kind, entry.oid).as_bytes());
         info.extend_from_slice(&entry.path);
         info.push(0);
+    }
+    for (name, out) in &own {
+        if let Outcome::Blob { mode, content } = out {
+            let oid = git.checked(&["hash-object", "-w", "--no-filters", "--stdin"], false, Some(content))?;
+            info.extend_from_slice(format!("{mode} blob {}\t{name}\0", git::text(&oid).trim()).as_bytes());
+        }
     }
     if !info.is_empty() {
         git.checked(&["update-index", "-z", "--index-info"], true, Some(&info))?;

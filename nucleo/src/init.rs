@@ -37,6 +37,7 @@ use hook::{decide_hook, install, install_hooks, install_vitest, modules_not_igno
 use suites::{drop_empty_checks, plan};
 
 pub use agents::agents_block_status;
+pub(crate) use agents::{marker_lines, written_blocks};
 pub use config_file::AGENTS;
 pub use files::{is_executable, on_path};
 pub use hook::{hook_status, LEFTHOOK_FILES, LOCAL};
