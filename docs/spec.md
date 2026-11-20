@@ -713,6 +713,104 @@ This is the stricter path the threat model asks for, applied the way items 132 a
 - Standing effects the cases can meet, all kept: the run-log rows, lock writes, closing flow and suite running that item 132's "Current behavior" lists.
 - Item 139's output files, kept: `red` and the hook write each command's output to `.git/shipcraft/output/red.log` or `hook.log` (per worktree, created or truncated at the first spawned command, parent folders created), print its first 4096 bytes and, past that, its last lines and one cut line; `SHIPCRAFT_OUTPUT=full` prints it all; a failed open or write keeps the verdict. A `setup-unreadable` refusal comes after the suite ran, so `red.log` holds that run, as item 139's `later-lock-failure` asserts for other refusals after the run.
 
+### Commits the hook did not judge are checked by `post-commit` and named by `status` and `pr` (item 141)
+
+Wrong-verdict note. Since v2.0.0 (`nucleo/src/fecha.rs` and `init`'s `commit-msg` and `post-commit` hooks, commit `4f9d784`, `git tag --contains` gives `v2.0.0` as the oldest tag), the hook judges a commit only when git runs `commit-msg` (or `pre-commit`, on the `check` route). Several git commands create commits on the branch without running either, and Shipcraft says nothing locally: no line, no run-log row. Found on item 138's branch (2026-11-19, reported in item 138's metrics row, shipcraft-v2 PR 241, opened 2026-11-19T21:35-03:00): `f9d2161` (a revert of the GREEN) and `eda40f5` (the reapply), both made by `git revert`, had no hook row in `.git/shipcraft/runs.jsonl`; nobody used `--no-verify`. `shipcraft ci` re-checked the range and passed, so the guarantee held at CI (section 1), but the local half was silent. The layer that should have caught it is the hook's own coverage: `close`, which git does run for most of these commands, returns without a word when there is no close mark. Section 9 already listed `git rebase --continue` as a known limit; this item covers the whole class.
+
+**Reproduction, on main (`182f194`, 2.81.0, git 2.54.0, built with `cargo build --release`):** a scratch repository with `init --lang python` (plain `.git/hooks`, real pytest 8.4.2), `textutil.py` stub, `test_old.py` (passing), a commit `T` on `main` that edits `test_old.py`, a branch `side` from `T` with `S2` (edits `test_old.py`) and `S1` (product fix), and a branch `item` from `T` with the RED commit (lock open, `test_old.py` locked). Every other hook git knows was installed as a logger. From the RED commit:
+- `git revert --no-edit T` makes a commit that changes the locked `test_old.py`. Hooks run: `prepare-commit-msg`, `post-commit` (`shipcraft close`, which printed nothing), `reference-transaction`. No row was written. `shipcraft ci --base main` refuses it: `locked test test_old.py changed after RED (in commit <sha>)`. **This is the first RED case.**
+- `git cherry-pick S2`: the same, refused only by CI. `git cherry-pick S1` (a GREEN made by cherry-pick): nothing judged it, the lock stayed open, and nothing said so.
+
+Which hooks each command runs (`commit-msg` is where the hook judges; `post-commit` is where `close` runs):
+
+| Command | Runs `commit-msg`/`pre-commit` | Runs `post-commit` | Other hooks it runs |
+|---|---|---|---|
+| `git commit` (also `--amend`, `--fixup`, `-a`) | yes | yes | `prepare-commit-msg` |
+| `git commit --no-verify` | no | yes | `prepare-commit-msg` |
+| `git merge --no-ff` (clean), `git merge --continue` / `git commit` after a conflict | yes (`pre-merge-commit` too) | yes | `prepare-commit-msg` |
+| `git cherry-pick <c>`, `git revert <c>` (clean) | **no** | yes | `prepare-commit-msg` |
+| `git cherry-pick --continue`, `git revert --continue` after a conflict | yes | yes | `prepare-commit-msg` |
+| `git revert --no-commit` then `git commit` | yes | yes | `prepare-commit-msg` |
+| `git rebase` (merge backend): `pick`, `exec`, `squash`, `fixup`, `--autosquash` | **no** | yes, once per commit | `pre-rebase`, `post-checkout`, `post-rewrite` (once, at the end) |
+| `git rebase` `reword`, and `git commit --amend` at an `edit` stop | yes | yes | `post-rewrite` |
+| `git rebase --continue` after a conflict | **no** | yes | `post-rewrite` |
+| `git rebase --apply`, `git am` | **no** | **no** | `applypatch-msg`, `pre-applypatch`, `post-applypatch` (`post-rewrite` for `rebase --apply`) |
+| `git stash`, `git merge` fast-forward, `git pull` (merge) | makes no new commit on the branch (the stash commits live under `refs/stash`) | | |
+
+`git pull --rebase` is `git rebase`. `reference-transaction` runs for every one of them, but inside ref transactions and once per ref update, so this item does not use it.
+
+Everything in items 10, 17, 38, 44, 128 and 138 holds unless a point below says otherwise. CI stays the judge of record: nothing here blocks a git command, and nothing changes what `ci`, `merge` or the hook refuse.
+
+1. **The hook's row names the tree it judged.** Every row the hook writes (`check` and `check --commit-msg`, layer `hook`, whatever its result) gains the key `tree`: the output of `git write-tree` for the index the hook judged (the 40-hex id), or `""` when it cannot be written (an unmerged index, any git error). Nothing else in the row changes; `commit` stays the HEAD at the judgment (for a new commit, its first parent; for `--amend`, the commit being amended).
+
+2. **A commit is *judged* when the run log has its judgment.** For a commit `C` with first parent `P` (a root commit is never judged), `C` is *judged* when the run log (`.git/shipcraft/runs.jsonl` of the common git dir, every row, any branch) has
+   - a `hook` row whose `tree` equals `C`'s tree and whose `commit` equals `P`, or whose `commit` is a commit whose own first parent is `P` (an amend: the hook ran with the amended commit at HEAD); or
+   - a `close` row whose `commit` equals `C` (the commit `close` made).
+
+   A commit *has a lock open* when the tree of `C`, or of one of its parents, holds a lock file (`.shipcraft/locks/*.json`) that is open (a file that does not parse counts as open, as `status` counts it). Point 3 and point 4 consider only commits that have a lock open; a commit with no open lock around it is never named.
+
+   **The cutoff.** Rows written before this release carry no `tree`. Let the *cutoff* be the smallest `at` of the rows that carry the key `tree` (any layer). Point 4 and point 5 name only commits whose committer time (`%ct`) is at or after the cutoff, and nothing when no row carries `tree`. Point 3 needs no cutoff: it judges the commit just made.
+
+3. **`close` checks a commit the hook did not judge.** `shipcraft close` (git's `post-commit`, or run by hand) does what it does today first (the mark, the closing commit, its lines and its row). Then it looks at HEAD as it is now (when `close` just made a closing commit, HEAD is that commit, judged by its `close` row under point 2, so nothing more happens):
+   - If HEAD has a lock open and is not judged (point 2), it prints, on stdout:
+     - `shipcraft: commit <short> (<action>) was not judged by the hook, with lock <ids> open; checking it now against the locks, without the suite (CI judges it in full).`
+     - then one verdict line (below).
+
+     `<short>` is the 7-character abbreviation `short` gives elsewhere; `<ids>` the open locks' ids (file name without `.json`), byte order, joined by `, `; `<action>` is the message of HEAD's newest reflog entry (`git rev-parse --git-path logs/HEAD`, its last line, the text after the tab) up to the first `: ` (for example `revert`, `cherry-pick`, `rebase (pick)`, `rebase (continue)`, `commit`), or `unknown` when HEAD's reflog cannot be read, has no entry for HEAD, or the message has no `: `.
+   - **The check** is the per-commit part of `shipcraft ci` (section 2, "What CI re-checks"), for HEAD alone against its parents: how the commit changes the locks (`Opened`, `Kept`, closed, removed, a redo), the locked files' hashes, and for a bound lock that is not `Opened` the lefthook, vitest added-config, pytest settings (item 138) and Jest (item 140) checks. It never runs a suite, a build or a `check` command, and never calls GitHub (item 42's squash admission is treated as not proved). The config is the one `ci` would use with `--base <first parent>`: the first parent's `.shipcraft.toml`, else HEAD's (item 128). The extraction must leave `ci`'s own result, output and rows byte-for-byte as today.
+   - **The verdict line:**
+     - passed: `shipcraft: commit <short> keeps the locks' files; the suite did not run, so if the locked cases pass now, close the lock with a commit through the hook: git commit --allow-empty -m "close lock"`
+     - refused: `shipcraft: commit <short> would be refused by CI (<code>): <what>; next: <next>`, where `<code>`, `<what>` and `<next>` are the refusal's own code, first line and Next text, as `ci` prints them for that commit.
+     - the check fails (`shipcraft: error:` in `ci`; any other failure, such as an unreadable lock or config): `shipcraft: commit <short> could not be checked (<message, one line>); shipcraft ci --base <first parent short> checks it`
+   - **The row.** One row, layer `unjudged`: `{"layer": "unjudged", "result": "unjudged", "verdict": "passed"|"refused"|"error", "code": <refusal code, or "" when passed, "error" on error>, "commit": <HEAD, 40 hex>, "tree": <HEAD's tree>, "lock": <first open lock id in byte order>, "action": <action>, "secs": ..., "branch": ...}` (`at` as every row). `result` is never `passed` or `refused`, so `report` and the PR summary count nothing new.
+   - **Never in the way.** `close` still always exits 0. It prints nothing new when HEAD has no lock open or is judged, when HEAD cannot be read, or in a repository without `.shipcraft.toml` at HEAD. During a rebase, a cherry-pick or a revert of several commits, git runs `post-commit` once per commit, and each unjudged commit gets its two lines and its row; nothing stops or slows the sequence beyond the check (no suite runs). The existing in-progress and not-the-judged-commit lines (item 17) are printed first, unchanged.
+
+4. **`status` names the unjudged commits of the branch.** After the `open locks` line (and item 134's lines), `status` prints one line when the branch has at least one commit that has a lock open, is not judged, and is at or after the cutoff:
+   - `shipcraft: commits with a lock open that the hook did not judge: <n> (<shorts>); shipcraft ci --base <base> judges them`
+   - The commits are those of `<base>..HEAD` (`git rev-list`), newest first; `<shorts>` names at most 5, joined by `, `, then ` and <k> more` when there are more. `<base>` is `origin/<default branch>` when that ref resolves, else `<default branch>` (`default_branch`, as `status` already uses), else no line.
+   - No line when there is none, when HEAD is on the default branch with nothing in the range, or when any read fails (status stays read-only and never fails because of this line). Every other `status` line is unchanged.
+   - `git am` and `git rebase --apply` run no `post-commit`; this line is where their commits show.
+
+5. **`pr` warns before pushing.** After the `pr-not-on-branch` check and before the push, when point 4's commits are not empty for `origin/<base>..HEAD` (after `pr`'s fetch), `pr` prints, on stdout:
+   - `shipcraft: warning: <n> commit(s) on <branch> were made with a lock open and the hook did not judge them (<shorts>); shipcraft/ci re-checks every commit of the PR; to check them first: shipcraft ci --base origin/<base>`
+   - Same `<shorts>` rule as point 4. A warning, never a refusal: `pr` goes on exactly as today, and its exit code, rows, statuses and PR body do not change. When the lookup fails, no line.
+
+**Fix, version 2.82.0.** The silent loss of a local verdict is a defect of the hook's coverage (section 1 promises the hook judges each commit; for these commands nothing did and nothing said so), so this is a fix: `red --fix --reported-at 2026-11-19T21:35-03:00 --fixes-release v2.0.0`. Not a patch: the run log gains a key and a layer, and `close`, `status` and `pr` print new lines. Section 11 goes to 2.82.0.
+
+**Existing installs.** No hook file changes. Every setup `init` writes already calls `shipcraft close` from `post-commit` (plain `.git/hooks`, husky, pre-commit, lefthook, item 101's `core.hooksPath` check), so a project gets point 3 with the new binary, with no `init`, no migration and no new file. A setup whose `post-commit` does not call `shipcraft close` (`status` already says `missing hook`) gets points 4 and 5 only. Old run-log rows stay as they are; the cutoff keeps their commits out of points 4 and 5. Locks, config and their formats do not change.
+
+**Known limits.**
+- The suite never runs for an unjudged commit locally: a GREEN made by `git revert` or `git cherry-pick` leaves the lock open until a commit through the hook closes it (the verdict line says how); CI's `lock-not-closed` still catches a branch pushed that way.
+- `git am` and `git rebase --apply` run no `post-commit`, so they get no local check, only point 4's and 5's line.
+- Commits made in another clone have no row here and are named as unjudged once they are after the cutoff; the line says what this clone saw, and CI judges them all.
+- A hook whose run-log row could not be written (the log is not writable) makes its commit look unjudged.
+- Rebasing an item branch while its lock is open names every rebased commit (they are new commits nobody judged); that is true, and CI judges them.
+
+**Metric:** on the release, the reproduction's `git revert T` and `git cherry-pick S2` print the refused verdict at `post-commit`, and `status` and `pr` name both commits. False lines: 0 lines for commits made through `commit-msg` (plain, amend, merge, `--continue` after a conflict) over the next 5 items' branches. Revert trigger: one false line on an ordinary commit, or a `post-commit` that slows a rebase by more than 1 s per commit on this repository; undo: `close` stops at point 3, `status` and `pr` drop their lines (the `tree` key stays, harmless).
+
+**Touches.** Read first:
+- **The version:** section 11 and `nucleo/Cargo.toml` (and `Cargo.lock`) go to 2.82.0 (`v1-62.version`, `v1-64.version`, `v1-67.version`, `v1-69.version`, `v1-87.version`, `v1-103.version`, `v1-108.version`, `v1-139.version` and the other version guards read Cargo or section 11).
+- **What this change can move** (searched in `acceptance/` for `runs.jsonl`, run-log readers, `close`'s output, `--no-verify`/`commit_nv`, `cherry-pick`, `git revert`, `rebase`, `git am`):
+  - item 17's `close` cases (`acceptance/tools/item17.py`: `merge`, `cherry-pick`, `revert`, `rebase`, `outro-head`, `outra-arvore`, `sem-marca`, `sem-reflog`, `abortada`, `ref-andou`): they build in-progress states and foreign HEADs with a lock open; where they assert `close`'s exact stdout or the run log's rows, point 3's lines and row may appear after today's lines. Point 3 keeps today's lines first; a case that asserts the whole stdout or the row count moves only if its HEAD is unjudged with a lock open.
+  - cases that commit with `--no-verify` (`commit_nv`, `setup_nv`/`nv_then_ci` in `acceptance/run.sh`, items 30, 31, 35, 43, 50, 61, 70, 74, 75, 135): their commit now prints point 3's lines and writes an `unjudged` row; they assert `ci`'s refusal, which does not change. A case that counts run-log rows by position after such a commit can move.
+  - `status` cases (items 61, 62, 64, 73, 89, 101, 128, 134 and the `status` lines of section 3): unchanged unless the case's branch holds an unjudged commit with a lock open after the cutoff; none was found.
+  - `pr` cases (items 10, 11, 19, 24, 96, 100, 103, 108, 110, 115, 130): the warning appears only for such commits; none was found that makes one (`setup_nv` cases that then run `pr` would see it: none found).
+  - hook-row readers (items 10, 38, 80, 97, 129): the new `tree` key; item 80's and 129's key checks test for absent keys, not an exact key set.
+  - **Not moved:** `init`'s hook files (no change, items 15a, 20, 91, 101 and the `init-files` case), the README (no change: `v1-128.readme-once`'s hash holds), the review briefs (`v1-63.*`, `v1-82.*` hashes hold), `AGENTS.md`'s block (item 89), `report` (item 38, 76, 99: `unjudged` rows have no `passed`/`refused` result and no layer it reads).
+- **Must keep passing unchanged:** items 17 (close), 38 (rows), 42 (squash admission, CI only), 46 (redo), 98 (hook controls), 128 (config base), 138 and 140 (per-commit checks, through the extraction), and `ci`'s cases of items 1 to 5.
+- **New cases** go in `acceptance/lib/item141.sh` (ids `v1-141.<name>`), with real git fixture repositories and the battery's fake or real runners, never the network; `pr` cases use the battery's `gh` stub. Estimate, at most 40: point 1 (2), point 2 and 3 (about 20: revert, cherry-pick, rebase pick, squash/fixup, rebase `--continue`, `--no-verify`, a GREEN by cherry-pick then the empty commit closes, a RED commit moved by rebase, refused/passed/error verdicts, action names, row fields, the cutoff, controls for plain commit, amend, `merge --no-ff`, `--continue` after a conflict, `reword`, no lock open, the closing commit), point 4 (about 8), point 5 (about 6).
+
+**Current behavior** on these paths (keep unless marked change):
+- `close` with no close mark prints nothing and writes no row (change: point 3 when HEAD is unjudged with a lock open; keep otherwise).
+- `close`'s mark paths (in-progress operation, not the judged commit, closing commit, failure lines) and their rows (keep, printed first).
+- `close` exits 0 always (keep).
+- The hook row's keys (`layer`, `secs`, `result`, `code`, `branch`, `commit`, `lock`, `at`, `reason`) (keep; change: add `tree`).
+- `status`'s lines and order (keep; change: one line after `open locks`/item 134's lines, only when point 4 finds commits).
+- `pr`'s output before `published to origin` (keep; change: the warning line, only when point 5 finds commits); its exit codes, rows and PR body (keep).
+- `ci`'s output, refusals, rows and exit codes (keep, byte-for-byte; the per-commit loop may move into a shared function).
+- Hook files `init` writes, for every setup (keep).
+- `report`, `report --findings` and the PR summary table (keep).
+
 ### What the hook judges
 
 - **Only the commit's content:** the index plus the tree's ignored files (dependencies, `.env`, generated files). An untracked, non-ignored file is left out, as in a clean clone. Changes outside the index never block and never change the result.
@@ -743,18 +841,18 @@ Each command is `shipcraft <command>`. Exit codes, unless the row says otherwise
 | `init [--lang python\|node\|go] [--github]`, `init --lang other --command <cmd> --glob <glob>... [--github]` | Sets up the project (below; `other`, item 67). |
 | `red [--redo] [--base <ref>] [--all]` | Runs the RED's changed test files, or every suite when it cannot narrow safely (item 55), requires assertion failures, reruns the failing cases once and does not lock those that pass (item 53), does not lock a failing case of a test file the RED did not change while one of its own fails (item 81), writes an open lock; `--redo` rewrites the branch's open lock (item 46). Refuses `lock-open`, `install-not-committed` (item 80), `red-already-passes`, `error-before-assertions`, `group-failed`, `red-not-reproduced`, `no-report`, `suite-without-tests`, `build-failed`. |
 | `check [--commit-msg <file>]` | The hook: judges the commit against the open locks and closes them when the RED cases pass. With `--commit-msg` it judges the final index and writes a close mark instead of the lock (`mark-failed` if it cannot). |
-| `close` | The `post-commit` half of the `commit-msg` route: if the mark matches the commit just made, adds one commit that only flips the lock to `closed`. On failure it changes nothing and says to rerun it. Always exits `0`. |
+| `close` | The `post-commit` half of the `commit-msg` route: if the mark matches the commit just made, adds one commit that only flips the lock to `closed`. On failure it changes nothing and says to rerun it. Then, for a commit the hook did not judge while a lock is open, checks it against the locks without the suite and says so (item 141). Always exits `0`. |
 | `ci --base <ref> [--pr]` | CI (section 2). `--pr` allows the docs-only path (section 5). `ci` publishes no status (item 44). |
 | `export --base <ref> <branch>` | For a project that does not use Shipcraft: writes `<branch>` with the commits of `<ref>..HEAD` without Shipcraft's files and without the commits that change only them, and names what it left out (item 135). Changes nothing else. Refuses `export-uses-shipcraft`, `export-lock-open`, `export-merge`, `export-branch-exists`, `export-empty`. |
 | `pr [--title <t>] [--body <file>] [--merge]` | Pushes (`--force-with-lease`), opens or updates the PR, runs the layers, posts statuses and summary (section 5). Refuses `pr-not-on-branch`. Exit `0` is guaranteed only when every layer passed or is off. With `--merge`, once every layer passed it then attempts the merge exactly as `merge <pr>`, whose own gate decides the result (item 110). |
 | `review` | Reviews local HEAD and prints the verdict; publishes nothing. Exit `0` on approval; refuses `review-changes-requested`, `review-error`, `review-off`. |
 | `review --pr <n>` | Reviews any PR in an isolated copy and publishes `shipcraft/review` and a comment. Refuses `pr-from-fork`. |
 | `merge <pr> [--no-review "<reason>"]` | The merge gate (section 5). Refuses `pr-not-open`, `merge-without-ci`, `merge-without-review`, `no-review-without-reason`. |
-| `status` | Prints the layers, review agent (none when review is off, item 73), hook state, whether `AGENTS.md`'s block is this version's (item 89), open locks, and one line with the real branch protection level. |
+| `status` | Prints the layers, review agent (none when review is off, item 73), hook state, whether `AGENTS.md`'s block is this version's (item 89), open locks, the commits with a lock open that the hook did not judge (item 141, only when there are some), and one line with the real branch protection level. |
 | `report [--json] [--since <tag>] [--github]` | Prints the flow's numbers per lock and per day from the run log (section 8, item 38), with DORA from git (item 76); `--github` fills the waiting and merge times from GitHub (item 79). Reads only; refuses only bad arguments and a `--since` that is not a release. |
 | `report --findings [--json] [--since <pr>]` | Prints the Blocking findings of the review comments on merged PRs, grouped by class, as the ledger `docs/review-findings.md` (item 121). Reads GitHub through `gh` only; refuses only bad arguments. |
 
-`init` writes no run-log row; `red` and `close` write one each (item 38).
+`init` writes no run-log row; `red` and `close` write one each (item 38), and `close` one `unjudged` row for a commit the hook did not judge (item 141).
 
 ### `init`
 
@@ -4592,7 +4690,7 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 - With `[build]`, the `tsconfig.json` files are not locked, so a GREEN can change the build graph while a lock is open.
 - On a pnpm workspace, the hook's copy resolves internal packages to the working tree, so the hook can judge stale code (*CI*).
 - `git commit --amend` on top of the closing commit passes the hook (*CI*).
-- `git rebase --continue` skips `commit-msg`, so the `commit-msg` route does not judge those commits (*CI*).
+- `git revert`, `git cherry-pick`, rebase picks and `git rebase --continue` skip `commit-msg`: `post-commit` checks those commits against the locks without the suite, and `status` and `pr` name them; `git am` and `git rebase --apply` run no `post-commit`, so only `status` and `pr` name them (item 141) (*CI*).
 
 ## 10. Out of scope
 
@@ -4608,4 +4706,4 @@ These gaps are known and open. The ones marked *CI* are caught by `shipcraft ci`
 
 ## 11. Versioning
 
-`shipcraft` follows semantic versioning. This contract is **2.81.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
+`shipcraft` follows semantic versioning. This contract is **2.82.0**. A change that breaks a config, a lock, a command or a refusal code raises the major version. The lock carries its own `format` version. A new lock format that a binary writes while still reading the previous one is a minor change, since no lock already written stops being valid (lock format 3, item 43, in 2.3.0). `shipcraft_min` lets a project require a minimum binary, and `init` writes the running binary's `major.minor`. Releases ship one archive per macOS target (`aarch64`, `x86_64`), each holding only the `shipcraft` binary, with a `SHA256SUMS` file. On other platforms, build from source with `cargo install --path nucleo`.
