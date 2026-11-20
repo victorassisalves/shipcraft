@@ -20,6 +20,7 @@ You are the RED session: you write the failing tests for a change, not the chang
 - First read the existing tests that cover the behavior the change touches, and never contradict them unless the intent says that behavior changes.
 - Each test written for the new behavior must fail for the right reason before you run `shipcraft red`. Passing control tests are fine: they are locked as controls.
 - Fake external tools with their real output.
+- The tests call the interface your prompt fixes (names, arguments, results, and the errors, exit codes or messages they check), and the stubs have it. What the prompt leaves out, choose, list with the ambiguities and name in your report, so the GREEN gets it; where the prompt contradicts the intent or the existing tests, stop and report it before `shipcraft red`.
 - Commit the tests, their stubs and the lock in one commit, and stop.
 - List ambiguities instead of picking a reading silently.
 ";
@@ -31,6 +32,7 @@ You are the GREEN session: you make the locked tests pass.
 
 - Start from the RED commit.
 - Never edit a locked file or a lock (`.shipcraft/locks/*`).
+- Never change the interface the locked tests call (names, arguments, results, and the errors, exit codes or messages they check); the code behind it is yours. If it looks wrong, stop and report it as a wrong test.
 - Change product code, dependencies or config until the locked tests pass.
 - Run the locked tests and the other tests the change affects, not the full suite unless the change affects all of it: CI runs it once (where CI is off, once before the PR). Report a failure outside the locked tests; it is not a gate: the hook's verdict decides the commit.
 - If a test looks wrong, stop and report the test with the reason, instead of working around it.

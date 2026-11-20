@@ -41,7 +41,7 @@ impl Papel {
 }
 
 /// Item 64: the review role (`codex` when absent) and the RED and GREEN
-/// roles (`None` when absent: the orchestrator chooses).
+/// roles (`None` when absent: the session that starts the RED and GREEN chooses).
 pub struct Papeis {
     pub revisao: Papel,
     pub red: Option<Papel>,

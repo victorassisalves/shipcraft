@@ -141,7 +141,7 @@ pub fn status(repo: &Repo) -> Result<()> {
         );
     }
     // Item 64: the roles, right after the layers line.
-    let unset = || "not set (the orchestrator's choice)".to_string();
+    let unset = || "not set (the session that starts the RED and GREEN chooses)".to_string();
     say!(
         "shipcraft: roles: red {}; green {}; review {}",
         config.papeis.red.as_ref().map_or_else(unset, |p| p.shown()),

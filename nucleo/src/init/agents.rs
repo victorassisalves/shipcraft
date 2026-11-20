@@ -1,4 +1,4 @@
-//! The `AGENTS.md` block and the `CLAUDE.md` import (items 61, 68, 70, 74, 75, 84, 85, 89).
+//! The `AGENTS.md` block and the `CLAUDE.md` import (items 61, 68, 70, 74, 75, 84, 85, 89, 142, 145).
 
 use super::files::on_path;
 use crate::git::Repo;
@@ -23,6 +23,8 @@ const RISK_LINES: &str = "- Pick the lane first: a mechanical change, one that c
 const CLEANUP_LINE: &str = "- After a merge, clean up what this change created: its worktree, temp folders, and servers or databases you started. Never remove what you did not create, what other sessions may be using, or anything with unmerged work: report those instead.\n";
 /// Item 142: the line the current block gains right after the cleanup line (contributing with `export`).
 const EXPORT_LINE: &str = "- To contribute to a project that does not use Shipcraft (its default branch has no `.shipcraft.toml` or `.sc2.toml`), open the PR from the branch `shipcraft export --base <base> <new branch>` writes once the lock is closed and `shipcraft ci --base <base>` passes on this branch: it leaves out Shipcraft's files and this block, and the project's own checks still apply to it. `shipcraft pr` is for projects that use Shipcraft.\n";
+/// Item 145: the line the current block gains right after the `- A session told it is the RED or the GREEN` line (who fixes the interface).
+const INTERFACE_LINE: &str = "- Before starting either phase, the session the user talks to fixes the interface the tests call (what they call to reach the behavior: names, arguments, results, and the errors, exit codes or messages they check; for a command line, its commands, flags and output) and writes it in every prompt that starts a phase, a command given to the user included. The RED's tests and stubs use that interface; the GREEN never changes it (the code behind it is free), and a GREEN that finds it wrong stops and reports it as a wrong test: the repair above, with the corrected interface in the new RED's prompt and the GREEN's, through `shipcraft red --redo` and its limits.\n";
 /// Item 74's block (commit f4220f1, v2.30.0), a known block in both variants;
 /// item 75's is it with `FIX_LINE` (`agents_block_2_31`). Item 61's block
 /// with item 68's rules: the machine install's block; a project-local install
@@ -130,9 +132,20 @@ fn agents_block_2_81() -> String {
     after_line(&agents_block_2_39(), "\n- Small fixes from one request go in one PR.", CLEANUP_LINE)
 }
 
-/// Item 142: item 85's block with `EXPORT_LINE` right after the cleanup line.
-fn current_block() -> String {
+/// Item 142's block (v2.82.0 to v2.85.0), a known block in both variants:
+/// item 85's block with `EXPORT_LINE` right after the cleanup line.
+fn agents_block_2_82() -> String {
     after_line(&agents_block_2_81(), "\n- After a merge, clean up", EXPORT_LINE)
+}
+
+/// Item 145: item 142's block with `INTERFACE_LINE` right after the line that
+/// starts `- A session told it is the RED or the GREEN`.
+fn current_block() -> String {
+    after_line(
+        &agents_block_2_82(),
+        "\n- A session told it is the RED or the GREEN does that phase only",
+        INTERFACE_LINE,
+    )
 }
 
 /// `block` with `lines` right after the line that starts at `start` (a `\n` and the line's start).
@@ -142,7 +155,7 @@ fn after_line(block: &str, start: &str, lines: &str) -> String {
     format!("{}{lines}{}", &block[..end], &block[end..])
 }
 
-/// A block (this version's, v2.81.0's, v2.39.0's, v2.31.0's, v2.30.0's, v2.26.0's, v2.25.0's or v2.22.0's) in its machine or project-local form.
+/// A block (this version's, v2.82.0's, v2.81.0's, v2.39.0's, v2.31.0's, v2.30.0's, v2.26.0's, v2.25.0's or v2.22.0's) in its machine or project-local form.
 fn variant(block: &str, local: bool) -> String {
     if !local {
         return block.to_string();
@@ -163,6 +176,7 @@ fn known_blocks(local: bool) -> Vec<String> {
         agents_block_2_31(),
         agents_block_2_39(),
         agents_block_2_81(),
+        agents_block_2_82(),
     ];
     let mut known = vec![agents_text(!local)];
     for block in &earlier {
