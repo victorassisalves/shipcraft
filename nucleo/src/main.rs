@@ -35,6 +35,7 @@ mod medicao;
 mod merge;
 mod narrow;
 mod origin;
+mod output;
 mod pr;
 mod processo;
 mod pytest_config;
@@ -147,6 +148,7 @@ fn run(args: &[&str]) -> Result<()> {
             // Item 38: a lock written, or a refusal, is a row.
             let started = Instant::now();
             let repo = Repo::open()?;
+            output::capture(&repo, "red");
             let mut chosen = None;
             if redo {
                 // Item 46: every redo is a `red` row with `redo: true` and HEAD's lock id.
@@ -336,6 +338,9 @@ fn measured(camada: &str, command: impl FnOnce(&Repo, &mut medicao::CiRow) -> Re
     let started = Instant::now();
     let repo = Repo::open()?;
     let lock = (camada == "hook").then(|| medicao::open_lock(&repo));
+    if camada == "hook" {
+        output::capture(&repo, "hook");
+    }
     let mut ci = medicao::CiRow::default();
     let result = command(&repo, &mut ci);
     medicao::layer(&repo, camada, started, &result, (camada == "ci").then_some(ci), lock);
