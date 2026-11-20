@@ -77,7 +77,6 @@ pub fn run(repo: &Repo, commit_msg: bool) -> Result<()> {
         if !matches!(change, Change::Opened(_)) {
             check_lefthook(repo, &parents, &Snapshot::Index, path)?;
             crate::vitest_files::check_added(repo, &parents, &Snapshot::Index, path, lock)?;
-            crate::pytest_config::check_changed(repo, &parents, &Snapshot::Index, path)?;
         }
     }
     let config = match &staged_config {

@@ -125,26 +125,6 @@ impl Repo {
         self.run(&["cat-file", "blob", &object]).map(Some)
     }
 
-    /// A path's git mode in a snapshot (`100644`, `120000`, ...), or None if
-    /// it is not there. The tree's is `120000` for a symbolic link, else `100644`.
-    pub fn mode(&self, snapshot: &Snapshot, path: &str) -> Result<Option<String>> {
-        let out = match snapshot {
-            Snapshot::Tree => {
-                return match fs::symlink_metadata(self.path(path)) {
-                    Ok(meta) if meta.file_type().is_symlink() => Ok(Some("120000".into())),
-                    Ok(_) => Ok(Some("100644".into())),
-                    Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
-                    Err(e) => Err(failed(format!("read {path}: {e}"))),
-                };
-            }
-            Snapshot::Index => self.run(&["ls-files", "-s", "-z", "--", path])?,
-            Snapshot::Commit(rev) => self.run(&["ls-tree", "-z", rev, "--", path])?,
-        };
-        // Each entry is `<mode> <...>\t<path>`; only the exact path counts.
-        let entry = out.split(|b| *b == 0).map(text).find(|e| e.split_once('\t').is_some_and(|(_, p)| p == path));
-        Ok(entry.and_then(|e| e.split(' ').next().map(str::to_string)))
-    }
-
     /// The files directly under `dir` in a snapshot, as paths from the root.
     pub fn list(&self, snapshot: &Snapshot, dir: &str) -> Result<Vec<String>> {
         let mut paths = match snapshot {
@@ -433,26 +413,6 @@ mod tests {
         git(dir.path(), &["init", "-q", "-b", "main"]);
         git(dir.path(), &["commit", "-q", "--allow-empty", "-m", "first"]);
         Repo { root: dir.path().to_path_buf() }
-    }
-
-    #[test]
-    fn a_path_mode_in_the_index_and_a_commit() {
-        let dir = TempDir::new("shipcraft-test-item138").unwrap();
-        let repo = repo(&dir);
-        fs::create_dir_all(dir.path().join("a")).unwrap();
-        fs::write(dir.path().join("a/pytest.ini"), "[pytest]\n").unwrap();
-        std::os::unix::fs::symlink("pytest.ini", dir.path().join("a/.pytest.ini")).unwrap();
-        git(dir.path(), &["add", "-A"]);
-        let mode = |snapshot: &Snapshot, path: &str| repo.mode(snapshot, path).unwrap();
-        assert_eq!(mode(&Snapshot::Index, "a/pytest.ini").as_deref(), Some("100644"));
-        assert_eq!(mode(&Snapshot::Index, "a/.pytest.ini").as_deref(), Some("120000"));
-        assert_eq!(mode(&Snapshot::Index, "a"), None, "a folder is not a path");
-        assert_eq!(mode(&Snapshot::Tree, "a/.pytest.ini").as_deref(), Some("120000"));
-        git(dir.path(), &["commit", "-q", "-m", "second"]);
-        let head = Snapshot::Commit(repo.text(&["rev-parse", "HEAD"]).unwrap());
-        assert_eq!(mode(&head, "a/.pytest.ini").as_deref(), Some("120000"));
-        assert_eq!(mode(&head, "a/pytest.ini").as_deref(), Some("100644"));
-        assert_eq!(mode(&head, "pytest.ini"), None);
     }
 
     #[test]

@@ -37,7 +37,6 @@ mod narrow;
 mod origin;
 mod pr;
 mod processo;
-mod pytest_config;
 mod python_env;
 mod red;
 mod refusal;
