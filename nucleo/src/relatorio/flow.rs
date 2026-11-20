@@ -70,6 +70,7 @@ impl Report {
                     Some(f) => f.fix.get(id).cloned().unwrap_or_default(),
                     None => red_row(rows, id).map(fix_of_row).unwrap_or_default(),
                 };
+                // Item 136: before `closed`, which `lock_row` gives a lock whose close was observed.
                 if m.is_none() && facts.is_some_and(|f| f.tip.contains(id)) {
                     row["state"] = "merge_not_observed".into();
                 }
@@ -137,7 +138,7 @@ fn lock_row(id: &str, rows: &[&Row]) -> (Value, Option<Merged>) {
         [("red", red), ("close", close)].iter().filter(|(_, t)| t.is_none()).map(|(s, _)| *s).collect();
     let of = |layer: &str| stats(&rows.iter().copied().filter(|r| str_of(r, "layer") == layer).collect::<Vec<_>>());
     let row = json!({
-        "kind": "lock", "lock": id, "state": if merge.is_some() { "merged" } else { "open" },
+        "kind": "lock", "lock": id, "state": if merge.is_some() { "merged" } else if close.is_some() { "closed" } else { "open" },
         "red_at": red.map(num), "close_at": close.map(num), "merge_at": merge.map(num),
         "red_to_close": span(red, close).map(num), "close_to_merge": span(close, merge).map(num),
         "red_to_merge": span(red, merge).map(num), "waiting": waiting.map(num), "unobserved": unobserved,

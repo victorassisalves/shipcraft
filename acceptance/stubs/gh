@@ -852,6 +852,14 @@ def cmd_api(args):
     m2 = re.match(r"^(branches/[^/]+/protection(?:/.*)?|rulesets(?:/.*)?)$", rest)
     if m2:
         mode = readfile("protection", "403")
+        if mode in ("not-found", "admin-required"):
+            if method == "GET":
+                log_call(None, "")
+            else:
+                w("protection")
+            code, message = (404, "Not Found") if mode == "not-found" else (403, "Must have admin rights to Repository.")
+            sys.stdout.write(json.dumps({"message": message, "documentation_url": "https://docs.github.com/rest/branches/branch-protection#get-branch-protection", "status": str(code)}, separators=(",", ":")) + "\n")
+            fail("gh: %s (HTTP %d)" % (message, code))
         if method == "GET":
             log_call(None, "")
             if mode == "403":
