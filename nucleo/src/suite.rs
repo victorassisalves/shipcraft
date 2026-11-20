@@ -456,6 +456,8 @@ fn shell_with(command: &str, dir: &Path, clean: bool, vars: &[(&str, PathBuf)], 
         }
     }
     let mut child = sh.spawn().map_err(|e| failed(format!("run the suite: {e}")))?;
+    // Item 139: in `red` and the hook, the screen's bound and the file.
+    let cut = if pass { crate::output::begin(command) } else { None };
     let scan_out = Arc::new(Mutex::new(FirstLine::default()));
     let scan_err = Arc::new(Mutex::new(FirstLine::default()));
     // Both streams pass to shipcraft's stderr; `open` is whether the last byte
@@ -466,11 +468,13 @@ fn shell_with(command: &str, dir: &Path, clean: bool, vars: &[(&str, PathBuf)], 
     let err = child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>);
     for (pipe, scan) in [(out, Arc::clone(&scan_out)), (err, Arc::clone(&scan_err))] {
         let Some(mut pipe) = pipe else { continue };
-        let (open, done) = (Arc::clone(&open), done.clone());
+        let (open, done, cut) = (Arc::clone(&open), done.clone(), cut.clone());
         thread::spawn(move || {
             let mut buf = [0u8; 8192];
             while let Ok(n @ 1..) = pipe.read(&mut buf) {
-                if pass {
+                if let Some(cut) = &cut {
+                    cut.lock().unwrap_or_else(|e| e.into_inner()).feed(&buf[..n]);
+                } else if pass {
                     let mut open = open.lock().unwrap_or_else(|e| e.into_inner());
                     let _ = io::stderr().write_all(&buf[..n]);
                     *open = buf[n - 1] != b'\n';
@@ -484,7 +488,13 @@ fn shell_with(command: &str, dir: &Path, clean: bool, vars: &[(&str, PathBuf)], 
     let status = child.wait().map_err(|e| failed(format!("run the suite: {e}")))?;
     // A process the command left running may hold a stream open: a moment, not forever.
     let deadline = Instant::now() + Duration::from_secs(2);
+    if let Some(cut) = &cut {
+        cut.lock().unwrap_or_else(|e| e.into_inner()).until(deadline);
+    }
     while finished.recv_timeout(deadline.saturating_duration_since(Instant::now())).is_ok() {}
+    if let Some(cut) = &cut {
+        crate::output::finish(cut);
+    }
     // What shipcraft writes next (a refusal's three lines) starts on its own line.
     let mut open = open.lock().unwrap_or_else(|e| e.into_inner());
     if *open {

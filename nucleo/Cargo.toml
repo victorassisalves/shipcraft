@@ -1,12 +1,13 @@
 [package]
 license = "Apache-2.0"
 name = "shipcraft"
-version = "2.79.1"
+version = "2.80.0"
 edition = "2021"
 publish = false
 description = "Shipcraft v2 core: the GREEN cannot pass the suite by changing, deleting or skipping the RED's tests."
 
 [dependencies]
+libc = "0.2"
 regex = "1.12"
 roxmltree = "0.20"
 serde = { version = "1", features = ["derive"] }
