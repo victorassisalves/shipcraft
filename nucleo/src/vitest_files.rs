@@ -4,7 +4,7 @@
 //! (`setup-unreadable`), and the hook and CI refuse a runner config added
 //! while a lock is open (`runner-config-added`).
 
-mod scan;
+pub(crate) mod scan;
 
 use crate::config::{Config, Suite, CONFIG_FILE};
 use crate::git::{Repo, Snapshot};
@@ -18,7 +18,7 @@ use std::fs;
 /// The extensions of a runner config name.
 const CONFIG_EXTS: [&str; 6] = ["ts", "mts", "cts", "js", "mjs", "cjs"];
 /// The extensions a reached module is scanned with, and a setup literal's candidates.
-const JS_EXTS: [&str; 8] = ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
+pub(crate) const JS_EXTS: [&str; 8] = ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
 
 #[derive(Clone, Copy, PartialEq)]
 enum Name {
@@ -41,7 +41,7 @@ fn runner_name(path: &str) -> Option<Name> {
     }
 }
 
-fn folder(path: &str) -> &str {
+pub(crate) fn folder(path: &str) -> &str {
     path.rsplit_once('/').map_or("", |(dir, _)| dir)
 }
 
@@ -79,7 +79,7 @@ fn runner_configs(suites: &[Suite], paths: &[String]) -> BTreeSet<String> {
 
 /// A literal's content joined to `folder`: `.` and empty segments dropped,
 /// each `..` removing the segment before it; None above the root.
-fn join(folder: &str, content: &str) -> Option<String> {
+pub(crate) fn join(folder: &str, content: &str) -> Option<String> {
     let mut parts: Vec<&str> = Vec::new();
     for part in folder.split('/').chain(content.split('/')) {
         match part {
@@ -93,7 +93,7 @@ fn join(folder: &str, content: &str) -> Option<String> {
     Some(parts.join("/"))
 }
 
-fn relative(content: &str) -> bool {
+pub(crate) fn relative(content: &str) -> bool {
     content.starts_with("./") || content.starts_with("../")
 }
 
@@ -134,7 +134,7 @@ pub fn discover(repo: &Repo, config: &Config) -> Result<Found> {
         }
         let bytes = fs::read(repo.path(&module)).map_err(|e| failed(format!("read {module}: {e}")))?;
         let mut first: Option<String> = None;
-        for event in scan::scan(&String::from_utf8_lossy(&bytes)) {
+        for event in scan::scan(&String::from_utf8_lossy(&bytes), &scan::VITEST) {
             let (content, import) = match event {
                 Event::Bad(reason) => {
                     first.get_or_insert(reason);
@@ -146,7 +146,7 @@ pub fn discover(repo: &Repo, config: &Config) -> Result<Found> {
                 }
                 Event::Setup(content) => (content, false),
                 Event::Import(content) if relative(&content) => (content, true),
-                Event::Import(_) => continue,
+                Event::Import(_) | Event::Root(_) => continue,
             };
             let Some(base) = join(folder(&module), &content) else { continue };
             let mut named = false;
@@ -178,7 +178,7 @@ pub fn discover(repo: &Repo, config: &Config) -> Result<Found> {
     Ok(Found { paths, unreadable: why.into_iter().next() })
 }
 
-enum Kind {
+pub(crate) enum Kind {
     File,
     Link,
     Folder,
@@ -187,7 +187,7 @@ enum Kind {
 /// A repository path as `fs::symlink_metadata` sees it. Every path asked is one
 /// `repo.files()` lists, so one the tree no longer has (a tracked file deleted)
 /// is a read failure, as `locked_files` fails on it: exit 2, no lock written.
-fn kind(repo: &Repo, path: &str) -> Result<Kind> {
+pub(crate) fn kind(repo: &Repo, path: &str) -> Result<Kind> {
     match fs::symlink_metadata(repo.path(path)) {
         Ok(meta) if meta.file_type().is_symlink() => Ok(Kind::Link),
         Ok(meta) if meta.is_dir() => Ok(Kind::Folder),
@@ -213,11 +213,17 @@ fn beside(config: &Config, lock: &Lock) -> Vec<String> {
     lock.files.keys().filter(outside).map(|path| one_line(path)).collect()
 }
 
-/// Point 3's line, right before `RED locked at`/`RED redone at`.
+/// Point 3's line, right before `RED locked at`/`RED redone at`; item 140
+/// names the runners of the config's suites.
 pub fn print_beside(config: &Config, lock: &Lock) {
     let shown = beside(config, lock);
     if !shown.is_empty() {
-        println!("shipcraft: red also locked what vitest reads beside the tests: {}", short_list(&shown));
+        let runners = match (vitest_suites(config).is_empty(), crate::jest_files::suites(config).is_empty()) {
+            (false, false) => "vitest and jest read",
+            (true, false) => "jest reads",
+            _ => "vitest reads",
+        };
+        println!("shipcraft: red also locked what {runners} beside the tests: {}", short_list(&shown));
     }
 }
 
@@ -235,14 +241,17 @@ pub(crate) fn snapshot_paths(repo: &Repo, snapshot: &Snapshot) -> Result<Vec<Str
 }
 
 /// Point 4, right after `check_lefthook`: a locked runner config of the
-/// snapshot's vitest suites that no parent has and the lock does not hold.
+/// snapshot's vitest suites, or item 140's Jest config of its Jest suites,
+/// that no parent has and the lock does not hold, in bytewise order.
 pub fn check_added(repo: &Repo, parents: &[Snapshot], snapshot: &Snapshot, lock_path: &str, lock: &Lock) -> Result<()> {
     let Some(config) = Config::at(repo, snapshot)? else { return Ok(()) };
-    let suites = vitest_suites(&config);
-    if suites.is_empty() {
+    let (suites, jest) = (vitest_suites(&config), crate::jest_files::suites(&config));
+    if suites.is_empty() && jest.is_empty() {
         return Ok(());
     }
-    for path in runner_configs(&suites, &snapshot_paths(repo, snapshot)?) {
+    let paths = snapshot_paths(repo, snapshot)?;
+    let jest = crate::jest_files::configs(&jest, &paths);
+    for path in runner_configs(&suites, &paths).into_iter().chain(jest.iter().cloned()).collect::<BTreeSet<_>>() {
         if lock.files.contains_key(&path) {
             continue;
         }
@@ -257,7 +266,8 @@ pub fn check_added(repo: &Repo, parents: &[Snapshot], snapshot: &Snapshot, lock_
         return refuse(
             "runner-config-added",
             format!("runner config {shown} was added {} with lock {} open", snapshot.describe(), one_line(lock_path)),
-            "vitest reads its settings from this file, so adding one during GREEN can change the judge mid-game",
+            if jest.contains(&path) { "jest" } else { "vitest" }.to_string()
+                + " reads its settings from this file, so adding one during GREEN can change the judge mid-game",
             format!("remove {shown}; if the suite needs it, add it in a RED (shipcraft red --redo) or after the cycle closes"),
         );
     }

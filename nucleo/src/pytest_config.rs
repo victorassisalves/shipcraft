@@ -20,20 +20,23 @@ const WHOLE: [&str; 4] = ["pytest.ini", ".pytest.ini", "pytest.toml", ".pytest.t
 
 /// The pytest settings of a path in a snapshot.
 #[derive(Debug)]
-enum Settings {
+pub(crate) enum Settings {
     None,
     Bytes(Vec<u8>),
     Value(toml::Value),
+    /// Item 140: a manifest's `jest` value.
+    Json(serde_json::Value),
     /// A symbolic link: equals nothing.
     Linked,
 }
 
 impl Settings {
-    fn same(&self, other: &Settings) -> bool {
+    pub(crate) fn same(&self, other: &Settings) -> bool {
         match (self, other) {
             (Settings::None, Settings::None) => true,
             (Settings::Bytes(a), Settings::Bytes(b)) => a == b,
             (Settings::Value(a), Settings::Value(b)) => a == b,
+            (Settings::Json(a), Settings::Json(b)) => a == b,
             _ => false,
         }
     }
@@ -55,9 +58,12 @@ fn pytest_suites(config: &Config) -> Vec<Suite> {
 /// Whether `suite` watches `path`: under its root at any depth, or directly in
 /// a folder from the repository root down to the root's parent.
 fn watches(suite: &Suite, path: &str) -> bool {
-    if !NAMES.contains(&file_name(path)) {
-        return false;
-    }
+    NAMES.contains(&file_name(path)) && holds(suite, path)
+}
+
+/// Under the suite's root at any depth, or directly in a folder that holds
+/// the root (item 140 reuses it for Jest's configs and manifests).
+pub(crate) fn holds(suite: &Suite, path: &str) -> bool {
     if path.starts_with(&suite.prefix()) {
         return true;
     }
@@ -143,18 +149,30 @@ fn of_bytes(name: &str, bytes: Vec<u8>) -> Settings {
     ini_section(text, section).map_or(Settings::None, |found| Settings::Bytes(found.into_bytes()))
 }
 
-/// Point 1: the pytest settings of `path` in `snapshot`.
-fn settings(repo: &Repo, snapshot: &Snapshot, path: &str) -> Result<Settings> {
+/// Point 1: the settings of `path` in `snapshot`, its bytes read with `of`.
+fn settings(repo: &Repo, snapshot: &Snapshot, path: &str, of: &dyn Fn(&str, Vec<u8>) -> Settings) -> Result<Settings> {
     match repo.mode(snapshot, path)?.as_deref() {
         None => return Ok(Settings::None),
         Some("120000") => return Ok(Settings::Linked),
         Some(_) => {}
     }
-    Ok(match repo.read(snapshot, path)? {
-        None => Settings::None,
-        Some(bytes) if WHOLE.contains(&file_name(path)) => Settings::Bytes(bytes),
-        Some(bytes) => of_bytes(file_name(path), bytes),
-    })
+    Ok(repo.read(snapshot, path)?.map_or(Settings::None, |bytes| of(path, bytes)))
+}
+
+fn pytest_settings(path: &str, bytes: Vec<u8>) -> Settings {
+    match file_name(path) {
+        name if WHOLE.contains(&name) => Settings::Bytes(bytes),
+        name => of_bytes(name, bytes),
+    }
+}
+
+/// The snapshot's and every parent's paths, for the watched paths among them.
+pub(crate) fn all_paths(repo: &Repo, parents: &[Snapshot], snapshot: &Snapshot) -> Result<Vec<String>> {
+    let mut paths = snapshot_paths(repo, snapshot)?;
+    for parent in parents {
+        paths.extend(snapshot_paths(repo, parent)?);
+    }
+    Ok(paths)
 }
 
 /// Point 2, right after `vitest_files::check_added`: the first judged path
@@ -165,31 +183,63 @@ pub fn check_changed(repo: &Repo, parents: &[Snapshot], snapshot: &Snapshot, loc
     if suites.is_empty() {
         return Ok(());
     }
-    let mut paths = snapshot_paths(repo, snapshot)?;
-    for parent in parents {
-        paths.extend(snapshot_paths(repo, parent)?);
-    }
-    for path in watched(&suites, &paths) {
-        let now = settings(repo, snapshot, &path)?;
-        let before = parents.iter().map(|parent| settings(repo, parent, &path)).collect::<Result<Vec<_>>>()?;
-        if before.iter().any(|old| now.same(old)) {
-            continue;
+    let paths = watched(&suites, &all_paths(repo, parents, snapshot)?);
+    let judge = Judge {
+        code: "pytest-config-changed",
+        subject: "pytest's settings",
+        why: "pytest reads how the suite runs from these settings (plugins, options, import paths), so changing them during GREEN changes the judge mid-game",
+        undo: "pytest's settings",
+        of: &pytest_settings,
+    };
+    judge.run(repo, parents, snapshot, lock_path, paths)
+}
+
+/// A settings check: its code, its lines' words and how it reads a file.
+pub(crate) struct Judge<'a> {
+    pub code: &'static str,
+    pub subject: &'a str,
+    pub why: &'a str,
+    pub undo: &'a str,
+    pub of: &'a dyn Fn(&str, Vec<u8>) -> Settings,
+}
+
+impl Judge<'_> {
+    /// Refuses the first of `paths` whose settings in `snapshot` equal those of no parent.
+    pub(crate) fn run(
+        &self,
+        repo: &Repo,
+        parents: &[Snapshot],
+        snapshot: &Snapshot,
+        lock_path: &str,
+        paths: BTreeSet<String>,
+    ) -> Result<()> {
+        for path in paths {
+            let now = settings(repo, snapshot, &path, self.of)?;
+            let before =
+                parents.iter().map(|parent| settings(repo, parent, &path, self.of)).collect::<Result<Vec<_>>>()?;
+            if before.iter().any(|old| now.same(old)) {
+                continue;
+            }
+            let done = match &now {
+                Settings::Linked => "are behind a symbolic link",
+                _ if before.iter().all(|old| matches!(old, Settings::None)) => "were added",
+                Settings::None => "were removed",
+                _ => "changed",
+            };
+            let shown = one_line(&path);
+            let (place, lock) = (snapshot.describe(), one_line(lock_path));
+            return refuse(
+                self.code,
+                format!("{} in {shown} {done} {place} with lock {lock} open", self.subject),
+                self.why,
+                format!(
+                    "undo the change to {} in {shown}; if the suite needs it, make it after the cycle closes",
+                    self.undo
+                ),
+            );
         }
-        let done = match &now {
-            Settings::Linked => "are behind a symbolic link",
-            _ if before.iter().all(|old| matches!(old, Settings::None)) => "were added",
-            Settings::None => "were removed",
-            _ => "changed",
-        };
-        let shown = one_line(&path);
-        return refuse(
-            "pytest-config-changed",
-            format!("pytest's settings in {shown} {done} {} with lock {} open", snapshot.describe(), one_line(lock_path)),
-            "pytest reads how the suite runs from these settings (plugins, options, import paths), so changing them during GREEN changes the judge mid-game",
-            format!("undo the change to pytest's settings in {shown}; if the suite needs it, make it after the cycle closes"),
-        );
+        Ok(())
     }
-    Ok(())
 }
 
 #[cfg(test)]

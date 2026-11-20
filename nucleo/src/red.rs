@@ -759,16 +759,15 @@ fn refuse_a_suite_without_tests(
     Ok(())
 }
 
-/// The hash of every test file and of `.shipcraft.toml`, by path; item 132:
-/// and of what vitest reads beside the tests, or `setup-unreadable`.
+/// The hash of every test file and of `.shipcraft.toml`, by path; items 132
+/// and 140: and of what vitest and Jest read beside the tests, or `setup-unreadable`.
 fn locked_files(repo: &Repo, config: &Config) -> Result<BTreeMap<String, String>> {
     let found = vitest_files::discover(repo, config)?;
-    if let Some((module, why)) = &found.unreadable {
-        return vitest_files::refuse_unreadable(module, why);
-    }
+    let jest = crate::jest_files::discover(repo, config)?;
+    crate::jest_files::refuse_first(&found, &jest)?;
     let mut files = BTreeMap::new();
     let tests = config.test_files(repo)?;
-    for path in tests.iter().chain(&found.paths).map(String::as_str).chain([CONFIG_FILE]) {
+    for path in tests.iter().chain(&found.paths).chain(&jest.paths).map(String::as_str).chain([CONFIG_FILE]) {
         let bytes = fs::read(repo.path(path)).map_err(|e| failed(format!("read {path}: {e}")))?;
         files.insert(path.to_string(), new_digest(&bytes));
     }
