@@ -26,6 +26,7 @@ mod init_msg;
 mod init_probe;
 mod init_tool;
 mod install;
+mod jest_files;
 mod jsonc;
 mod junit;
 mod lang;

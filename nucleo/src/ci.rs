@@ -73,6 +73,7 @@ pub fn run(repo: &Repo, base: &str, pr: bool, row: &mut medicao::CiRow) -> Resul
                 check_lefthook(repo, &parents, &snapshot, path)?;
                 crate::vitest_files::check_added(repo, &parents, &snapshot, path, lock)?;
                 crate::pytest_config::check_changed(repo, &parents, &snapshot, path)?;
+                crate::jest_files::check_changed(repo, &parents, &snapshot, path)?;
             }
         }
         head_changes = changes;

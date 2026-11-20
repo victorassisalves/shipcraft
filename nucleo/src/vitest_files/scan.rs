@@ -16,11 +16,26 @@ enum Tok<'a> {
 pub enum Event {
     /// A literal of a read setup key.
     Setup(String),
+    /// Item 140: a read root key of a Jest module, its literal or None for
+    /// `import.meta.dirname` and `__dirname`.
+    Root(Option<String>),
     /// The literal of `from`, `import`, `import(` or `require(`.
     Import(String),
     /// Why the module is unreadable.
     Bad(String),
 }
+
+/// A runner's keys: its setup keys, its root key, and whether a root key's
+/// literal is read (Jest's `rootDir`) or refused unless it names the folder.
+pub struct Keys {
+    pub setup: &'static [&'static str],
+    pub root: &'static str,
+    pub jest: bool,
+}
+
+pub const VITEST: Keys = Keys { setup: &["setupFiles", "globalSetup"], root: "root", jest: false };
+pub const JEST: Keys =
+    Keys { setup: &["setupFiles", "setupFilesAfterEnv", "globalSetup", "globalTeardown"], root: "rootDir", jest: true };
 
 fn ident(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_' || b == b'$'
@@ -142,25 +157,40 @@ fn root_value(toks: &[Tok], i: usize) -> Option<usize> {
     ends_value(toks.get(after)).then_some(after)
 }
 
+/// Item 140: a Jest root key's value from `toks[i]`: a literal, or a name of
+/// the config's folder, followed by `,` or `}`.
+fn jest_root(toks: &[Tok], i: usize) -> Option<(Option<String>, usize)> {
+    match literal(toks.get(i)) {
+        Some(lit) if ends_value(toks.get(i + 1)) => Some((Some(lit.to_string()), i + 1)),
+        _ => root_value(toks, i).map(|after| (None, after)),
+    }
+}
+
 /// The events of one config module, in text order (lossy UTF-8 text).
-pub fn scan(text: &str) -> Vec<Event> {
+pub fn scan(text: &str, keys: &Keys) -> Vec<Event> {
     let toks = tokens(text);
     let mut events = Vec::new();
     let mut i = 0;
     while i < toks.len() {
         let colon = toks.get(i + 1) == Some(&Tok::Punct(b':'));
         match (key(&toks[i]), &toks[i]) {
-            (Some(name @ ("setupFiles" | "globalSetup")), _) => {
-                match colon.then(|| setup_value(&toks, i + 2)).flatten() {
-                    Some((found, after)) => {
-                        events.extend(found.into_iter().map(Event::Setup));
-                        i = after;
-                        continue;
-                    }
-                    None => events.push(Event::Bad(format!("{name} is not a string or an array of strings"))),
+            (Some(name), _) if keys.setup.contains(&name) => match colon.then(|| setup_value(&toks, i + 2)).flatten() {
+                Some((found, after)) => {
+                    events.extend(found.into_iter().map(Event::Setup));
+                    i = after;
+                    continue;
                 }
-            }
-            (Some("root"), _) if colon => match root_value(&toks, i + 2) {
+                None => events.push(Event::Bad(format!("{name} is not a string or an array of strings"))),
+            },
+            (Some(name), _) if colon && name == keys.root && keys.jest => match jest_root(&toks, i + 2) {
+                Some((value, after)) => {
+                    events.push(Event::Root(value));
+                    i = after;
+                    continue;
+                }
+                None => events.push(Event::Bad("it sets rootDir".to_string())),
+            },
+            (Some(name), _) if colon && name == keys.root => match root_value(&toks, i + 2) {
                 Some(after) => {
                     i = after;
                     continue;
@@ -196,7 +226,7 @@ pub fn scan(text: &str) -> Vec<Event> {
 
 #[cfg(test)]
 mod tests {
-    use super::Event::{Bad, Import, Setup};
+    use super::Event::{Bad, Import, Root, Setup};
     use super::*;
 
     fn setup(s: &str) -> Event {
@@ -205,6 +235,25 @@ mod tests {
 
     fn bad(s: &str) -> Event {
         Bad(s.to_string())
+    }
+
+    /// The vitest scan; a local item shadows the glob import.
+    fn scan(text: &str) -> Vec<Event> {
+        super::scan(text, &VITEST)
+    }
+
+    #[test]
+    fn jest_keys_and_root_dir() {
+        let jest = |text: &str| super::scan(text, &JEST);
+        let text = "{ rootDir: 'src', setupFilesAfterEnv: ['<rootDir>/a.js'], globalTeardown: './t', root: 'x' }";
+        assert_eq!(jest(text), [Root(Some("src".into())), setup("<rootDir>/a.js"), setup("./t")]);
+        assert_eq!(jest("{ 'rootDir': __dirname, setupFiles: './s' }"), [Root(None), setup("./s")]);
+        assert_eq!(jest("{ rootDir: import.meta.dirname }"), [Root(None)]);
+        assert_eq!(jest("{ rootDir: path.join(__dirname, 'src') }"), [bad("it sets rootDir")]);
+        assert_eq!(jest("const rootDir = 'x'; a.rootDir"), []);
+        assert_eq!(jest("{ globalSetup: g }"), [bad("globalSetup is not a string or an array of strings")]);
+        // Jest's keys are nothing to vitest, and vitest's root nothing to Jest.
+        assert_eq!(scan("{ setupFilesAfterEnv: x, rootDir: y, globalTeardown: z }"), []);
     }
 
     #[test]
