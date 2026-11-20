@@ -77,13 +77,11 @@ impl<'a> Reader<'a> {
         if self.shallow.iter().any(|c| c == commit) {
             return Err(format!("commit {} is a shallow boundary, so its parents are not known", short(commit)));
         }
-        let out = self.repo.text(&["log", "-1", "--format=%T %ct %P", commit, "--"]).map_err(message)?;
-        let mut fields = out.split_whitespace();
-        let (tree, time) = (fields.next().unwrap_or(""), fields.next().and_then(|t| t.parse().ok()));
-        match (tree.is_empty(), time) {
-            (false, Some(time)) => Ok(Info { tree: tree.into(), time, parents: fields.map(str::to_string).collect() }),
-            _ => Err(format!("git could not give the tree and time of commit {}", short(commit))),
-        }
+        // Plumbing: the raw commit object, which no display setting
+        // (`log.showSignature`, `format.pretty`, colors) changes.
+        let raw = self.repo.run(&["cat-file", "commit", commit]).map_err(message)?;
+        parse_commit(&String::from_utf8_lossy(&raw))
+            .ok_or_else(|| format!("git could not give the tree and time of commit {}", short(commit)))
     }
 
     fn first_parent(&mut self, commit: &str) -> Option<String> {
@@ -137,6 +135,21 @@ impl<'a> Reader<'a> {
         }
         !self.open_ids(commit, &info).is_empty()
     }
+}
+
+/// A raw commit object's header: `tree`, every `parent` in order, and the
+/// committer time (the second-to-last field of the `committer` line).
+fn parse_commit(raw: &str) -> Option<Info> {
+    let (mut tree, mut time, mut parents) = (None, None, Vec::new());
+    for line in raw.lines().take_while(|l| !l.is_empty()) {
+        match line.split_once(' ') {
+            Some(("tree", id)) => tree = Some(id.to_string()),
+            Some(("parent", id)) => parents.push(id.to_string()),
+            Some(("committer", who)) => time = who.rsplit(' ').nth(1).and_then(|t| t.parse().ok()),
+            _ => {}
+        }
+    }
+    Some(Info { tree: tree.filter(|t| !t.is_empty())?, time: time?, parents })
 }
 
 fn message(stop: Stop) -> String {
@@ -277,6 +290,16 @@ mod tests {
         assert_eq!(log.closes, vec!["e".to_string()]);
         assert_eq!(log.cutoff, Some(5));
         assert_eq!(read_log(vec![json!({"layer": "ci", "result": "passed", "commit": "a", "at": 1})]).cutoff, None);
+    }
+
+    #[test]
+    fn a_raw_commit_gives_tree_parents_and_committer_time() {
+        let raw = "tree t1\nparent p1\nparent p2\nauthor A <a@x> 5 +0000\ncommitter C D <c@x> 1795189812 -0300\ngpgsig -----BEGIN SSH SIGNATURE-----\n abc\n\nmsg\ntree no\n";
+        let info = parse_commit(raw).unwrap();
+        assert_eq!((info.tree.as_str(), info.time), ("t1", 1795189812));
+        assert_eq!(info.parents, vec!["p1".to_string(), "p2".to_string()]);
+        assert!(parse_commit("tree t1\n").is_none());
+        assert!(parse_commit("Good \"git\" signature\ntree t1\n").is_none());
     }
 
     #[test]
