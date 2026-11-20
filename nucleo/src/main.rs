@@ -51,6 +51,7 @@ mod revisao;
 mod size_block;
 mod suite;
 mod tsbuild;
+mod unjudged;
 mod vitest_files;
 
 use git::Repo;
@@ -345,7 +346,10 @@ fn measured(camada: &str, command: impl FnOnce(&Repo, &mut medicao::CiRow) -> Re
     }
     let mut ci = medicao::CiRow::default();
     let result = command(&repo, &mut ci);
-    medicao::layer(&repo, camada, started, &result, (camada == "ci").then_some(ci), lock);
+    // Item 141: the tree the hook judged, from the effective index after any
+    // lock the hook wrote; "" when git cannot write it.
+    let hook = lock.map(|lock| (lock, unjudged::index_tree(&repo)));
+    medicao::layer(&repo, camada, started, &result, (camada == "ci").then_some(ci), hook);
     result
 }
 

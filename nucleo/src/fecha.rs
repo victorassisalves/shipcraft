@@ -27,7 +27,8 @@ const IN_PROGRESS: [(&str, &str); 5] = [
 pub fn run() {
     let started = Instant::now();
     let Ok(repo) = Repo::open() else { return };
-    let Some(marca) = marca::read(&repo) else { return };
+    // Item 141: without a mark, `commit-msg` did not run; HEAD is checked if it holds a lock open.
+    let Some(marca) = marca::read(&repo) else { return crate::unjudged::post_commit(&repo) };
     if let Some(op) = in_progress(&repo) {
         discard(&repo);
         return println!("shipcraft: a {op} is in progress; {AGAIN}.");

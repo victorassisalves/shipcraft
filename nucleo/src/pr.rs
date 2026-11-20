@@ -22,6 +22,21 @@ use std::time::{Duration, Instant};
 
 const OFF: &str = "off in .shipcraft.toml";
 
+/// Item 141: a warning, before the push, for the commits of the PR with a
+/// lock open that the hook did not judge; never a refusal.
+fn unjudged_warning(repo: &Repo, branch: &str, base: &str, ci: Camada) {
+    let Some(found) = crate::unjudged::commits(repo, &format!("origin/{base}")).filter(|c| !c.is_empty()) else {
+        return;
+    };
+    let then = match ci {
+        Camada::Desligado => "CI is off ([execution] ci), so nothing re-checks them; check them",
+        _ => "shipcraft/ci re-checks every commit of the PR; to check them first",
+    };
+    let named = crate::unjudged::named(&found);
+    let (n, shorts) = named.split_once(' ').unwrap_or_default();
+    println!("shipcraft: warning: {n} commit(s) on {branch} were made with a lock open and the hook did not judge them {shorts}; {then}: shipcraft ci --base origin/{base}");
+}
+
 /// How a layer ended for this PR.
 enum Gate {
     Passed,
@@ -53,6 +68,7 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>, merge: bool
         None => None,
     };
     let head = repo.head()?.ok_or_else(|| failed("the branch has no commits"))?;
+    unjudged_warning(repo, &branch, &base, ci);
 
     repo.run(&["push", "-q", "--force-with-lease", "origin", &format!("{branch}:refs/heads/{branch}")])?;
     println!("shipcraft: {branch} published to origin ({})", short(&head));

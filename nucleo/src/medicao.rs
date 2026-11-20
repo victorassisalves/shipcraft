@@ -92,18 +92,20 @@ fn put_failed(row: &mut Value, failed: &[String]) {
 }
 
 /// The row of a hook or CI run, from how the command ended; `ci` only on
-/// CI rows, `lock` on hook rows (the lock open before the hook ran).
+/// CI rows, `lock` and `tree` on hook rows (the lock open before the hook
+/// ran, and item 141's tree the hook judged).
 pub fn layer(
     repo: &Repo,
     camada: &str,
     started: Instant,
     result: &Result<()>,
     ci: Option<CiRow>,
-    lock: Option<String>,
+    hook: Option<(String, String)>,
 ) {
     let mut row = row(repo, camada, started, result);
-    if let Some(lock) = lock {
+    if let Some((lock, tree)) = hook {
         row["lock"] = json!(lock);
+        row["tree"] = json!(tree);
     }
     if let Some(ci) = ci {
         row["docs_only"] = json!(ci.docs_only);
