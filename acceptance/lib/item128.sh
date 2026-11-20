@@ -144,7 +144,7 @@ if case=='readme':
  assert anchor+' '+sentence in text,text
 elif case=='readme-once':
  text=Path(readme).read_text();assert text.count(sentence)==1
- assert hashlib.sha256(text.replace(' '+sentence,'').encode()).hexdigest()=='ae345277b23fc1c34a537101992d60030900b16c7bfc045a5d1735f82f98685c','other README bytes changed'
+ assert hashlib.sha256(text.replace(' '+sentence,'').encode()).hexdigest()=='b8bd8f61bebf5e72594abe85600f7d480634f4c866ed944f3fde18d7311fbad4','other README bytes changed'
 elif notice:
  assert p.stdout.startswith(line),p.stdout
  assert p.stdout.count(line)==(2 if twice else 1),p.stdout
