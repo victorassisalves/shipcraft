@@ -155,6 +155,8 @@ pub fn status(repo: &Repo) -> Result<()> {
     println!("shipcraft: open locks: {}", if open.is_empty() { "none".to_string() } else { open.join(", ") });
     // Item 134: a bare python3 beside the project's venv (read-only).
     crate::python_env::status_lines(repo, &config).iter().for_each(|line| println!("{line}"));
+    // Item 141: the branch's commits with a lock open that the hook did not judge.
+    crate::unjudged::status_line(repo).iter().for_each(|line| println!("{line}"));
     let path = format!("repos/{{owner}}/{{repo}}/branches/{base}/protection");
     let line = match gh::run(repo, &["api", &path]) {
         Ok(out) => {

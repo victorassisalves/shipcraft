@@ -18,6 +18,11 @@ impl Refusal {
     pub fn what(&self) -> &str {
         &self.what
     }
+
+    /// How to go on: the third line, without its prefix.
+    pub fn how(&self) -> &str {
+        &self.how
+    }
 }
 
 impl fmt::Display for Refusal {

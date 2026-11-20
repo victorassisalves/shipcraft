@@ -14,7 +14,7 @@ use crate::contract::{
 use crate::docs;
 use crate::gh;
 use crate::git::{short, Repo, Snapshot};
-use crate::lock::lock_files;
+use crate::lock::{lock_files, LockFiles};
 use crate::medicao;
 use crate::refusal::{failed, refuse, Result};
 use crate::suite;
@@ -52,31 +52,14 @@ pub fn run(repo: &Repo, base: &str, pr: bool, row: &mut medicao::CiRow) -> Resul
     let mut head_changes = judge_locks(std::slice::from_ref(&head_locks), &head_locks, &head.describe(), false, None)?;
     let on_default = repo.branch() == repo.default_branch();
     for commit in &commits {
-        let snapshot = Snapshot::Commit(commit.clone());
-        let parents: Vec<Snapshot> = repo.parents(commit)?.into_iter().map(Snapshot::Commit).collect();
-        let locks = parents.iter().map(|parent| lock_files(repo, parent)).collect::<Result<Vec<_>>>()?;
-        let now = lock_files(repo, &snapshot)?;
+        let parents = repo.parents(commit)?;
         // Item 42: on the default branch, a lock that arrives closed is
         // admitted only when GitHub shows the commit is a squash of a PR whose
         // head had every required status in success.
-        let admit = on_default && arrive_closed(&locks, &now) && squash_proved(repo, commit, &required(&config));
-        // Item 46: a redo commit is judged by the paths it changes against its one parent.
-        let changed = || match parents.as_slice() {
-            [Snapshot::Commit(parent)] => changed_paths(repo, parent, &snapshot),
-            _ => Ok(Vec::new()),
+        let admit = |locks: &[LockFiles], now: &LockFiles| {
+            on_default && arrive_closed(locks, now) && squash_proved(repo, commit, &required(&config))
         };
-        let changes = judge_locks_admitting(&locks, &now, &snapshot.describe(), false, admit, Some(&changed))?;
-        for (path, change, lock) in bindings(&changes) {
-            check_files(repo, &snapshot, path, lock)?;
-            // 15c.4: a lefthook change in a commit (made with --no-verify) is the CI's.
-            if !matches!(change, Change::Opened(_)) {
-                check_lefthook(repo, &parents, &snapshot, path)?;
-                crate::vitest_files::check_added(repo, &parents, &snapshot, path, lock)?;
-                crate::pytest_config::check_changed(repo, &parents, &snapshot, path)?;
-                crate::jest_files::check_changed(repo, &parents, &snapshot, path)?;
-            }
-        }
-        head_changes = changes;
+        head_changes = check_commit(repo, commit, &parents, admit)?;
     }
     println!("shipcraft: {} commit(s) checked in {}..HEAD", commits.len(), short(&base));
     // Item 62: with `suite_checks`, the suite runs in those GitHub checks; this
@@ -142,6 +125,40 @@ pub fn run(repo: &Repo, base: &str, pr: bool, row: &mut medicao::CiRow) -> Resul
         );
     }
     passed(repo, &base, &config)
+}
+
+/// The per-commit part of `ci` (item 141 shares it with `close`): how
+/// `commit` changes the locks against `parents`, and each bound lock's
+/// checks, stopping at the first refusal. It prints nothing; `admit` says
+/// whether a lock that arrives closed is admitted (item 42).
+pub fn check_commit(
+    repo: &Repo,
+    commit: &str,
+    parents: &[String],
+    admit: impl FnOnce(&[LockFiles], &LockFiles) -> bool,
+) -> Result<Vec<(String, Change)>> {
+    let snapshot = Snapshot::Commit(commit.to_string());
+    let parents: Vec<Snapshot> = parents.iter().cloned().map(Snapshot::Commit).collect();
+    let locks = parents.iter().map(|parent| lock_files(repo, parent)).collect::<Result<Vec<_>>>()?;
+    let now = lock_files(repo, &snapshot)?;
+    let admit = admit(&locks, &now);
+    // Item 46: a redo commit is judged by the paths it changes against its one parent.
+    let changed = || match parents.as_slice() {
+        [Snapshot::Commit(parent)] => changed_paths(repo, parent, &snapshot),
+        _ => Ok(Vec::new()),
+    };
+    let changes = judge_locks_admitting(&locks, &now, &snapshot.describe(), false, admit, Some(&changed))?;
+    for (path, change, lock) in bindings(&changes) {
+        check_files(repo, &snapshot, path, lock)?;
+        // 15c.4: a lefthook change in a commit (made with --no-verify) is the CI's.
+        if !matches!(change, Change::Opened(_)) {
+            check_lefthook(repo, &parents, &snapshot, path)?;
+            crate::vitest_files::check_added(repo, &parents, &snapshot, path, lock)?;
+            crate::pytest_config::check_changed(repo, &parents, &snapshot, path)?;
+            crate::jest_files::check_changed(repo, &parents, &snapshot, path)?;
+        }
+    }
+    Ok(changes)
 }
 
 fn passed(repo: &Repo, base: &str, config: &Config) -> Result<()> {
