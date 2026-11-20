@@ -8,6 +8,7 @@ use crate::junit::{Outcome, Report};
 use crate::lock::{lock_files, new_digest, new_lock_path, Fix, Lock, LOCK_DIR};
 use crate::narrow::{self, Chosen, Fallback, Plan};
 use crate::refusal::{failed, refuse, short_list, Result};
+use crate::relatorio::NotRelease;
 use crate::suite::{self, Narrowed};
 use crate::vitest_files;
 use std::collections::{BTreeMap, BTreeSet};
@@ -110,13 +111,26 @@ pub fn run(
 /// right after the arguments parse: a tag name that is not a release name of
 /// the working tree's `[report]` selection (item 99) exits 2 with three lines
 /// on stderr, before `red` loads the config, logs a row or writes anything.
+/// Item 137: under the default reading, a bare `X.Y.Z` name is read against
+/// the clone's tags, with its own three lines when no tag has that name.
 pub fn exit_unless_release_name(tag: &str) {
-    if let Some(pattern) = crate::relatorio::not_a_release_name(tag) {
-        eprintln!("shipcraft: --fixes-release {tag} is not a release tag of this project (release tags: {pattern})");
-        eprintln!("Why: report counts a fix only against a release it reads, so this lock would name a release report never counts.");
-        eprintln!("Next: pass the tag of the release that shipped the defect, or set [report] release_tags in .shipcraft.toml, then run red again.");
-        std::process::exit(2);
+    match crate::relatorio::not_a_release_name(tag) {
+        None => return,
+        Some(NotRelease::Selection(pattern)) => {
+            eprintln!(
+                "shipcraft: --fixes-release {tag} is not a release tag of this project (release tags: {pattern})"
+            );
+            eprintln!("Why: report counts a fix only against a release it reads, so this lock would name a release report never counts.");
+            eprintln!("Next: pass the tag of the release that shipped the defect, or set [report] release_tags in .shipcraft.toml, then run red again.");
+        }
+        // Item 137: a bare name the clone holds no tag of, or a failed read.
+        Some(NotRelease::NotInClone) => {
+            eprintln!("shipcraft: --fixes-release {tag} is not a tag in this clone");
+            eprintln!("Why: without [report] release_tags, red takes a release tag without v only when this clone holds a tag of that name, since an X.Y.Z number may name no release of this project.");
+            eprintln!("Next: fetch the project's tags (git fetch --tags), or pass the tag of the release that shipped the defect, or set [report] release_tags in .shipcraft.toml, then run red again.");
+        }
     }
+    std::process::exit(2);
 }
 
 /// Item 46: `red --redo` rewrites the open lock HEAD holds, in place, as the

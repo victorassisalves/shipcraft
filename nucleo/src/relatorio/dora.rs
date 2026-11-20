@@ -152,6 +152,10 @@ pub(super) fn dora(
             }
         })
     };
+    // Item 137: under the default reading, the label names the bare form when
+    // any release on the default branch has a bare name.
+    let bare = ev.releases.iter().any(|r| super::selection::bare(&r.name));
+    let release_tags = release_tags.or(bare.then_some("vX.Y.Z or X.Y.Z"));
     json!({
         "kind": "dora",
         "git": {
