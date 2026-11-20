@@ -40,10 +40,8 @@ pub fn run() {
     let closed = match closing_commit(&repo, &marca, &head) {
         Ok(closed) => closed,
         Err(e) => {
-            return println!(
-                "shipcraft: the lock did not close ({}); nothing changed: run `shipcraft close` manually.",
-                one_line(&e)
-            );
+            let line = format!("shipcraft: the lock did not close ({}); nothing changed: run `shipcraft close` manually.", one_line(&e));
+            return println!("{}", crate::inv::route(&line));
         }
     };
     record(&repo, &marca, started, &closed.commit);

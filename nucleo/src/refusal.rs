@@ -29,7 +29,7 @@ impl fmt::Display for Refusal {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "shipcraft refused: {}", self.what)?;
         writeln!(f, "Why: {}", self.why)?;
-        write!(f, "Next: {}", self.how)
+        write!(f, "Next: {}", crate::inv::route(&self.how))
     }
 }
 

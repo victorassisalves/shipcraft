@@ -34,7 +34,8 @@ fn unjudged_warning(repo: &Repo, branch: &str, base: &str, ci: Camada) {
     };
     let named = crate::unjudged::named(&found);
     let (n, shorts) = named.split_once(' ').unwrap_or_default();
-    println!("shipcraft: warning: {n} commit(s) on {branch} were made with a lock open and the hook did not judge them {shorts}; {then}: shipcraft ci --base origin/{base}");
+    let line = format!("shipcraft: warning: {n} commit(s) on {branch} were made with a lock open and the hook did not judge them {shorts}; {then}: shipcraft ci --base origin/{base}");
+    println!("{}", crate::inv::route(&line));
 }
 
 /// How a layer ended for this PR.
@@ -210,9 +211,8 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>, merge: bool
         gh::comment(repo, number, &summary)?;
         match gate {
             Gate::Passed => {
-                println!(
-                    "shipcraft: PR #{number} ready: enabled layers passed; merge with `shipcraft merge {number}`."
-                );
+                let line = format!("shipcraft: PR #{number} ready: enabled layers passed; merge with `shipcraft merge {number}`.");
+                println!("{}", crate::inv::route(&line));
                 Ok(())
             }
             Gate::Stopped(code, why) => refuse(
