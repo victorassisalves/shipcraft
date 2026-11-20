@@ -21,6 +21,8 @@ const RISK_LINES: &str = "- Pick the lane first: a mechanical change, one that c
 ";
 /// Item 85: the line the current block gains right after the `- Small fixes` line (cleanup after the merge).
 const CLEANUP_LINE: &str = "- After a merge, clean up what this change created: its worktree, temp folders, and servers or databases you started. Never remove what you did not create, what other sessions may be using, or anything with unmerged work: report those instead.\n";
+/// Item 142: the line the current block gains right after the cleanup line (contributing with `export`).
+const EXPORT_LINE: &str = "- To contribute to a project that does not use Shipcraft (its default branch has no `.shipcraft.toml` or `.sc2.toml`), open the PR from the branch `shipcraft export --base <base> <new branch>` writes once the lock is closed and `shipcraft ci --base <base>` passes on this branch: it leaves out Shipcraft's files and this block, and the project's own checks still apply to it. `shipcraft pr` is for projects that use Shipcraft.\n";
 /// Item 74's block (commit f4220f1, v2.30.0), a known block in both variants;
 /// item 75's is it with `FIX_LINE` (`agents_block_2_31`). Item 61's block
 /// with item 68's rules: the machine install's block; a project-local install
@@ -122,9 +124,15 @@ fn agents_block_2_39() -> String {
     after_line(&agents_block_2_31(), "\n- Cycle:", RISK_LINES)
 }
 
-/// Item 85: item 84's block with `CLEANUP_LINE` right after the `- Small fixes` line.
-fn current_block() -> String {
+/// Item 85's block (commit 182f194, v2.81.0), a known block in both variants:
+/// item 84's block with `CLEANUP_LINE` right after the `- Small fixes` line.
+fn agents_block_2_81() -> String {
     after_line(&agents_block_2_39(), "\n- Small fixes from one request go in one PR.", CLEANUP_LINE)
+}
+
+/// Item 142: item 85's block with `EXPORT_LINE` right after the cleanup line.
+fn current_block() -> String {
+    after_line(&agents_block_2_81(), "\n- After a merge, clean up", EXPORT_LINE)
 }
 
 /// `block` with `lines` right after the line that starts at `start` (a `\n` and the line's start).
@@ -134,7 +142,7 @@ fn after_line(block: &str, start: &str, lines: &str) -> String {
     format!("{}{lines}{}", &block[..end], &block[end..])
 }
 
-/// A block (this version's, v2.39.0's, v2.31.0's, v2.30.0's, v2.26.0's, v2.25.0's or v2.22.0's) in its machine or project-local form.
+/// A block (this version's, v2.81.0's, v2.39.0's, v2.31.0's, v2.30.0's, v2.26.0's, v2.25.0's or v2.22.0's) in its machine or project-local form.
 fn variant(block: &str, local: bool) -> String {
     if !local {
         return block.to_string();
@@ -154,6 +162,7 @@ fn known_blocks(local: bool) -> Vec<String> {
         AGENTS_BLOCK_2_30.to_string(),
         agents_block_2_31(),
         agents_block_2_39(),
+        agents_block_2_81(),
     ];
     let mut known = vec![agents_text(!local)];
     for block in &earlier {
@@ -161,6 +170,35 @@ fn known_blocks(local: bool) -> Vec<String> {
         known.push(variant(block, true));
     }
     known
+}
+
+/// Item 142: the blocks Shipcraft writes in `name` (`AGENTS.md` or `CLAUDE.md`),
+/// which `export` reads out: for `AGENTS.md` this version's block and every
+/// block `init` replaces (not the 2.14.0 legacy one), each in both forms.
+pub(crate) fn written_blocks(name: &str) -> Vec<String> {
+    if name == CLAUDE_FILE {
+        return vec![CLAUDE_BLOCK.to_string()];
+    }
+    let mut blocks = vec![agents_text(false)];
+    blocks.extend(known_blocks(false));
+    blocks
+}
+
+/// Item 61's marker rule over bytes: each line (`\n`-ended, the last possibly
+/// not) that, without its `\n` and one trailing `\r`, is the start or end line,
+/// as (is the start line, first byte, byte after its end).
+pub(crate) fn marker_lines(bytes: &[u8]) -> Vec<(bool, usize, usize)> {
+    let mut markers = Vec::new();
+    let mut at = 0;
+    for line in bytes.split_inclusive(|b| *b == b'\n') {
+        let bare = line.strip_suffix(b"\n").unwrap_or(line);
+        let bare = bare.strip_suffix(b"\r").unwrap_or(bare);
+        if bare == START_LINE.as_bytes() || bare == END_LINE.as_bytes() {
+            markers.push((bare == START_LINE.as_bytes(), at, at + line.len()));
+        }
+        at += line.len();
+    }
+    markers
 }
 
 /// Item 89: `status`'s line on `AGENTS.md`'s block, read with `init`'s rules. It writes nothing.
@@ -286,17 +324,7 @@ enum Found {
 /// equal to the start or end line; a block runs from a start line through the
 /// next end line. Only one start and one end, or the legacy start alone, are read.
 fn find_block(text: &str, new: &str, known: &[&str], legacy: Option<&str>) -> Found {
-    let mut markers = Vec::new();
-    let mut at = 0;
-    for line in text.split_inclusive('\n') {
-        let bare = line.strip_suffix('\n').unwrap_or(line);
-        let bare = bare.strip_suffix('\r').unwrap_or(bare);
-        if bare == START_LINE || bare == END_LINE {
-            markers.push((bare == START_LINE, at, at + line.len()));
-        }
-        at += line.len();
-    }
-    match markers.as_slice() {
+    match marker_lines(text.as_bytes()).as_slice() {
         m if !m.iter().any(|(start, ..)| *start) => Found::None,
         [(true, from, _), (false, _, to)] => match &text[*from..*to] {
             block if block == new => Found::Equal,

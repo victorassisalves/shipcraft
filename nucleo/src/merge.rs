@@ -157,6 +157,9 @@ pub fn status(repo: &Repo) -> Result<()> {
     crate::python_env::status_lines(repo, &config).iter().for_each(|line| println!("{line}"));
     // Item 141: the branch's commits with a lock open that the hook did not judge.
     crate::unjudged::status_line(repo).iter().for_each(|line| println!("{line}"));
+    if let Some(line) = export_line(repo, &base) {
+        println!("{line}");
+    }
     let path = format!("repos/{{owner}}/{{repo}}/branches/{base}/protection");
     let line = match gh::run(repo, &["api", &path]) {
         Ok(out) => {
@@ -173,6 +176,18 @@ pub fn status(repo: &Repo) -> Result<()> {
     };
     println!("{line}");
     Ok(())
+}
+
+/// Item 142: the line naming `export` when `origin/<base>` resolves to a
+/// commit whose root tree has neither config file; None on any failure.
+fn export_line(repo: &Repo, base: &str) -> Option<String> {
+    let commit = repo.resolve(&format!("refs/remotes/origin/{base}")).ok()??;
+    let root = repo.run(&["ls-tree", "-z", "--name-only", "--full-tree", &commit]).ok()?;
+    let mut names = root.split(|b| *b == 0);
+    if names.any(|n| n == b".shipcraft.toml" || n == b".sc2.toml") {
+        return None;
+    }
+    Some(format!("shipcraft: origin/{base} has no .shipcraft.toml: if this project does not use Shipcraft, make the branch for its PR with `shipcraft export --base origin/{base} <new branch>` once the lock is closed"))
 }
 
 /// Item 136: the protection line for a failed call, with `e` the error text;

@@ -145,7 +145,7 @@ Each refusal goes on with a `Why:` line and a `Next:` line that says how to reco
 
 ### Contributing to a project that doesn't use Shipcraft
 
-Work as usual on your branch: `init`, RED, GREEN, `shipcraft ci --base <base>`. The setup, the locks and the closing commits stay on that branch, which keeps the guarantee and its history. When the lock is closed, `shipcraft export --base <base> <branch>` writes `<branch>`: the same commits on the same base, without `.shipcraft.toml`, `.shipcraft/`, `AGENTS.md`, `CLAUDE.md` and the hook manager files, and without the commits that change only them. It lists what it left out; a change of yours to one of those files has to be added by hand. Push `<branch>` to your fork and open the PR from it; `shipcraft pr` is for projects that use Shipcraft.
+Work as usual on your branch: `init`, RED, GREEN, `shipcraft ci --base <base>`. The setup, the locks and the closing commits stay on that branch, which keeps the guarantee and its history. When the lock is closed, `shipcraft export --base <base> <branch>` writes `<branch>`: the same commits on the same base, without `.shipcraft.toml`, `.shipcraft/`, the hook manager files and Shipcraft's block in `AGENTS.md` and `CLAUDE.md`, and without the commits that change only them. Your own changes to `AGENTS.md` and `CLAUDE.md` stay. It lists what it left out; a change of yours to the other files has to be added by hand. Push `<branch>` to your fork and open the PR from it; `shipcraft pr` is for projects that use Shipcraft.
 
 ### Removing Shipcraft
 
@@ -166,7 +166,7 @@ Upgrading: with the npm install, `pnpm add -DE shipcraft@latest` (or `npm i -D -
 | `shipcraft check [--commit-msg <file>]` | Called by the hook. Judges the commit being made against open locks and closes a lock when its cases pass. |
 | `shipcraft close` | Closes a lock in its own commit; the post-commit hook runs it, and you can run it by hand. |
 | `shipcraft ci --base <ref> [--pr]` | Re-checks every commit in `<ref>..HEAD` and runs the full suite on HEAD, unless the PR is docs only or `[execution] suite_checks` leaves the suite to your GitHub checks. Runs locally or in GitHub Actions. |
-| `shipcraft export --base <ref> <branch>` | For a project that doesn't use Shipcraft: writes `<branch>` with your commits since `<ref>`, without Shipcraft's files (config, locks, briefs, `AGENTS.md`, `CLAUDE.md`, hook manager files) and without the commits that change only them. Push it to your fork and open the PR from it. |
+| `shipcraft export --base <ref> <branch>` | For a project that doesn't use Shipcraft: writes `<branch>` with your commits since `<ref>`, without Shipcraft's files (config, locks, briefs, Shipcraft's block in `AGENTS.md` and `CLAUDE.md`, hook manager files) and without the commits that change only them. Push it to your fork and open the PR from it. |
 | `shipcraft pr [--title <t>] [--body <file>] [--merge]` | Pushes the branch, opens or updates the PR, runs CI and review, and publishes the `shipcraft/ci` and `shipcraft/review` statuses. With `--merge`, once the PR is ready it then merges it exactly as `shipcraft merge <n>`. |
 | `shipcraft review [--pr <n>]` | Runs the review on the local HEAD (to catch blockers before opening the PR) or on any PR. |
 | `shipcraft merge <pr> [--no-review "<reason>"]` | Merges only when CI and review are green on the PR's head. `--no-review "<reason>"` is the recorded way out, and the reason shows up in the PR and in the numbers. |
