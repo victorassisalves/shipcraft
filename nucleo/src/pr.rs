@@ -211,7 +211,9 @@ pub fn pr(repo: &Repo, title: Option<&str>, body_file: Option<&str>, merge: bool
         gh::comment(repo, number, &summary)?;
         match gate {
             Gate::Passed => {
-                let line = format!("shipcraft: PR #{number} ready: enabled layers passed; merge with `shipcraft merge {number}`.");
+                let line = format!(
+                    "shipcraft: PR #{number} ready: enabled layers passed; merge with `shipcraft merge {number}`."
+                );
                 println!("{}", crate::inv::route(&line));
                 Ok(())
             }

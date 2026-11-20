@@ -5,8 +5,21 @@ use std::sync::OnceLock;
 
 static INVOCATION: OnceLock<&'static str> = OnceLock::new();
 
-const COMMANDS: [&str; 13] =
-    ["init", "red", "check", "close", "ci", "export", "pr", "review", "merge", "status", "report", "uninstall", "--version"];
+const COMMANDS: [&str; 13] = [
+    "init",
+    "red",
+    "check",
+    "close",
+    "ci",
+    "export",
+    "pr",
+    "review",
+    "merge",
+    "status",
+    "report",
+    "uninstall",
+    "--version",
+];
 
 /// Point 1: from the nearest folder holding a `.git` entry, items 58's and 69's rule;
 /// `shipcraft` with no root. Starts no process; called in `main` before dispatch.
@@ -72,10 +85,16 @@ mod tests {
     fn routes_commands_at_a_word_start() {
         assert_eq!(route_with(NPX, "run `shipcraft red --redo` again"), "run `npx -- shipcraft red --redo` again");
         assert_eq!(route_with(NPX, "shipcraft init"), "npx -- shipcraft init");
-        assert_eq!(route_with("pnpm exec shipcraft", "x; run shipcraft uninstall again"), "x; run pnpm exec shipcraft uninstall again");
+        assert_eq!(
+            route_with("pnpm exec shipcraft", "x; run shipcraft uninstall again"),
+            "x; run pnpm exec shipcraft uninstall again"
+        );
         assert_eq!(route_with(NPX, "a\nshipcraft ci\nb"), "a\nnpx -- shipcraft ci\nb");
         assert_eq!(route_with(NPX, "é shipcraft --version."), "é npx -- shipcraft --version.");
-        assert_eq!(route_with(NPX, "(shipcraft pr), shipcraft merge:"), "(npx -- shipcraft pr), npx -- shipcraft merge:");
+        assert_eq!(
+            route_with(NPX, "(shipcraft pr), shipcraft merge:"),
+            "(npx -- shipcraft pr), npx -- shipcraft merge:"
+        );
     }
 
     #[test]

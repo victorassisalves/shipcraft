@@ -258,6 +258,11 @@ fn protect(repo: &Repo, review: bool) {
         Err(e) if e.contains("Upgrade to GitHub Pro") => {
             println!("{}", crate::inv::route("shipcraft: this repository has no branch protection on its GitHub plan: `shipcraft merge` is the gate."))
         }
-        Err(e) => println!("{}", crate::inv::route(&format!("shipcraft: could not mark statuses as required ({e}); `shipcraft merge` is the gate."))),
+        Err(e) => println!(
+            "{}",
+            crate::inv::route(&format!(
+                "shipcraft: could not mark statuses as required ({e}); `shipcraft merge` is the gate."
+            ))
+        ),
     }
 }

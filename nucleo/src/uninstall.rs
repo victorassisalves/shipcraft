@@ -98,7 +98,10 @@ pub fn run(dry: bool) -> Result<()> {
             (Step::Change { what, .. }, None) => println!("shipcraft: would remove {what}"),
             (Step::Change { path, shown, old, new, what, hook }, Some(folder)) => {
                 if !matches!(file(path, shown), Ok(Some(now)) if now == *old) {
-                    return Err(failed(format!("{shown} changed since uninstall read it; nothing more was changed: {}", crate::inv::route("run shipcraft uninstall again"))));
+                    return Err(failed(format!(
+                        "{shown} changed since uninstall read it; nothing more was changed: {}",
+                        crate::inv::route("run shipcraft uninstall again")
+                    )));
                 }
                 let name = path.file_name().unwrap_or_default().to_string_lossy();
                 keep_copy(&folder.join(if *hook { format!("hooks/{name}") } else { shown.clone() }), old)?;
