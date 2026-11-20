@@ -37,11 +37,11 @@ use hook::{decide_hook, install, install_hooks, install_vitest, modules_not_igno
 use suites::{drop_empty_checks, plan};
 
 pub use agents::agents_block_status;
-pub(crate) use agents::{marker_lines, written_blocks};
+pub(crate) use agents::{marker_lines, rewrite, written_blocks};
 pub use config_file::AGENTS;
 pub use files::{is_executable, on_path};
 pub use hook::{hook_status, LEFTHOOK_FILES, LOCAL};
-pub(crate) use hook::{install_at, invocation, Install};
+pub(crate) use hook::{install_at, invocation, written_hook, Install, HOOK_MARK};
 pub use lefthook::{block_layout, insert_text, layout, lefthook_source, single_source};
 
 const LOCAL_NOTICE: &str =

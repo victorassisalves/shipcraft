@@ -51,6 +51,7 @@ mod revisao;
 mod size_block;
 mod suite;
 mod tsbuild;
+mod uninstall;
 mod unjudged;
 mod vitest_files;
 
@@ -66,7 +67,8 @@ const USAGE: &str =
      | shipcraft check [--commit-msg <file>] | shipcraft close
      | shipcraft ci --base <ref> [--pr] | shipcraft export --base <ref> <branch>
      | shipcraft pr [--title <t>] [--body <file>] [--merge] | shipcraft review [--pr <n>]
-     | shipcraft merge <pr> [--no-review \"<reason>\"] | shipcraft status | shipcraft report [--json] [--since <tag>] [--github] | shipcraft report --findings [--json] [--since <pr>]";
+     | shipcraft merge <pr> [--no-review \"<reason>\"] | shipcraft status | shipcraft report [--json] [--since <tag>] [--github] | shipcraft report --findings [--json] [--since <pr>]
+     | shipcraft uninstall [--dry-run]";
 
 fn main() -> ExitCode {
     // Item 22.2: the lists reach only the hook's suite, never a value inherited.
@@ -248,6 +250,9 @@ fn run(args: &[&str]) -> Result<()> {
         ["merge", n] => merge::merge(&Repo::open()?, n, None),
         ["merge", n, "--no-review", motivo] => merge::merge(&Repo::open()?, n, Some(motivo)),
         ["status"] => merge::status(&Repo::open()?),
+        // Item 143: no row, as `init`.
+        ["uninstall"] => uninstall::run(false),
+        ["uninstall", "--dry-run"] => uninstall::run(true),
         // Item 38: reads the run log; item 76: and git, read-only; item 79: and
         // GitHub through `gh` with `--github` only. Syntax first (exit 2, before
         // any git or `gh` call): `--json`, `--since <tag>` and `--github` once each.

@@ -281,7 +281,7 @@ fn onboard(repo: &Repo, file: &str, new: &str, known: &[&str], legacy: Option<&s
                     } else {
                         "\n\n"
                     };
-                    rewrite(&path, &format!("{text}{sep}{new}")).map(|()| "added the shipcraft block to")
+                    rewrite(&path, format!("{text}{sep}{new}")).map(|()| "added the shipcraft block to")
                 }
                 Found::Equal => {
                     println!("shipcraft: {file} already has the shipcraft block, kept");
@@ -342,7 +342,7 @@ fn find_block(text: &str, new: &str, known: &[&str], legacy: Option<&str>) -> Fo
 /// Rewrites an existing file through a temporary one in its folder, with the
 /// old permission bits, renamed over it; a failure leaves the old bytes. A file
 /// the owner may not write is not rewritten.
-fn rewrite(path: &Path, text: &str) -> std::io::Result<()> {
+pub(crate) fn rewrite(path: &Path, text: impl AsRef<[u8]>) -> std::io::Result<()> {
     use std::io::Write;
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
     let mode = fs::metadata(path)?.permissions().mode() & 0o7777;
@@ -362,7 +362,7 @@ fn rewrite(path: &Path, text: &str) -> std::io::Result<()> {
         }
     };
     let result = file
-        .write_all(text.as_bytes())
+        .write_all(text.as_ref())
         .and_then(|()| file.sync_all())
         .and_then(|()| fs::set_permissions(&temp, fs::Permissions::from_mode(mode)))
         .and_then(|()| fs::rename(&temp, path));

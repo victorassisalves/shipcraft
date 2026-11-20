@@ -58,7 +58,7 @@ fn subject(message: &[u8]) -> String {
 }
 
 /// Closed: UTF-8 without a byte order mark, one JSON object whose `state` is `closed`.
-fn closed(bytes: &[u8]) -> bool {
+pub(crate) fn closed(bytes: &[u8]) -> bool {
     let Ok(text) = std::str::from_utf8(bytes) else { return false };
     if text.starts_with('\u{feff}') {
         return false;
@@ -142,14 +142,14 @@ const SETTINGS: [&str; 6] = [
 
 /// Git as export runs it: no hook (an empty hooks folder, `SETTINGS`), no lazy
 /// fetch, no replace refs or grafts, and a temporary index outside the repository's.
-struct Git {
+pub(crate) struct Git {
     root: PathBuf,
     hooks: TempDir,
     index: TempDir,
 }
 
 impl Git {
-    fn open() -> Result<Git> {
+    pub(crate) fn open() -> Result<Git> {
         let cwd = std::env::current_dir().map_err(|e| failed(format!("current directory: {e}")))?;
         let hooks = TempDir::new("shipcraft-export-hooks")?;
         let index = TempDir::new("shipcraft-export-index")?;
@@ -222,7 +222,7 @@ impl Git {
         }
     }
 
-    fn verify(&self, spec: &str) -> Result<Option<String>> {
+    pub(crate) fn verify(&self, spec: &str) -> Result<Option<String>> {
         let (found, out) = self.test(&["rev-parse", "-q", "--verify", spec])?;
         Ok(found.then(|| git::text(&out).trim().to_string()))
     }
@@ -244,7 +244,7 @@ impl Git {
 }
 
 /// The first lock in HEAD's `.shipcraft/locks/` that is not closed.
-fn open_lock(git: &Git, head: &str) -> Result<Option<Vec<u8>>> {
+pub(crate) fn open_lock(git: &Git, head: &str) -> Result<Option<Vec<u8>>> {
     let mut tree = head.to_string();
     for folder in [".shipcraft", "locks"] {
         let found = git.ls_tree(&[&tree])?.into_iter().find(|e| e.path == folder.as_bytes() && e.kind == "tree");

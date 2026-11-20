@@ -149,10 +149,13 @@ Work as usual on your branch: `init`, RED, GREEN, `shipcraft ci --base <base>`. 
 
 ### Removing Shipcraft
 
-1. Remove the binary: `pnpm remove shipcraft` (or `npm rm shipcraft`) with the npm install, `install.sh --uninstall` with the script, or `cargo uninstall shipcraft` from source.
-2. Delete `.shipcraft.toml` and the `.shipcraft/` folder.
-3. Remove the block between `<!-- shipcraft -->` and `<!-- /shipcraft -->` in `AGENTS.md` and in `CLAUDE.md` (delete either file if `init` created it and nothing else is in it).
-4. Remove the hooks: with plain git hooks, `commit-msg` and `post-commit` in the hooks folder (`git rev-parse --git-path hooks` prints it), the two files marked `# shipcraft hook`; with lefthook, husky or pre-commit, the `shipcraft` lines in the hook manager's file.
+Run `shipcraft uninstall`, with no lock open. It removes Shipcraft's files and its parts of shared files, in the working tree and the hooks folder only: `.shipcraft.toml`, the briefs and locks in `.shipcraft/` (whatever their content, even a config or brief you wrote yourself), Shipcraft's block in `AGENTS.md` and `CLAUDE.md` (the rest of the file stays; a file left with nothing else is removed), its plain git hooks, and its lines in `.husky/commit-msg`, `.husky/post-commit` and `.pre-commit-config.yaml`. It copies everything it removes or changes to `.git/shipcraft/uninstalled/` first, leaves a Shipcraft block or hook line edited by hand and names it, and prints the commit to make; the locks stay in git history. `shipcraft uninstall --dry-run` prints the same list and changes nothing. Then remove the binary: `pnpm remove shipcraft` (or `npm rm shipcraft`) with the npm install, `install.sh --uninstall` with the script, or `cargo uninstall shipcraft` from source.
+
+By hand, for what `uninstall` leaves (lefthook files, anything edited by hand):
+
+1. Delete `.shipcraft.toml` and the `.shipcraft/` folder.
+2. Remove the block between `<!-- shipcraft -->` and `<!-- /shipcraft -->` in `AGENTS.md` and in `CLAUDE.md` (delete either file if `init` created it and nothing else is in it).
+3. Remove the hooks: with plain git hooks, `commit-msg` and `post-commit` in the hooks folder (`git rev-parse --git-path hooks` prints it), the two files marked `# shipcraft hook`; with lefthook or husky, the `shipcraft` lines in the hook manager's file; with pre-commit or prek, the whole `- repo: local` item that holds `shipcraft-check` and `shipcraft-close`, not only its `shipcraft` lines.
 
 Upgrading: with the npm install, `pnpm add -DE shipcraft@latest` (or `npm i -D --save-exact shipcraft@latest`) and commit `package.json` with the lockfile; every clone then gets the same version. To go back, pin the previous one exactly: `pnpm add -DE shipcraft@<version>`, and commit both files again. With `install.sh`, run it again, or `install.sh --version <version>`. A version older than the config's `shipcraft_min` refuses to run: going back past it also means lowering `shipcraft_min` in `.shipcraft.toml`, with no lock open. Release notes say which version to go back to when a release changes something you may want to undo.
 
@@ -171,6 +174,7 @@ Upgrading: with the npm install, `pnpm add -DE shipcraft@latest` (or `npm i -D -
 | `shipcraft review [--pr <n>]` | Runs the review on the local HEAD (to catch blockers before opening the PR) or on any PR. |
 | `shipcraft merge <pr> [--no-review "<reason>"]` | Merges only when CI and review are green on the PR's head. `--no-review "<reason>"` is the recorded way out, and the reason shows up in the PR and in the numbers. |
 | `shipcraft status` | The open locks, and how protected the repository really is (branch protection or only `shipcraft merge`). |
+| `shipcraft uninstall [--dry-run]` | Removes what `init` wrote from the working tree and the hooks folder, keeping a copy, and prints the commit to make. |
 
 ## Languages, runners and hook managers
 
