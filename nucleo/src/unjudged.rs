@@ -195,7 +195,8 @@ pub fn status_line(repo: &Repo) -> Option<String> {
 
 /// Point 1: `git write-tree` of the effective index (`GIT_INDEX_FILE`, else
 /// the repository's), run on a temporary copy so the caller's index is never
-/// rewritten (item 28); "" on any failure, a missing index file included.
+/// rewritten (item 28); "" on any other failure. A missing index file is
+/// an empty index, as git reads it.
 pub fn index_tree(repo: &Repo) -> String {
     let index = match std::env::var_os("GIT_INDEX_FILE") {
         // Relative to the root, where the hook's git calls run (`git -C <root>`).
@@ -205,8 +206,11 @@ pub fn index_tree(repo: &Repo) -> String {
     let Some(index) = index else { return String::new() };
     let Ok(temp) = TempDir::new("shipcraft-tree") else { return String::new() };
     let copy = temp.path().join("index");
-    if fs::copy(&index, &copy).is_err() {
-        return String::new();
+    // No index file is an empty index to git: write-tree then reads the
+    // copy's path, which does not exist, and gives the empty tree.
+    match fs::copy(&index, &copy) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return String::new(),
+        _ => {}
     }
     let out = Command::new("git").arg("-C").arg(repo.root()).arg("write-tree").env("GIT_INDEX_FILE", &copy).output();
     match out {
@@ -300,6 +304,19 @@ mod tests {
         assert_eq!(info.parents, vec!["p1".to_string(), "p2".to_string()]);
         assert!(parse_commit("tree t1\n").is_none());
         assert!(parse_commit("Good \"git\" signature\ntree t1\n").is_none());
+    }
+
+    #[test]
+    fn a_missing_index_is_the_empty_tree_and_stays_missing() {
+        if std::env::var_os("GIT_INDEX_FILE").is_some() {
+            return; // run inside a hook: the effective index is not this repository's
+        }
+        let dir = TempDir::new("shipcraft-test-item141").unwrap();
+        assert!(crate::git::git_in(dir.path(), &["init", "-q"]).unwrap().status.success());
+        let repo = Repo::at_root(dir.path());
+        let empty = repo.text(&["hash-object", "-t", "tree", "/dev/null"]).unwrap();
+        assert_eq!(index_tree(&repo), empty);
+        assert!(!dir.path().join(".git/index").exists());
     }
 
     #[test]
