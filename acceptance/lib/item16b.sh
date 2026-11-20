@@ -125,15 +125,15 @@ EOF
   pass
 }
 b16b_diagnostic() {
-  # Init succeeds: the inference warning has the three lines of the format.
-  grep -E '^(shipcraft refused:|Why:|Next:)' "$OUT" > "$OUT.last3"
+  # Init succeeds: inference is a skipped optional step, never a refusal.
+  grep -E '^(shipcraft: skipped the optional \[build\] step:|Why:|Next:)' "$OUT" > "$OUT.last3"
   chk 'warning has three lines' eq "$(wc -l < "$OUT.last3" | tr -d ' ')" 3
-  chk 'order and format of the three lines' "$PY" -c 'import pathlib,sys; a=pathlib.Path(sys.argv[1]).read_text().splitlines(); assert len(a)==3 and all(line.startswith(prefix) for line,prefix in zip(a,["shipcraft refused:","Why:","Next:"]))' "$OUT.last3"
+  chk 'order and format of the three lines' "$PY" -c 'import pathlib,sys; a=pathlib.Path(sys.argv[1]).read_text().splitlines(); assert len(a)==3 and all(line.startswith(prefix) for line,prefix in zip(a,["shipcraft: skipped the optional [build] step:","Why:","Next:"])); assert a[1].endswith(", so init goes on without it"); assert "add a [build] section" in a[2]; assert not any(l.startswith("shipcraft refused:") for l in pathlib.Path(sys.argv[2]).read_text().splitlines())' "$OUT.last3" "$OUT"
   chk 'suggests a manual build' grep -F -q '[build]' "$OUT.last3"
 }
 item16b_langs() { echo node; }
 
-# Only failed probes change format; JSONC/glob/manifest notices keep b16b_diagnostic.
+# Failed probes keep their own unchanged three-line diagnostic.
 b16b_probe_diagnostic() {
   grep -E '^(shipcraft: skipped the optional \[build\] step:|Why:|Next:)' "$OUT" > "$OUT.last3"
   chk 'optional build diagnostic has three lines' "$PY" -c 'import pathlib,sys; a=pathlib.Path(sys.argv[1]).read_text().splitlines(); assert len(a)==3 and all(l.startswith(p) for l,p in zip(a,["shipcraft: skipped the optional [build] step:","Why:","Next:"])); assert "add a [build] section" in a[-1] and "init again" not in a[-1]' "$OUT.last3"

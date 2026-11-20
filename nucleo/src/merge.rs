@@ -24,6 +24,7 @@ pub fn merge(repo: &Repo, number: &str, sem_revisao: Option<&str>) -> Result<()>
         );
     }
     crate::origin::check_merge(repo)?; // item 130
+    crate::origin_repo::pin(repo)?; // item 144
     let pr = gh::json(repo, &["pr", "view", number, "--json", "number,state,headRefOid,headRefName,baseRefName"])?;
     let field = |k: &str| pr[k].as_str().unwrap_or_default().to_string();
     let (head, base) = (field("headRefOid"), field("baseRefName"));
@@ -113,9 +114,11 @@ pub fn merge(repo: &Repo, number: &str, sem_revisao: Option<&str>) -> Result<()>
 }
 
 pub fn status(repo: &Repo) -> Result<()> {
+    // Item 146: every line status prints, routed to the project's invocation.
+    macro_rules! say { ($($t:tt)*) => { println!("{}", crate::inv::route(&format!($($t)*))) }; }
     let base = repo.default_branch();
     let config = Config::load(repo)?;
-    println!("shipcraft: branch {}", repo.branch());
+    say!("shipcraft: branch {}", repo.branch());
     let layer = |value: &str| match value {
         "local" => "local (on this machine)".to_string(),
         other => other.to_string(),
@@ -128,9 +131,9 @@ pub fn status(repo: &Repo) -> Result<()> {
     // Item 73: review off names no agent.
     let review_off = config.execucao.revisao == "off";
     if review_off {
-        println!("shipcraft: layers: ci {ci}; review off");
+        say!("shipcraft: layers: ci {ci}; review off");
     } else {
-        println!(
+        say!(
             "shipcraft: layers: ci {}; review {} (agent {})",
             ci,
             layer(&config.execucao.revisao),
@@ -139,26 +142,26 @@ pub fn status(repo: &Repo) -> Result<()> {
     }
     // Item 64: the roles, right after the layers line.
     let unset = || "not set (the orchestrator's choice)".to_string();
-    println!(
+    say!(
         "shipcraft: roles: red {}; green {}; review {}",
         config.papeis.red.as_ref().map_or_else(unset, |p| p.shown()),
         config.papeis.green.as_ref().map_or_else(unset, |p| p.shown()),
         if review_off { "off".to_string() } else { config.papeis.revisao.shown() }
     );
-    println!("{}", crate::init::hook_status(repo));
-    println!("{}", crate::init::agents_block_status(repo));
+    say!("{}", crate::init::hook_status(repo));
+    say!("{}", crate::init::agents_block_status(repo));
     let open: Vec<String> = lock_files(repo, &Snapshot::Tree)?
         .into_iter()
         .filter(|(_, bytes)| crate::lock::Lock::parse(bytes).is_none_or(|l| l.is_open()))
         .map(|(path, _)| path)
         .collect();
-    println!("shipcraft: open locks: {}", if open.is_empty() { "none".to_string() } else { open.join(", ") });
+    say!("shipcraft: open locks: {}", if open.is_empty() { "none".to_string() } else { open.join(", ") });
     // Item 134: a bare python3 beside the project's venv (read-only).
-    crate::python_env::status_lines(repo, &config).iter().for_each(|line| println!("{line}"));
+    crate::python_env::status_lines(repo, &config).iter().for_each(|line| say!("{line}"));
     // Item 141: the branch's commits with a lock open that the hook did not judge.
-    crate::unjudged::status_line(repo).iter().for_each(|line| println!("{line}"));
+    crate::unjudged::status_line(repo).iter().for_each(|line| say!("{line}"));
     if let Some(line) = export_line(repo, &base) {
-        println!("{line}");
+        say!("{line}");
     }
     let path = format!("repos/{{owner}}/{{repo}}/branches/{base}/protection");
     let line = match gh::run(repo, &["api", &path]) {
@@ -174,7 +177,7 @@ pub fn status(repo: &Repo) -> Result<()> {
         }
         Err(e) => protection_unread(&e, &base),
     };
-    println!("{line}");
+    say!("{line}");
     Ok(())
 }
 

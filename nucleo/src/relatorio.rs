@@ -43,6 +43,7 @@ use serde_json::{json, Map, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 use text::text;
+pub(crate) use text::utc;
 
 type Row = Map<String, Value>;
 

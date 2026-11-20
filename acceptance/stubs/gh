@@ -44,6 +44,10 @@ ST = os.path.join(HERE, "state")
 OWNER, REPO = "acme", "proj"
 QUIET = os.environ.get("SHIPCRAFT_STUB_QUIET") == "1"
 ARGV = sys.argv[1:]
+os.makedirs(ST, exist_ok=True)
+with open(os.path.join(ST, "gh-env.log"), "a") as env_log:
+    env_log.write(json.dumps({"args": ARGV, "GH_REPO": os.environ.get("GH_REPO"),
+                              "GH_HOST": os.environ.get("GH_HOST")}) + "\n")
 _stdin = None
 
 

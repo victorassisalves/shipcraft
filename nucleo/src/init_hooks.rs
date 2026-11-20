@@ -97,6 +97,11 @@ fn calls(text: &[u8], args: &[&str]) -> bool {
     text.split(|b| *b == b'\n').any(|line| call_line(line.strip_suffix(b"\r").unwrap_or(line), args))
 }
 
+/// Item 143: whether a line of `text` calls `shipcraft check --commit-msg` or `shipcraft close`.
+pub(crate) fn calls_shipcraft(text: &[u8]) -> bool {
+    HOOKS.iter().any(|(_, args, _)| calls(text, args))
+}
+
 /// One shell word: unquoted segments (no blank or quote) and quoted ones (no
 /// escapes), up to the first unquoted blank. Its value is the segments joined
 /// without their quotes, and the rest of the line; None for an unclosed quote.

@@ -29,7 +29,7 @@ impl fmt::Display for Refusal {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "shipcraft refused: {}", self.what)?;
         writeln!(f, "Why: {}", self.why)?;
-        write!(f, "Next: {}", self.how)
+        write!(f, "Next: {}", crate::inv::route(&self.how))
     }
 }
 
@@ -48,12 +48,6 @@ pub fn refuse<T>(
     how: impl Into<String>,
 ) -> Result<T> {
     Err(Stop::Refused(Refusal { code, what: what.into(), why: why.into(), how: how.into() }))
-}
-
-/// A refusal that does not stop the command: its three lines, printed, and the
-/// command goes on without the step it refused (rule 17).
-pub fn warn(what: impl Into<String>, why: impl Into<String>, how: impl Into<String>) {
-    println!("{}", Refusal { code: "", what: what.into(), why: why.into(), how: how.into() });
 }
 
 pub fn failed(message: impl Into<String>) -> Stop {

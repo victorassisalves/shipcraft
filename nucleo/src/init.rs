@@ -33,15 +33,18 @@ use agents::agents_block;
 use config_file::{config_text, reviewer};
 use custom::custom;
 use files::{keep_config, write_once};
-use hook::{decide_hook, install, install_hooks, install_vitest, modules_not_ignored, uncommitted_manifests, Hook};
+use hook::{
+    decide_hook, install, install_hooks, install_prefix, install_vitest, modules_not_ignored, uncommitted_manifests,
+    Hook,
+};
 use suites::{drop_empty_checks, plan};
 
 pub use agents::agents_block_status;
-pub(crate) use agents::{marker_lines, written_blocks};
+pub(crate) use agents::{marker_lines, rewrite, written_blocks};
 pub use config_file::AGENTS;
 pub use files::{is_executable, on_path};
 pub use hook::{hook_status, LEFTHOOK_FILES, LOCAL};
-pub(crate) use hook::{install_at, invocation, Install};
+pub(crate) use hook::{hooks_path_by, install_at, invocation, written_hook, HooksPath, Install, HOOK_MARK};
 pub use lefthook::{block_layout, insert_text, layout, lefthook_source, single_source};
 
 const LOCAL_NOTICE: &str =
@@ -199,6 +202,13 @@ pub fn run(repo: &Repo, options: &Options) -> Result<()> {
         Hook::Tool(tool) => tool.writes.iter().map(|(file, ..)| format!(", {file}")).collect(),
         Hook::Own(_) => String::new(),
     };
+    // Item 147: a React app's first DOM test, in a config this run writes.
+    if !kept && lang == Some(Lang::Node) && !workspace && lang::react_without_dom(repo.root()) {
+        println!(
+            "shipcraft: package.json depends on react: to test a component in a DOM with Testing Library, install them with `{} jsdom @testing-library/react` and start each such test file with the line // @vitest-environment jsdom",
+            install_prefix(repo.root())
+        );
+    }
     // Item 131: the project's install, whose packages a `git add -A` would stage.
     if local && modules_not_ignored(repo.root()) {
         println!("shipcraft: node_modules is not ignored by git: add it to .gitignore before committing, or `git add -A` stages the installed packages");
@@ -256,8 +266,13 @@ fn protect(repo: &Repo, review: bool) {
     match gh::with_input(repo, &["api", "-X", "PUT", &path], &body) {
         Ok(_) => println!("shipcraft: GitHub now requires {required} to merge into {branch}."),
         Err(e) if e.contains("Upgrade to GitHub Pro") => {
-            println!("shipcraft: this repository has no branch protection on its GitHub plan: `shipcraft merge` is the gate.")
+            println!("{}", crate::inv::route("shipcraft: this repository has no branch protection on its GitHub plan: `shipcraft merge` is the gate."))
         }
-        Err(e) => println!("shipcraft: could not mark statuses as required ({e}); `shipcraft merge` is the gate."),
+        Err(e) => println!(
+            "{}",
+            crate::inv::route(&format!(
+                "shipcraft: could not mark statuses as required ({e}); `shipcraft merge` is the gate."
+            ))
+        ),
     }
 }
