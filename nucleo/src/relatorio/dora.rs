@@ -64,8 +64,9 @@ pub(super) fn dora(
     let deploys = {
         let (first, last) = (times.iter().min().copied(), times.iter().max().copied());
         let value = first.zip(last).map(|(first, last)| {
+            // Item 136: no rate over less than a day.
             let span = (last - first) as f64 / 86_400.0;
-            let per_day = (times.len() >= 2 && span > 0.0).then(|| num(times.len() as f64 / span));
+            let per_day = (times.len() >= 2 && span >= 1.0).then(|| num(times.len() as f64 / span));
             json!({"count": times.len(), "first": first, "last": last, "per_day": per_day})
         });
         metric(value, times.len(), 0, || format!("no {one} read"))

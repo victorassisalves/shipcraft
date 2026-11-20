@@ -167,18 +167,44 @@ pub fn status(repo: &Repo) -> Result<()> {
                 format!("shipcraft: branch protection on {base}, but GitHub does not require shipcraft/ci and shipcraft/review: `shipcraft merge` is the gate")
             }
         }
-        Err(e) if e.contains("403") || e.contains("Upgrade to GitHub Pro") => {
-            "shipcraft: this repository has no branch protection (GitHub free plan): `shipcraft merge` is the gate"
-                .to_string()
-        }
-        Err(e) if e.contains("404") || e.contains("not protected") => {
-            format!("shipcraft: {base} has no branch protection: `shipcraft merge` is the gate")
-        }
-        Err(e) => format!(
-            "shipcraft: could not read branch protection ({}): use `shipcraft merge` as the gate",
-            e.lines().next().unwrap_or("")
-        ),
+        Err(e) => protection_unread(&e, &base),
     };
     println!("{line}");
     Ok(())
+}
+
+/// Item 136: the protection line for a failed call, with `e` the error text;
+/// only GitHub's own words prove there is no protection.
+fn protection_unread(e: &str, base: &str) -> String {
+    if e.contains("Upgrade to GitHub Pro") {
+        "shipcraft: this repository has no branch protection (GitHub free plan): `shipcraft merge` is the gate"
+            .to_string()
+    } else if e.contains("Branch not protected") {
+        format!("shipcraft: {base} has no branch protection: `shipcraft merge` is the gate")
+    } else if e.contains("HTTP 404") {
+        format!("shipcraft: could not read branch protection on {base} (GitHub answers 404 when this account is not an admin of the repository, so protection may exist): use `shipcraft merge` as the gate")
+    } else {
+        format!(
+            "shipcraft: could not read branch protection ({}): use `shipcraft merge` as the gate",
+            e.lines().next().unwrap_or("")
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::protection_unread;
+
+    #[test]
+    fn only_github_words_prove_no_protection() {
+        let line = |e: &str| protection_unread(e, "trunk");
+        assert!(line("gh: Upgrade to GitHub Pro (HTTP 403)").contains("(GitHub free plan)"));
+        assert!(line("gh: Branch not protected (HTTP 404)").starts_with("shipcraft: trunk has no branch protection"));
+        assert!(line("gh: Not Found (HTTP 404) {\"status\":\"404\"}")
+            .starts_with("shipcraft: could not read branch protection on trunk (GitHub answers 404"));
+        assert_eq!(
+            line("gh: Must have admin rights to Repository. (HTTP 403)\nmore"),
+            "shipcraft: could not read branch protection (gh: Must have admin rights to Repository. (HTTP 403)): use `shipcraft merge` as the gate"
+        );
+    }
 }

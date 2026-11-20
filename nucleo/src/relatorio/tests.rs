@@ -6,7 +6,7 @@ use super::github::{blocking, checks, reviewed_commits};
 use super::quality::{reds, review, size};
 use super::rows::{median, p90};
 use super::selection::{matches, Selection};
-use super::text::{day, duration, percent, text, utc};
+use super::text::{day, duration, per_day, percent, text, utc};
 use super::*;
 use crate::config::CONFIG_FILE;
 use crate::relatorio_gh::Asker;
@@ -583,4 +583,12 @@ fn reader_strips_bom_and_cr_and_counts_physical_lines() {
     let (rows, gaps) = read("\u{feff}{\"at\":1}\r\n\r\n[]\r\n{\"at\":2,\"escape\":true}\n{bad".as_bytes());
     assert_eq!(rows.len(), 1);
     assert_eq!(gaps.iter().map(|g| g.0).collect::<Vec<_>>(), vec![3, 5]);
+}
+
+#[test]
+fn per_day_says_why_it_is_empty_under_a_day() {
+    assert_eq!(per_day(&json!({"first": 0, "last": 5, "per_day": null})), "- (first to last under a day)");
+    assert_eq!(per_day(&json!({"first": 0, "last": 86_399, "per_day": null})), "- (first to last under a day)");
+    assert_eq!(per_day(&json!({"first": 7, "last": 7, "per_day": null})), "-");
+    assert_eq!(per_day(&json!({"first": 0, "last": 86_400, "per_day": 2.0})), "2.00");
 }

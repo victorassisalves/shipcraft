@@ -208,6 +208,20 @@ pub fn holders(
     cases.iter().map(|case| map.holder(case)).collect()
 }
 
+/// Item 136: as `holders`, case by case: the map is inferred once as there;
+/// None when the mapper finds no map, else each case's one file, or None when
+/// the map ties it to no file or to more than one.
+pub fn holder_each(
+    dir: &Path,
+    suite: &Suite,
+    locked: &[String],
+    present: &[String],
+    cases: &[&str],
+) -> Option<Vec<Option<String>>> {
+    let map = coverage_map(dir, suite, locked, present, cases)?;
+    Some(cases.iter().map(|case| map.holder(case)).collect())
+}
+
 /// Item 55: the hook's mapper for `cases` over the suite's `locked` files,
 /// reading the tree in `dir`; None when it finds no single map.
 fn coverage_map(dir: &Path, suite: &Suite, locked: &[String], present: &[String], cases: &[&str]) -> Option<Map> {
