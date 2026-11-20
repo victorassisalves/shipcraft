@@ -2,7 +2,7 @@
 item143_langs() { echo core; }
 item143_cases() {
  local c
- for c in plain precommit precommit-breaks precommit-indent precommit-local husky9 husky-existing husky7 agents-created agents-endings claude-project earlier-block local-block untracked edited-block husky-runner edited-precommit edited-hook symlinks lefthook project-files legacy-config open-lock lock-reader closed-locks copies tracked-paths dry-run idempotent nothing readme usage plan-failure copy-failure late-failure arguments worktrees control-plain control-managers control-locks; do echo "v1-143.$c"; done
+ for c in plain precommit precommit-breaks precommit-indent precommit-local husky9 husky-existing husky7 agents-created agents-endings claude-project earlier-block local-block untracked edited-block husky-runner edited-precommit edited-hook symlinks lefthook project-files legacy-config open-lock lock-reader closed-locks copies tracked-paths dry-run idempotent nothing readme usage plan-failure copy-failure late-failure arguments worktrees control-plain control-managers control-locks shape-hooks-path shape-husky-link shape-hooks-link shape-owned-link shape-lefthook changed-since-plan; do echo "v1-143.$c"; done
 }
 item143_case() {
  EXPECT="item 143: ${CASE#v1-143.}"
@@ -69,7 +69,7 @@ def uninstall(*args,call=None,**kw):
  p=run(call or binary,'uninstall',*args,env=env,**kw);invariant(before)
  assert not probe.exists(),'uninstall ran suite or gh'
  for a in (map(json.loads,trace.read_text().splitlines()) if trace.exists() else []):
-  assert any(command in a for command in ('rev-parse','ls-files','ls-tree','cat-file','worktree')),('uninstall ran non-read Git command',a)
+  assert any(command in a for command in ('rev-parse','ls-files','ls-tree','cat-file','worktree')) or ('config' in a and '--get' in a and a[-1]=='core.hooksPath'),('uninstall ran non-read Git command',a)
  return p
 def success(p):
  assert p.returncode==0,('uninstall must accept valid command',p.returncode,p.stderr)
@@ -101,7 +101,7 @@ def file_limit():
 def observer(fault=''):
  real=shutil.which('git');tools=cw/('git-'+str(len(list(cw.glob('git-*')))));tools.mkdir();trace=tools/'calls'
  put(tools/'git','#!'+sys.executable+'\nimport json,os,sys\na=sys.argv[1:]\nwith open('+repr(str(trace))+',"a") as f:f.write(json.dumps(a)+"\\n")\n'+
- "fault="+repr(fault)+"\nif 'ls-files' in a and fault:\n print('fatal: plan143' if fault=='exit' else 'malformed\\0record',end='',file=sys.stderr if fault=='exit' else sys.stdout);sys.exit(128 if fault=='exit' else 0)\n"+
+ "fault="+repr(fault)+"\nif 'ls-files' in a and fault=='edit':\n with open('AGENTS.md','ab') as f:f.write(b'concurrent edit143\\n')\nif 'ls-files' in a and fault in ('exit','malformed'):\n print('fatal: plan143' if fault=='exit' else 'malformed\\0record',end='',file=sys.stderr if fault=='exit' else sys.stdout);sys.exit(128 if fault=='exit' else 0)\n"+
  'os.execv('+repr(real)+',['+repr(real)+',*a])\n',0o755)
  put(tools/'gh','#!/bin/sh\nprintf gh143 > "$UNINSTALL143_PROBE"\nexit 97\n',0o755)
  return dict(os.environ,PATH=str(tools)+os.pathsep+os.environ['PATH']),trace
@@ -154,7 +154,11 @@ elif case=='precommit-local':
  # Legacy post-commit id is one of the proven forms too.
  put('.pre-commit-config.yaml',raw.replace(b'id: shipcraft-close',b'id: shipcraft-fecha'));out=success(uninstall(call=call));assert Path('.pre-commit-config.yaml').read_bytes()==original['.pre-commit-config.yaml'][1]
 elif case=='husky9':
- root,call,base,original=fixture('h9',manager='husky9');out=success(uninstall());assert not Path('.husky/commit-msg').exists() and not Path('.husky/post-commit').exists()
+ root,call,base,original=fixture('h9',manager='husky9')
+ put('.husky/_/commit-msg',b'#!/bin/sh\n# shipcraft hook: checks the commit against open locks\nexec \'/old/shipcraft\' check --commit-msg "$1"\n',0o755);launcher=Path('.husky/_/commit-msg').read_bytes()
+ out=success(uninstall());assert Path('.husky/_/commit-msg').is_file(),'husky-owned machine-shaped launcher was removed by the plain pass'
+ assert Path('.husky/_/commit-msg').read_bytes()==launcher
+ assert not Path('.husky/commit-msg').exists() and not Path('.husky/post-commit').exists()
  assert Path('.husky/_/h').read_text()==constants['HUSKY_H'] and Path('.husky/pre-commit').read_bytes()==b'# formatter143\n'
 elif case=='husky-existing':
  root,call,base,original=fixture('existing',manager='husky9')
@@ -207,9 +211,17 @@ elif case=='symlinks':
   p=Path(name)
   if p.is_dir():shutil.rmtree(p)
   elif p.exists():p.unlink()
-  p.symlink_to(target);before=entries(target);out=success(uninstall());assert p.is_symlink() and entries(target)==before
-  reason='not a regular folder' if name in ('.shipcraft/briefs','.shipcraft','.husky') else 'not a regular file'
-  assert f'shipcraft: left {name}: {reason}; remove it by hand\n' in out
+  p.symlink_to(target);target_before=entries(target)
+  for args in ((),('--dry-run',)):
+   before=snapshot();p=uninstall(*args)
+   assert p.returncode==1,('unexpected shape must refuse before changes',p.returncode,p.stdout,p.stderr)
+   what='is a symbolic link'
+   expected=(f'shipcraft refused: {name} {what}, a shape init does not create\n'
+    'Why: uninstall acts only on the shapes init creates, so it never reads or changes what it was not built for; nothing was changed\n'
+    'Next: remove Shipcraft by hand with the README\'s steps (Removing Shipcraft): delete .shipcraft.toml and .shipcraft/, remove the block between <!-- shipcraft --> and <!-- /shipcraft --> in AGENTS.md and CLAUDE.md, and remove the shipcraft calls from your hooks; or put back the shape init made and run shipcraft uninstall again\n').encode()
+   assert p.stdout==b'' and p.stderr==expected,(p.stdout,p.stderr)
+   assert snapshot()==before,'shape refusal changed tree/Git/hooks or created recovery copies'
+   assert Path(name).is_symlink() and entries(target)==target_before
 elif case=='lefthook':
  root,call,base,original=fixture('lefthook');raw=b'commit-msg:\n  commands:\n    shipcraft:\n      run: shipcraft check --commit-msg {1}\n';put('lefthook.yml',raw);out=success(uninstall())
  assert Path('lefthook.yml').read_bytes()==raw and 'uninstall does not edit lefthook files yet: remove the shipcraft commands under commit-msg and post-commit; remove it by hand\n' in out
@@ -289,7 +301,7 @@ elif case=='nothing':
 elif case=='readme':
  text=(acceptance.parent/'README.md').read_text();section=text.split('### Removing Shipcraft\n\n',1)[1].split('\nUpgrading:',1)[0]
  assert section.startswith('Run `shipcraft uninstall`, with no lock open.'),'README missing uninstall instructions'
- assert section.count('Run `shipcraft uninstall`')==1 and 'By hand, for what `uninstall` leaves (lefthook files, anything edited by hand):\n\n1. Delete' in section
+ assert 'It stops with nothing changed on a shape `init` does not create (a symbolic link, a hooks folder moved by hand) and prints the manual steps below.' in section and section.count('Run `shipcraft uninstall`')==1 and 'By hand, for what `uninstall` leaves (lefthook files, anything edited by hand):\n\n1. Delete' in section
  assert 'the whole `- repo: local` item that holds `shipcraft-check` and `shipcraft-close`, not only its `shipcraft` lines.' in section
  row='| `shipcraft uninstall [--dry-run]` | Removes what `init` wrote from the working tree and the hooks folder, keeping a copy, and prints the commit to make. |'
  assert text.count(row)==1 and text.index(row)>text.index('| `shipcraft status`')
@@ -322,10 +334,89 @@ elif case=='worktrees':
  (other/'.shipcraft/locks/a.json').unlink();before=snapshot();p=uninstall('--dry-run');refusal(p,str(other)+':.shipcraft/locks/a.json');assert snapshot()==before
  # A missing worktree still has its HEAD's RED; never prune or guess it safe.
  shutil.rmtree(other);before=snapshot();p=uninstall();refusal(p,str(other)+':.shipcraft/locks/a.json');assert snapshot()==before
+elif case=='shape-hooks-path':
+ for i,value in enumerate(('moved hooks143','.git/hooks/')):
+  for j,args in enumerate(((),('--dry-run',))):
+   root,call,base,original=fixture('moved'+str(i)+str(j));shutil.move('.git/hooks','moved hooks143');git('config','core.hooksPath',value)
+   before=snapshot();p=uninstall(*args);name='core.hooksPath';what=f'is set to {value}, a hooks folder init does not use'
+   assert p.returncode==1,('unexpected shape must refuse before changes',p.returncode,p.stdout,p.stderr)
+   expected=(f'shipcraft refused: {name} {what}, a shape init does not create\n'
+    'Why: uninstall acts only on the shapes init creates, so it never reads or changes what it was not built for; nothing was changed\n'
+    'Next: remove Shipcraft by hand with the README\'s steps (Removing Shipcraft): delete .shipcraft.toml and .shipcraft/, remove the block between <!-- shipcraft --> and <!-- /shipcraft --> in AGENTS.md and CLAUDE.md, and remove the shipcraft calls from your hooks; or put back the shape init made and run shipcraft uninstall again\n').encode()
+   assert p.stdout==b'' and p.stderr==expected,(p.stdout,p.stderr)
+   assert snapshot()==before,'shape refusal changed tree/Git/hooks or created recovery copies'
+elif case=='shape-husky-link':
+ for i,manager in enumerate(('husky9','husky7')):
+  for j,args in enumerate(((),('--dry-run',))):
+   root,call,base,original=fixture('husky-link'+str(i)+str(j),manager=manager);target=cw/('husky-target'+str(i)+str(j));shutil.move('.husky',target);Path('.husky').symlink_to(target);target_before=entries(target)
+   before=snapshot();p=uninstall(*args);name='.husky'
+   assert p.returncode==1,('unexpected shape must refuse before changes',p.returncode,p.stdout,p.stderr)
+   what='is a symbolic link'
+   expected=(f'shipcraft refused: {name} {what}, a shape init does not create\n'
+    'Why: uninstall acts only on the shapes init creates, so it never reads or changes what it was not built for; nothing was changed\n'
+    'Next: remove Shipcraft by hand with the README\'s steps (Removing Shipcraft): delete .shipcraft.toml and .shipcraft/, remove the block between <!-- shipcraft --> and <!-- /shipcraft --> in AGENTS.md and CLAUDE.md, and remove the shipcraft calls from your hooks; or put back the shape init made and run shipcraft uninstall again\n').encode()
+   assert p.stdout==b'' and p.stderr==expected,(p.stdout,p.stderr)
+   assert snapshot()==before,'shape refusal changed tree/Git/hooks or created recovery copies'
+   assert entries(target)==target_before,'linked husky target bytes/modes changed'
+elif case=='shape-hooks-link':
+ for i,args in enumerate(((),('--dry-run',))):
+  root,call,base,original=fixture('hooks-link'+str(i));target=cw/('hooks-target'+str(i));shutil.move('.git/hooks',target);Path('.git/hooks').symlink_to(target);target_before=entries(target)
+  before=snapshot();p=uninstall(*args);name='.git/hooks'
+  assert p.returncode==1,('unexpected shape must refuse before changes',p.returncode,p.stdout,p.stderr)
+  what='is a symbolic link'
+  expected=(f'shipcraft refused: {name} {what}, a shape init does not create\n'
+   'Why: uninstall acts only on the shapes init creates, so it never reads or changes what it was not built for; nothing was changed\n'
+   'Next: remove Shipcraft by hand with the README\'s steps (Removing Shipcraft): delete .shipcraft.toml and .shipcraft/, remove the block between <!-- shipcraft --> and <!-- /shipcraft --> in AGENTS.md and CLAUDE.md, and remove the shipcraft calls from your hooks; or put back the shape init made and run shipcraft uninstall again\n').encode()
+  assert p.stdout==b'' and p.stderr==expected,(p.stdout,p.stderr)
+  assert snapshot()==before,'shape refusal changed tree/Git/hooks or created recovery copies'
+  assert entries(target)==target_before,'linked plain hooks target changed'
+elif case=='shape-owned-link':
+ for i,name in enumerate(('.shipcraft/briefs/red.md','.shipcraft/briefs/green.md','.shipcraft/locks/.gitkeep')):
+  for j,args in enumerate(((),('--dry-run',))):
+   root,call,base,original=fixture('owned-link'+str(i)+str(j));target=cw/('owned-target'+str(i)+str(j));shutil.move(name,target);Path(name).symlink_to(target);target_before=target.read_bytes()
+   before=snapshot();p=uninstall(*args)
+   assert p.returncode==1,('unexpected shape must refuse before changes',p.returncode,p.stdout,p.stderr)
+   what='is a symbolic link'
+   expected=(f'shipcraft refused: {name} {what}, a shape init does not create\n'
+    'Why: uninstall acts only on the shapes init creates, so it never reads or changes what it was not built for; nothing was changed\n'
+    'Next: remove Shipcraft by hand with the README\'s steps (Removing Shipcraft): delete .shipcraft.toml and .shipcraft/, remove the block between <!-- shipcraft --> and <!-- /shipcraft --> in AGENTS.md and CLAUDE.md, and remove the shipcraft calls from your hooks; or put back the shape init made and run shipcraft uninstall again\n').encode()
+   assert p.stdout==b'' and p.stderr==expected,(p.stdout,p.stderr)
+   assert snapshot()==before,'shape refusal changed tree/Git/hooks or created recovery copies'
+   assert target.read_bytes()==target_before
+elif case=='shape-lefthook':
+ for i,name in enumerate(('lefthook.yml','.lefthook.yaml')):
+  for j,kind in enumerate(('link','folder')):
+   for k,args in enumerate(((),('--dry-run',))):
+    root,call,base,original=fixture('lefthook-shape'+str(i)+str(j)+str(k));target=cw/('lefthook-target'+str(i)+str(j)+str(k));put(target,'# project only; no calls143\n')
+    if kind=='link':Path(name).symlink_to(target)
+    else:Path(name).mkdir()
+    target_before=target.read_bytes();before=snapshot();p=uninstall(*args);what='is a symbolic link' if kind=='link' else 'is not a regular file'
+    assert p.returncode==1,('unexpected shape must refuse before changes',p.returncode,p.stdout,p.stderr)
+    expected=(f'shipcraft refused: {name} {what}, a shape init does not create\n'
+     'Why: uninstall acts only on the shapes init creates, so it never reads or changes what it was not built for; nothing was changed\n'
+     'Next: remove Shipcraft by hand with the README\'s steps (Removing Shipcraft): delete .shipcraft.toml and .shipcraft/, remove the block between <!-- shipcraft --> and <!-- /shipcraft --> in AGENTS.md and CLAUDE.md, and remove the shipcraft calls from your hooks; or put back the shape init made and run shipcraft uninstall again\n').encode()
+    assert p.stdout==b'' and p.stderr==expected,(p.stdout,p.stderr)
+    assert snapshot()==before,'shape refusal changed tree/Git/hooks or created recovery copies'
+    assert target.read_bytes()==target_before
+elif case=='changed-since-plan':
+ root,call,base,original=fixture('changed-since-plan');commit('install143');before=snapshot();old=Path('AGENTS.md').read_bytes();env,trace=observer('edit')
+ p=run(binary,'uninstall',env=env);invariant(before)
+ assert p.returncode==2,('concurrent edit must stop the run',p.returncode,p.stdout,p.stderr)
+ assert p.stderr==b'shipcraft: error: AGENTS.md changed since uninstall read it; nothing more was changed: run shipcraft uninstall again\n',p.stderr
+ assert Path('AGENTS.md').read_bytes()==old+b'concurrent edit143\n','concurrent edit was lost'
+ after=snapshot();expected=dict(before);expected['AGENTS.md']=('file',old+b'concurrent edit143\n',before['AGENTS.md'][2])
+ # A recovery folder may already have been announced/created, but no file copied.
+ filtered=lambda d:{k:v for k,v in d.items() if k not in ('.git/shipcraft','.git/shipcraft/uninstalled') and not k.startswith('.git/shipcraft/uninstalled/')}
+ assert filtered(after)==filtered(expected),'later file changed after stale-plan detection'
+ assert not any(v[0]=='file' for k,v in after.items() if k.startswith('.git/shipcraft/uninstalled/'))
+ assert b'shipcraft: removed ' not in p.stdout and b'commit the removal:' not in p.stdout
 elif case=='control-plain':
  root,call,base,original=fixture('control-plain');assert Path('CLAUDE.md').read_bytes()==b'<!-- shipcraft -->\nShipcraft workflow (required): @AGENTS.md\n<!-- /shipcraft -->\n'
  assert b'exec ' in Path('.git/hooks/commit-msg').read_bytes();commit('install control143')
  env,trace=observer();actual=ok('git','ls-files','-z','--cached','--full-name',env=env);assert b'AGENTS.md\0' in actual and json.loads(trace.read_text().splitlines()[-1])==['ls-files','-z','--cached','--full-name']
+ env_edit,trace_edit=observer('edit');old_agents=Path('AGENTS.md').read_bytes();actual=ok('git','ls-files','-z','--cached','--full-name',env=env_edit)
+ assert b'AGENTS.md\0' in actual and Path('AGENTS.md').read_bytes()==old_agents+b'concurrent edit143\n' and json.loads(trace_edit.read_text().splitlines()[-1])==['ls-files','-z','--cached','--full-name']
+ put('AGENTS.md',old_agents)
  # Marker-free project file and foreign, non-Shipcraft hook survive public init.
  put('AGENTS.md','# root without markers143\n');put('project.txt','no marker, leave byte-for-byte143\xff');put('.git/hooks/pre-push','#!/bin/sh\necho foreign143\n',0o755);before=snapshot();ok(binary,'init','--lang','other','--command','sh run.sh {junit}','--glob','tests/*.sh',env=env)
  assert Path('project.txt').read_bytes()==before['project.txt'][1]
