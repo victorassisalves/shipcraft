@@ -37,6 +37,7 @@ mod medicao;
 mod merge;
 mod narrow;
 mod origin;
+mod origin_repo;
 mod output;
 mod pr;
 mod processo;
