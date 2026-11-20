@@ -36,7 +36,7 @@ pub(super) struct Evidence {
     /// Item 79: the default branch's commit, for the ancestry check.
     pub(super) tip_commit: String,
     tip: BTreeMap<String, String>,
-    /// Ordered by time, then by version (by tag name under a pattern).
+    /// Ordered by time, then by version and tag name (by tag name under a pattern).
     pub(super) releases: Vec<Release>,
     /// Fix data from the first valid lock file among the tip, the latest
     /// release that holds it (item 124: the merge that ships it) and HEAD;
@@ -89,11 +89,13 @@ impl Evidence {
             releases.push(Release { name: name.to_string(), time, commit, locks });
         }
         // Item 99: the version tie-break only for item 76's tags; under a
-        // pattern, the tag name in byte order.
+        // pattern, the tag name in byte order. Item 137: then the name in
+        // byte order, so `1.2.3` comes before `v1.2.3`.
         releases.sort_by(|a, b| {
+            let bytes = a.name.as_bytes().cmp(b.name.as_bytes());
             a.time.cmp(&b.time).then_with(|| match selection {
-                Selection::Pattern(..) => a.name.as_bytes().cmp(b.name.as_bytes()),
-                _ => version_cmp(&a.name, &b.name),
+                Selection::Pattern(..) => bytes,
+                _ => version_cmp(&a.name, &b.name).then(bytes),
             })
         });
         let tip = git.locks(&tip_commit)?;
@@ -278,7 +280,7 @@ fn seconds(text: &str) -> Option<i64> {
     text.parse().ok()
 }
 
-/// `vX.Y.Z` by major, minor, patch as decimal numbers of any length.
+/// `vX.Y.Z` or `X.Y.Z` by major, minor, patch as decimal numbers of any length.
 fn version_cmp(a: &str, b: &str) -> std::cmp::Ordering {
     let parts = |t: &str| t.trim_start_matches('v').split('.').map(str::to_string).collect::<Vec<_>>();
     let (a, b) = (parts(a), parts(b));
