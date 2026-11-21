@@ -349,8 +349,8 @@ fn measured(camada: &str, command: impl FnOnce(&Repo, &mut medicao::CiRow) -> Re
     let started = Instant::now();
     let repo = Repo::open()?;
     let lock = (camada == "hook").then(|| medicao::open_lock(&repo));
-    if camada == "hook" {
-        output::capture(&repo, "hook");
+    if camada == "hook" || camada == "ci" {
+        output::capture(&repo, camada);
     }
     let mut ci = medicao::CiRow::default();
     let result = command(&repo, &mut ci);
