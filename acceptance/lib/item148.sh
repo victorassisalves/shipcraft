@@ -171,7 +171,7 @@ elif case=='empty-post-key':
  root,call,base=fixture('lefthook.yml',b'pre-commit:\n  commands:\n    lint:\n      run: echo lint\n'+b'post-commit:\n',local=False)
  old=Path('lefthook.yml').read_bytes();hooks=files(Path('.git/hooks'));p=run(call,'uninstall')
  assert p.returncode==0 and p.stderr==b'',p
- assert Path('lefthook.yml').is_file() and Path('lefthook.yml').read_bytes()==b'pre-commit:\n  commands:\n    lint:\n      run: echo lint\n','lefthook bytes not restored'
+ assert Path('lefthook.yml').is_file() and Path('lefthook.yml').read_bytes()==base,'lefthook bytes not restored'
  assert not Path('.shipcraft.toml').exists() and not Path('.shipcraft').exists(),'config/briefs/locks remain'
  assert files(Path('.git/hooks'))==hooks,'launchers changed'
  out=p.stdout.decode();assert removed('lefthook.yml')+'\n'+launchers('lefthook.yml')+'\n' in out,out
@@ -206,7 +206,7 @@ elif case=='trailing-fragment':
  p=Path('lefthook.yml');p.write_bytes(p.read_bytes()+b'# tail148');commit('fragment148')
  old=Path('lefthook.yml').read_bytes();hooks=files(Path('.git/hooks'));p=run(call,'uninstall')
  assert p.returncode==0 and p.stderr==b'',p
- assert Path('lefthook.yml').is_file() and Path('lefthook.yml').read_bytes()==base+b'# tail148','lefthook bytes not restored'
+ assert Path('lefthook.yml').is_file() and Path('lefthook.yml').read_bytes()==base+b'commit-msg:\npost-commit:\n# tail148','lefthook bytes not restored'
  assert not Path('.shipcraft.toml').exists() and not Path('.shipcraft').exists(),'config/briefs/locks remain'
  assert files(Path('.git/hooks'))==hooks,'launchers changed'
  out=p.stdout.decode();assert removed('lefthook.yml')+'\n'+launchers('lefthook.yml')+'\n' in out,out

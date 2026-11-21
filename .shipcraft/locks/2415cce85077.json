@@ -73,7 +73,7 @@
     "acceptance/lib/item145.sh": "sha256:d67a1e63320cb8da5c3e442a94c1fd49c4f166f427fcd41e398432913843793d",
     "acceptance/lib/item146.sh": "sha256:595e7f197b51c7027466b406883dec6813d72812992e9a486745e3a3e5887e9d",
     "acceptance/lib/item147.sh": "sha256:204302c6e61bd889c035fa6e2a6b311df8d5d07f8c7f5ea60ba59e324bf09f91",
-    "acceptance/lib/item148.sh": "sha256:6853f6b0c897811b807bd159fa6ca7dfa49938c570110c444bd29775f31fa4c3",
+    "acceptance/lib/item148.sh": "sha256:76b6409a981c57d3817c28fbe37f05c9d96183abc49161fa52f3f3dfb3d89c65",
     "acceptance/lib/item16a.sh": "sha256:d83f4146699d5f19ce369613c49449b2c6b4de1bd96c66e17d7a4f2ce350e125",
     "acceptance/lib/item16b.sh": "sha256:4dc9b80badb29117ff4b482576ff64cc369704f3fadda0e338ff33e09cb7da42",
     "acceptance/lib/item17.sh": "sha256:5efdcfc0c8b419625cbc0e96a6aaac226387a5a7dad57f8ac90d64cdedbee4c1",
@@ -196,7 +196,7 @@
     "acceptance/pontos/145.md": "sha256:2e29a9ea36a2e960a77d773ff3003fb022e812db3c753c7ac32fd7a153555291",
     "acceptance/pontos/146.md": "sha256:259dcd38d5f2ce4cb0d83df9c5c687fd51e203d8fcd2086e0a803f705da2aae3",
     "acceptance/pontos/147.md": "sha256:d71cb590538fde79eae566121100dc8171dfb06ef4761c5f7c13b6e1fe534a61",
-    "acceptance/pontos/148.md": "sha256:e3b4a1191ec5640a78031ab36df0d9962759bbb7cdfb447ed8d881d57da53581",
+    "acceptance/pontos/148.md": "sha256:cfa808b9acad69a1ecd975b18a9e664ea3995dd3ed25eb555bc41aa6d8062a84",
     "acceptance/pontos/15a.md": "sha256:f1480266606c0a01f815315cb04ddea9544438df9dda618e06cf167ca9f971b2",
     "acceptance/pontos/15c.md": "sha256:81c2cc2c4613889e13e620e865cec3e6a8833e3f3c1f610d1d004eb6d7750e2a",
     "acceptance/pontos/16a.md": "sha256:862354f335d398149125128a4d520dff86d76c7eb10092b8a8fb3b3cc86e5e78",
@@ -303,7 +303,7 @@
     "acceptance/tools/shard.py": "sha256:5b530f4110b1aa23ebceafba1f8a59c0fb717f122dd8a1f05c927c8bdea6ae49",
     "acceptance/tools/slice.sh": "sha256:368aba67e2427b3f47573dc0d0caacdd5f973e647f1cad7915f704d2a9aebadf",
     "acceptance/tools/tmo.py": "sha256:03dd0904d07c119f115237889bb51392e2206b71fe77d694ffb3d1edd82b5c61",
-    "docs/spec.md": "sha256:618afe9e27124cc4649cf025fe1103679872a18a4a466bed472fde322add51e5"
+    "docs/spec.md": "sha256:46c13a37e89e037def99367ffcf9e306bd376c0225200456c005adc7c1c244fb"
   },
   "cases": [
     "acceptance:acceptance/lib/item128.sh::core::v1-128.ci-base-invalid",
@@ -562,5 +562,5 @@
   "kind": "feature",
   "reported_at": null,
   "fixes_release": null,
-  "seal": "c825c94652467f05ed725d399856a65b39a366d98d15e8e053f617e77dd2535b"
+  "seal": "d114561fa92f6a947185e6d569562e39afc44d37cd99e1f44a52e96299c88d0f"
 }
