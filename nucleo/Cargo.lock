@@ -242,7 +242,7 @@ dependencies = [
 
 [[package]]
 name = "shipcraft"
-version = "2.88.0"
+version = "2.89.0"
 dependencies = [
  "libc",
  "regex",

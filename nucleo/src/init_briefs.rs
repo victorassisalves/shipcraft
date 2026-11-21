@@ -39,16 +39,16 @@ You are the GREEN session: you make the locked tests pass.
 - Commit.
 ";
 
-/// A brief's full text: from a project-local install every command is
-/// `npx -- shipcraft`, as in the block (item 61); the last line names the version.
-fn text(brief: &str, local: bool) -> String {
-    let body = if local { brief.replace("`shipcraft ", "`npx -- shipcraft ") } else { brief.to_string() };
+/// A brief's full text: every command is the project's invocation `inv`, as in
+/// the block (items 61 and 150); the last line names the version.
+fn text(brief: &str, inv: &str) -> String {
+    let body = brief.replace("`shipcraft ", &format!("`{inv} "));
     format!("{body}\n<!-- written by shipcraft {} -->\n", env!("CARGO_PKG_VERSION"))
 }
 
 /// Writes the briefs that are missing; returns the closing line's part for the
 /// ones written (`, .shipcraft/briefs/red.md`), red before green.
-pub fn write(repo: &Repo, local: bool) -> String {
+pub fn write(repo: &Repo, inv: &str) -> String {
     if let Err(reason) = folder(repo) {
         println!("shipcraft: {DIR} not written: {reason}");
         return String::new();
@@ -57,7 +57,9 @@ pub fn write(repo: &Repo, local: bool) -> String {
     for (name, brief) in [("red.md", RED_BRIEF), ("green.md", GREEN_BRIEF)] {
         let relative = format!("{DIR}/{name}");
         let path = repo.path(&relative);
-        let variants = [text(brief, local), text(brief, !local)];
+        // Item 150: this run's form first, then the other two, each this version's.
+        let mut variants = vec![text(brief, inv)];
+        variants.extend(crate::init::FORMS.iter().map(|f| text(brief, f)));
         match path.symlink_metadata() {
             Err(e) if e.kind() == ErrorKind::NotFound => match create(&path, &variants[0]) {
                 Ok(()) => listed.push_str(&format!(", {relative}")),
@@ -130,13 +132,22 @@ mod tests {
     #[test]
     fn briefs_end_with_the_version_and_use_lf() {
         for brief in [RED_BRIEF, GREEN_BRIEF] {
-            for local in [false, true] {
-                let t = text(brief, local);
+            for inv in crate::init::FORMS {
+                let t = text(brief, inv);
                 assert!(!t.contains('\r') && t.ends_with('\n'));
                 let last = t.lines().last().unwrap();
                 assert_eq!(last, format!("<!-- written by shipcraft {} -->", env!("CARGO_PKG_VERSION")));
-                assert_eq!(t.contains("npx -- shipcraft"), local && brief == RED_BRIEF);
+                assert_eq!(t.contains("npx -- shipcraft"), inv == "npx -- shipcraft" && brief == RED_BRIEF);
+                assert_eq!(t.contains("pnpm exec shipcraft"), inv == "pnpm exec shipcraft" && brief == RED_BRIEF);
             }
         }
+    }
+
+    #[test]
+    fn pnpm_red_names_pnpm_exec_twice() {
+        let t = text(RED_BRIEF, "pnpm exec shipcraft");
+        assert_eq!(t.matches("`pnpm exec shipcraft red`").count(), 2);
+        assert!(!t.contains("npx --"));
+        assert_eq!(text(GREEN_BRIEF, "pnpm exec shipcraft"), text(GREEN_BRIEF, "shipcraft"));
     }
 }

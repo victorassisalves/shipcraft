@@ -40,7 +40,7 @@ use hook::{
 use suites::{drop_empty_checks, plan};
 
 pub use agents::agents_block_status;
-pub(crate) use agents::{marker_lines, rewrite, written_blocks};
+pub(crate) use agents::{marker_lines, rewrite, written_blocks, FORMS};
 pub use config_file::AGENTS;
 pub use files::{is_executable, on_path};
 pub use hook::{hook_status, LEFTHOOK_FILES, LOCAL};
@@ -159,9 +159,10 @@ pub fn run(repo: &Repo, options: &Options) -> Result<()> {
     if kept && custom.is_some() {
         println!("{SEED_NOTICE}");
     }
-    let agents = agents_block(repo, local);
+    // Item 150: the block and the briefs in the form of item 131's invocation.
+    let agents = agents_block(repo, inv);
     // Item 68: only after everything else this run writes has succeeded.
-    let briefs = crate::init_briefs::write(repo, local);
+    let briefs = crate::init_briefs::write(repo, inv);
     if let Some(command) = &build {
         println!("shipcraft: [build] in {CONFIG_FILE} runs `{command}` before suites");
     }
