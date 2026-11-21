@@ -49,8 +49,14 @@ pub fn capture(repo: &Repo, name: &str) {
 }
 
 /// Creates or truncates `F` as a regular file, never following a link at it
-/// nor blocking on it.
+/// or at its two folders (`shipcraft/output` and `shipcraft`), nor blocking
+/// on it.
 fn open(path: &PathBuf) -> io::Result<File> {
+    for folder in path.ancestors().skip(1).take(2) {
+        if fs::symlink_metadata(folder).is_ok_and(|meta| meta.file_type().is_symlink()) {
+            return Err(io::Error::other("a folder of the file is a symbolic link"));
+        }
+    }
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -270,6 +276,31 @@ mod tests {
     #[test]
     fn invalid_utf8_is_lossy() {
         assert_eq!(tail(b"a\xffb\n"), ["a\u{fffd}b"]);
+    }
+
+    #[test]
+    fn open_refuses_a_linked_folder_and_writes_nothing_through_it() {
+        let root = std::env::temp_dir().join(format!("shipcraft-output-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let archive = root.join("archive");
+        fs::create_dir_all(&archive).unwrap();
+        fs::write(archive.join("ci.log"), "kept").unwrap();
+        // `shipcraft/output` is a link.
+        fs::create_dir_all(root.join("a/shipcraft")).unwrap();
+        std::os::unix::fs::symlink(&archive, root.join("a/shipcraft/output")).unwrap();
+        assert!(open(&root.join("a/shipcraft/output/ci.log")).is_err());
+        // `shipcraft` is a link to a folder holding `output/ci.log`.
+        fs::create_dir_all(root.join("b")).unwrap();
+        fs::create_dir_all(root.join("archive2/output")).unwrap();
+        fs::write(root.join("archive2/output/ci.log"), "kept").unwrap();
+        std::os::unix::fs::symlink(root.join("archive2"), root.join("b/shipcraft")).unwrap();
+        assert!(open(&root.join("b/shipcraft/output/ci.log")).is_err());
+        assert_eq!(fs::read_to_string(archive.join("ci.log")).unwrap(), "kept");
+        assert_eq!(fs::read_to_string(root.join("archive2/output/ci.log")).unwrap(), "kept");
+        // Real folders, missing or present: opened.
+        assert!(open(&root.join("c/shipcraft/output/ci.log")).is_ok());
+        assert!(open(&root.join("c/shipcraft/output/ci.log")).is_ok());
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
