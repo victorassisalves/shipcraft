@@ -49,7 +49,9 @@ review = "local"
 # Revert: drop red and green, and set shipcraft_min back to "2.18".
 red = { agent = "codex", model = "gpt-6.1-sol", effort = "medium" }
 green = "claude"
-review = "codex"
+# 2026-11-21 (item 148, Victor): review pinned to gpt-6.1-sol; the Codex default became
+# gpt-6.2-astra, which this ChatGPT account refuses. Revert: review = "codex".
+review = { agent = "codex", model = "gpt-6.1-sol" }
 
 [review]
 spec = "docs/spec.md"
