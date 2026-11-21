@@ -1,8 +1,9 @@
 //! Item 139: in `red` and the hook, each command's output past its first
 //! 4,096 bytes goes only to a file `F` (`git rev-parse --git-path
-//! shipcraft/output/<red|hook>.log`); the screen gets its last lines and one
-//! cut line. `SHIPCRAFT_OUTPUT=full`, `ci`, `init` and a file that cannot be
-//! opened keep today's whole forwarding.
+//! shipcraft/output/<red|hook|ci>.log`); the screen gets its last lines and
+//! one cut line. Item 149: `ci` too, unless `GITHUB_ACTIONS` is exactly
+//! `true` in its process. `SHIPCRAFT_OUTPUT=full`, `init` and a file that
+//! cannot be opened keep today's whole forwarding.
 
 use crate::git::Repo;
 use std::fs::{self, File, OpenOptions};
@@ -27,11 +28,15 @@ enum Invocation {
 
 static STATE: Mutex<Invocation> = Mutex::new(Invocation::Whole);
 
-/// Called once by `red` (`name` "red") and the hook ("hook") before any
-/// command runs: point 1 unless `SHIPCRAFT_OUTPUT` is exactly `full` (point
-/// 2) or git cannot say where `F` is (point 3).
+/// Called once by `red` (`name` "red"), the hook ("hook") and `ci` ("ci")
+/// before any command runs: point 1 unless `SHIPCRAFT_OUTPUT` is exactly
+/// `full` (point 2), git cannot say where `F` is (point 3), or, for `ci`
+/// only, `GITHUB_ACTIONS` is exactly `true` (item 149's point 2).
 pub fn capture(repo: &Repo, name: &str) {
     if std::env::var_os("SHIPCRAFT_OUTPUT").is_some_and(|v| v == "full") {
+        return;
+    }
+    if name == "ci" && std::env::var_os("GITHUB_ACTIONS").is_some_and(|v| v == "true") {
         return;
     }
     let Ok(answer) = repo.text(&["rev-parse", "--git-path", &format!("shipcraft/output/{name}.log")]) else { return };
