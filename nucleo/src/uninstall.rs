@@ -363,9 +363,19 @@ fn plan(repo: &Repo, plain: bool) -> Result<Plan> {
         plan.steps.push(Step::Line("shipcraft: pre-commit's commit-msg and post-commit launchers stay in the hooks folder, and run any of the project's hooks with no stages at those stages: if nothing else needs them, pre-commit uninstall -t commit-msg -t post-commit (or prek uninstall ...)".into()));
     }
     for file in LEFTHOOK_FILES {
-        if self::file(&repo.path(file), file)?.is_some_and(|(bytes, _)| contains(&bytes, b"shipcraft")) {
-            let reason = "uninstall does not edit lefthook files yet: remove the shipcraft commands under commit-msg and post-commit";
-            plan.left(file, reason, true);
+        let Some((bytes, mode)) = self::file(&repo.path(file), file)? else { continue };
+        match lefthook::undo(&bytes).filter(|o| !contains(o, b"shipcraft")) {
+            // Item 148: never removed, also when empty (init did not create it).
+            Some(new) => {
+                let (path, shown, what) =
+                    (repo.path(file), file.to_string(), format!("the shipcraft commands from {file}"));
+                plan.steps.push(Step::Change { path, shown, old: (bytes, mode), new: Some(new), what, hook: false });
+                plan.steps.push(Step::Line(format!("shipcraft: lefthook's commit-msg and post-commit launchers stay in the hooks folder (lefthook install wrote them); they run only what {file} still has under those hooks")));
+            }
+            None if contains(&bytes, b"shipcraft") => {
+                plan.left(file, "it mentions shipcraft outside the commands init adds", true)
+            }
+            None => {}
         }
     }
     if repo.path(".shipcraft").is_dir() {
@@ -492,6 +502,8 @@ fn walk(repo: &Repo, dir: &str, known: &[String], out: &mut Vec<String>) -> Resu
     }
     Ok(())
 }
+
+mod lefthook;
 
 #[cfg(test)]
 mod tests;

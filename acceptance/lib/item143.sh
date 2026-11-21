@@ -224,7 +224,7 @@ elif case=='symlinks':
    assert Path(name).is_symlink() and entries(target)==target_before
 elif case=='lefthook':
  root,call,base,original=fixture('lefthook');raw=b'commit-msg:\n  commands:\n    shipcraft:\n      run: shipcraft check --commit-msg {1}\n';put('lefthook.yml',raw);out=success(uninstall())
- assert Path('lefthook.yml').read_bytes()==raw and 'uninstall does not edit lefthook files yet: remove the shipcraft commands under commit-msg and post-commit; remove it by hand\n' in out
+ assert Path('lefthook.yml').read_bytes()==raw and 'it mentions shipcraft outside the commands init adds; remove it by hand\n' in out
  assert Path('.shipcraft.toml').exists() and not Path('CLAUDE.md').exists()
 elif case=='project-files':
  root,call,base,original=fixture('project-files');put('.shipcraft/z/custom','custom143\n');put('.shipcraft/a','first143\n');Path('.shipcraft/link').symlink_to('z');out=success(uninstall())
@@ -301,7 +301,7 @@ elif case=='nothing':
 elif case=='readme':
  text=(acceptance.parent/'README.md').read_text();section=text.split('### Removing Shipcraft\n\n',1)[1].split('\nUpgrading:',1)[0]
  assert section.startswith('Run `shipcraft uninstall`, with no lock open.'),'README missing uninstall instructions'
- assert 'It stops with nothing changed on a shape `init` does not create (a symbolic link, a hooks folder moved by hand) and prints the manual steps below.' in section and section.count('Run `shipcraft uninstall`')==1 and 'By hand, for what `uninstall` leaves (lefthook files, anything edited by hand):\n\n1. Delete' in section
+ assert 'It stops with nothing changed on a shape `init` does not create (a symbolic link, a hooks folder moved by hand) and prints the manual steps below.' in section and section.count('Run `shipcraft uninstall`')==1 and 'By hand, for what `uninstall` leaves (anything edited by hand):\n\n1. Delete' in section
  assert 'the whole `- repo: local` item that holds `shipcraft-check` and `shipcraft-close`, not only its `shipcraft` lines.' in section
  row='| `shipcraft uninstall [--dry-run]` | Removes what `init` wrote from the working tree and the hooks folder, keeping a copy, and prints the commit to make. |'
  assert text.count(row)==1 and text.index(row)>text.index('| `shipcraft status`')
