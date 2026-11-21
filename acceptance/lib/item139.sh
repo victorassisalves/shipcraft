@@ -259,7 +259,7 @@ elif case=='late-drop':
  payload(b'H'*4096+b'last139\n');write(cw/'late139','yes');p=red();time.sleep(3.2)
  assert p.returncode==0 and b'LATE139' not in p.stdout+p.stderr and b'LATE139' not in logpath().read_bytes() and len(cuts(p))==2
 elif case=='ci':
- payload(b'I'*150000,b'C'*150000);base=git('rev-parse','HEAD');commit('test: CI fixture139');p=run(binary,'ci','--base',base)
+ payload(b'I'*150000,b'C'*150000);base=git('rev-parse','HEAD');commit('test: CI fixture139');p=run(binary,'ci','--base',base,extra={'GITHUB_ACTIONS':'true'})
  assert p.returncode==1 and screen_output(p).count(b'I')==150000 and screen_output(p).count(b'C')==150000 and not cuts(p) and not logpath().exists() and not logpath('hook').exists()
 elif case=='version':
  spec=Path(os.environ['ACEITE']).parent/'docs/spec.md';manifest=Path(os.environ['ACEITE']).parent/'nucleo/Cargo.toml'
