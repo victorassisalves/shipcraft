@@ -1,6 +1,6 @@
 {
   "format": 5,
-  "state": "open",
+  "state": "closed",
   "files": {
     ".shipcraft.toml": "sha256:b046dce71eed03bba631c634e580cc8610a3ee40b78d8ef53062acfaf0fe7fc0",
     "acceptance/fixtures/item121/draken-13-expected.json": "sha256:523184fe39b9f4f72cb5d6405db062afeea8e1db9f7742a45b0065fc8f18dfd9",
@@ -562,5 +562,5 @@
   "kind": "feature",
   "reported_at": null,
   "fixes_release": null,
-  "seal": "d114561fa92f6a947185e6d569562e39afc44d37cd99e1f44a52e96299c88d0f"
+  "seal": "9b280c48e64070ae2c136fbc8f205b6d7b2adf0d3095a3d4d7a38526689be57d"
 }
