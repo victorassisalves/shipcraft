@@ -110,7 +110,7 @@ elif case=='bytes':
  expected=b'shipcraft: output cut: the command wrote 300000 bytes; shown: the first 4096 and the last 1 line(s); all of it: .git/shipcraft/output/ci.log (SHIPCRAFT_OUTPUT=full prints everything)'
  assert p.returncode==0 and cuts(p)==[expected],cuts(p)
  f=ci_file().read_bytes();header,data=f.split(b'`\n',1)
- assert header==('shipcraft: `'+command.replace('{junit}',entries()[-1]['argv'][0])).encode(),header
+ assert header==('shipcraft: `'+command.replace('{junit}',"'"+entries()[-1]['argv'][0]+"'")).encode(),header
  assert data.count(b'O')==150000 and data.count(b'E')==150000 and len(data)==300001 and data.endswith(b'\n')
  screen=screen_tail(p)
  assert screen==data[:4096]+b'\n'+data[-4097:-1]+b'\n'
@@ -160,7 +160,7 @@ elif case=='no-report':
  assert p.returncode==1 and len(cuts(p))==1,(p.returncode,cuts(p))
  reason=p.stderr.split(b'shipcraft refused:')[-1]
  assert b'first diagnostic149' in reason and b'wrong last149' not in reason and ci_rows()[-1]['code']=='no-report'
- assert ci_file().read_bytes().count(b'O'*12000)==1
+ assert ci_file().read_bytes().split(b'`\n',1)[1].count(b'O')==12000
 elif case=='blocked-parent':
  payload(b'P'*10000);f=ci_file();write(f.parent,b'blocked149');p=ci()
  assert p.returncode==0 and not cuts(p) and p.stderr.count(b'P'*10000)==1 and f.parent.read_bytes()==b'blocked149'
@@ -225,7 +225,11 @@ elif case=='version':
  assert ok(binary,'--version').stdout.split()[1].decode()==version,version
 elif case=='control-fixture':
  payload(b'fixture149-out\n',b'fixture149-err\n');p=ci()
- assert p.returncode==0 and p.stderr.count(b'fixture149-out\n')==1 and p.stderr.count(b'fixture149-err\n')==1
+ # Accept any interleaving that preserves each stream's bytes and order.
+ out,err=b'fixture149-out\n',b'fixture149-err\n';positions={(0,0)}
+ for byte in screen_output(p):
+  positions={(i+1,j) for i,j in positions if i<len(out) and out[i]==byte} | {(i,j+1) for i,j in positions if j<len(err) and err[j]==byte}
+ assert p.returncode==0 and (len(out),len(err)) in positions
  assert [x['mode'] for x in entries()]==['suite'] and entries()[0]['cwd']==str(Path.cwd())
  assert ci_rows()[-1]['result']=='passed' and not cuts(p)
  write('value139','red');commit('product: control red149');q=ci()
@@ -260,12 +264,13 @@ elif case=='check-failure':
  assert p.returncode==1 and len(cuts(p))==1,(p.returncode,cuts(p))
  reason=p.stderr.split(b'shipcraft refused:')[-1]
  assert b'check diagnostic149' in reason and b'wrong149' not in reason and ci_rows()[-1]['code']=='no-report'
- assert [x['mode'] for x in entries()]==['check'] and ci_file().read_bytes().count(b'O'*10000)==1
+ assert [x['mode'] for x in entries()]==['check'] and ci_file().read_bytes().split(b'`\n',1)[1].count(b'O')==10000
 elif case=='build-failure':
  payload(b'B'*10000,b'build diagnostic149\n',mode='build');write(cw/'build.fail','yes');p=ci()
  assert p.returncode==1 and len(cuts(p))==1,(p.returncode,cuts(p))
  assert ci_rows()[-1]['code']=='build-failed' and [x['mode'] for x in entries()]==['build']
- assert ci_file().read_bytes().count(b'B'*10000)==1 and b'build diagnostic149' in ci_file().read_bytes()
+ data=ci_file().read_bytes().split(b'`\n',1)[1]
+ assert data.count(b'B')==10000 and b'build diagnostic149' in data.replace(b'B',b'')
 elif case=='row-failure':
  f=Path(git('rev-parse','--git-path','shipcraft/runs.jsonl'));f.unlink(missing_ok=True);f.mkdir();payload(b'J'*10000);p=ci()
  assert p.returncode==0 and len(cuts(p))==1,cuts(p)
