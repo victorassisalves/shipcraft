@@ -93,8 +93,11 @@ const AGENTS_BLOCK_2_22: &str = "<!-- shipcraft -->
 - When in doubt, run `shipcraft status`.
 <!-- /shipcraft -->
 ";
+/// Item 61's root line in the `npx -- shipcraft` form; item 150 puts the run's invocation in its place.
 const ROOT_LINE: &str =
     "- Run Shipcraft commands from the repository root, where `npx -- shipcraft` runs this project's install.\n";
+/// Item 150: the three forms of the block and the briefs, by the project's invocation (item 131).
+pub(crate) const FORMS: [&str; 3] = ["shipcraft", "npx -- shipcraft", "pnpm exec shipcraft"];
 /// The 2.14.0 block (`git show v2.14.0:nucleo/src/init.rs`): a start line, no end line.
 const AGENTS_BLOCK_2_14: &str = "<!-- shipcraft -->
 ## shipcraft: TDD with a lock (required in this repository)
@@ -108,9 +111,9 @@ const CLAUDE_BLOCK: &str = "<!-- shipcraft -->\nShipcraft workflow (required): @
 const DIFFERS: &str = "; it differs from this version's: edit it by hand to match docs/spec.md";
 
 /// Item 61: the block's current variant; from a project-local install (item 58)
-/// every command is `npx -- shipcraft` (fixed point 39), run from the root.
-fn agents_text(local: bool) -> String {
-    variant(&current_block(), local)
+/// every command is the project's invocation (item 150), run from the root.
+fn agents_text(inv: &str) -> String {
+    variant(&current_block(), inv)
 }
 
 /// Item 75's block (commit c3a919d, v2.31.0 to v2.38.0), a known block in both
@@ -155,19 +158,19 @@ fn after_line(block: &str, start: &str, lines: &str) -> String {
     format!("{}{lines}{}", &block[..end], &block[end..])
 }
 
-/// A block (this version's, v2.82.0's, v2.81.0's, v2.39.0's, v2.31.0's, v2.30.0's, v2.26.0's, v2.25.0's or v2.22.0's) in its machine or project-local form.
-fn variant(block: &str, local: bool) -> String {
-    if !local {
+/// A block (this version's, v2.82.0's, v2.81.0's, v2.39.0's, v2.31.0's, v2.30.0's, v2.26.0's, v2.25.0's or v2.22.0's) in the form of `inv` (item 150).
+fn variant(block: &str, inv: &str) -> String {
+    if inv == FORMS[0] {
         return block.to_string();
     }
-    let text = block.replace("`shipcraft ", "`npx -- shipcraft ");
+    let text = block.replace("`shipcraft ", &format!("`{inv} "));
     let (head, rest) = text.split_at(text.find("\n- ").unwrap() + 1);
-    format!("{head}{ROOT_LINE}{rest}")
+    format!("{head}{}{rest}", ROOT_LINE.replace("npx -- shipcraft", inv))
 }
 
-/// The blocks `init` replaces for an install of this form: this version's other
-/// form first, then every earlier block in both forms.
-fn known_blocks(local: bool) -> Vec<String> {
+/// The blocks `init` replaces for a run of form `inv`: this version's other two
+/// forms first, then every earlier block in the machine and `npx -- shipcraft` forms.
+fn known_blocks(inv: &str) -> Vec<String> {
     let earlier = [
         AGENTS_BLOCK_2_22.to_string(),
         AGENTS_BLOCK_2_25.to_string(),
@@ -178,23 +181,23 @@ fn known_blocks(local: bool) -> Vec<String> {
         agents_block_2_81(),
         agents_block_2_82(),
     ];
-    let mut known = vec![agents_text(!local)];
+    let mut known: Vec<String> = FORMS.iter().filter(|f| **f != inv).map(|f| agents_text(f)).collect();
     for block in &earlier {
-        known.push(variant(block, false));
-        known.push(variant(block, true));
+        known.push(variant(block, FORMS[0]));
+        known.push(variant(block, FORMS[1]));
     }
     known
 }
 
 /// Item 142: the blocks Shipcraft writes in `name` (`AGENTS.md` or `CLAUDE.md`),
 /// which `export` reads out: for `AGENTS.md` this version's block and every
-/// block `init` replaces (not the 2.14.0 legacy one), each in both forms.
+/// block `init` replaces (not the 2.14.0 legacy one), this version's in its three forms.
 pub(crate) fn written_blocks(name: &str) -> Vec<String> {
     if name == CLAUDE_FILE {
         return vec![CLAUDE_BLOCK.to_string()];
     }
-    let mut blocks = vec![agents_text(false)];
-    blocks.extend(known_blocks(false));
+    let mut blocks = vec![agents_text(FORMS[0])];
+    blocks.extend(known_blocks(FORMS[0]));
     blocks
 }
 
@@ -228,15 +231,17 @@ pub fn agents_block_status(repo: &Repo) -> String {
             Err(_) => return unreadable.to_string(),
         },
     };
-    let new = agents_text(false);
-    let known = known_blocks(false);
+    let new = agents_text(FORMS[0]);
+    let known = known_blocks(FORMS[0]);
     let refs: Vec<&str> = known.iter().map(String::as_str).collect();
     let found = text.as_deref().map(|t| (t, find_block(t, &new, &refs, Some(AGENTS_BLOCK_2_14))));
     match found {
         None | Some((_, Found::None)) => "shipcraft: AGENTS.md block: none; run `shipcraft init` to add it",
         Some((_, Found::Equal)) => "shipcraft: AGENTS.md block: current",
-        // A project-local install's form is this version's too; `known[0]` is that other form.
-        Some((t, Found::Known(range))) if t[range.clone()] == known[0] => "shipcraft: AGENTS.md block: current",
+        // A project-local install's forms are this version's too; `known[..2]` are those (item 150).
+        Some((t, Found::Known(range))) if known[..2].iter().any(|k| t[range.clone()] == **k) => {
+            "shipcraft: AGENTS.md block: current"
+        }
         Some((_, Found::Known(_))) => {
             "shipcraft: AGENTS.md block: from an earlier version; run `shipcraft init` to update it"
         }
@@ -250,9 +255,9 @@ pub fn agents_block_status(repo: &Repo) -> String {
 /// Tells agents the workflow where they already look: `AGENTS.md` gets the
 /// block, and `CLAUDE.md` imports it where Claude Code reads it (item 61). A
 /// failure here never undoes the init. Returns the files it wrote, `, AGENTS.md`.
-pub(super) fn agents_block(repo: &Repo, local: bool) -> String {
-    let new = agents_text(local);
-    let known = known_blocks(local);
+pub(super) fn agents_block(repo: &Repo, inv: &str) -> String {
+    let new = agents_text(inv);
+    let known = known_blocks(inv);
     let known: Vec<&str> = known.iter().map(String::as_str).collect();
     let (wrote, current) = onboard(repo, AGENTS_FILE, &new, &known, Some(AGENTS_BLOCK_2_14));
     let mut listed = if wrote { format!(", {AGENTS_FILE}") } else { String::new() };
@@ -384,4 +389,20 @@ pub(crate) fn rewrite(path: &Path, text: impl AsRef<[u8]>) -> std::io::Result<()
         let _ = fs::remove_file(&temp);
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn known_blocks_hold_this_versions_other_forms_and_no_earlier_pnpm_form() {
+        let pnpm = agents_text(FORMS[2]);
+        assert_eq!(pnpm.len(), 8603);
+        assert!(pnpm.lines().nth(2).unwrap().contains("where `pnpm exec shipcraft` runs"));
+        let known = known_blocks(FORMS[2]);
+        assert_eq!(known[..2], [agents_text(FORMS[0]), agents_text(FORMS[1])]);
+        assert!(!known.contains(&pnpm) && !known[2..].iter().any(|k| k.contains("pnpm exec")));
+        assert!(written_blocks(AGENTS_FILE).contains(&pnpm));
+    }
 }
