@@ -93,6 +93,9 @@ const AGENTS_BLOCK_2_22: &str = "<!-- shipcraft -->
 - When in doubt, run `shipcraft status`.
 <!-- /shipcraft -->
 ";
+/// Item 61's root line in the `npx -- shipcraft` form; item 150 puts the run's invocation in its place.
+const ROOT_LINE: &str =
+    "- Run Shipcraft commands from the repository root, where `npx -- shipcraft` runs this project's install.\n";
 /// Item 150: the three forms of the block and the briefs, by the project's invocation (item 131).
 pub(crate) const FORMS: [&str; 3] = ["shipcraft", "npx -- shipcraft", "pnpm exec shipcraft"];
 /// The 2.14.0 block (`git show v2.14.0:nucleo/src/init.rs`): a start line, no end line.
@@ -162,9 +165,7 @@ fn variant(block: &str, inv: &str) -> String {
     }
     let text = block.replace("`shipcraft ", &format!("`{inv} "));
     let (head, rest) = text.split_at(text.find("\n- ").unwrap() + 1);
-    format!(
-        "{head}- Run Shipcraft commands from the repository root, where `{inv}` runs this project's install.\n{rest}"
-    )
+    format!("{head}{}{rest}", ROOT_LINE.replace("npx -- shipcraft", inv))
 }
 
 /// The blocks `init` replaces for a run of form `inv`: this version's other two
