@@ -12,7 +12,8 @@ use serde_norway::{Mapping, Value};
 use std::fs;
 
 /// The two blocks this route writes, and the `run` of each `shipcraft` command.
-const BLOCKS: [(&str, &str); 2] = [("commit-msg", "shipcraft check --commit-msg"), ("post-commit", "shipcraft close")];
+pub const BLOCKS: [(&str, &str); 2] =
+    [("commit-msg", "shipcraft check --commit-msg"), ("post-commit", "shipcraft close")];
 
 const BY_HAND: &str =
     "or manually put `shipcraft check --commit-msg` in commit-msg and `shipcraft close` in post-commit";
@@ -53,8 +54,35 @@ fn generated(shipcraft: &Value, run: &str) -> bool {
 /// 20.2 and 20.3: the checks of this route and the text with the commands
 /// that are missing; any doubt refuses, nothing written (rule 17).
 pub fn plan(repo: &Repo, file: &str, text: String, local: bool) -> Result<Plan> {
+    let new = edit(&text, file, local, || twice(repo, file))?;
+    // The notice also names a `pre-commit` the lefthook still has to install.
+    let pre = repo.hook_path("pre-commit")?;
+    let mut missing = if is_executable(&pre) { vec![] } else { vec!["pre-commit"] };
+    for (block, _) in BLOCKS {
+        let hook = repo.hook_path(block)?;
+        let shown = hook.strip_prefix(repo.root()).unwrap_or(&hook).display().to_string();
+        if hook.symlink_metadata().is_err() {
+            missing.push(block);
+        } else if !fs::read_to_string(&hook).is_ok_and(|t| is_lefthook(&t, block)) {
+            let what = format!("installed hook {block} ({shown}) is not from lefthook");
+            return alien(what.clone(), &what);
+        } else if !is_executable(&hook) {
+            missing.push(block);
+        }
+    }
+    Ok(Plan { file: file.to_string(), old: text, new, missing })
+}
+
+/// Item 148: init's edit of a lefthook text, shared with `uninstall`'s proof: the new text,
+/// None when nothing is to add, or init's refusal (`twice`: a `shipcraft` command in pre-commit).
+pub fn edit(
+    text: &str,
+    file: &str,
+    local: bool,
+    twice: impl FnOnce() -> Result<Option<String>>,
+) -> Result<Option<String>> {
     let stop = |problem: String| alien(format!("{file} {problem}"), &problem);
-    let doc: Value = parse(&text).map_err(|_| failed(format!("{file} disappeared while it was read")))?;
+    let doc: Value = parse(text).map_err(|_| failed(format!("{file} disappeared while it was read")))?;
     let mut top = match doc {
         Value::Mapping(top) => top,
         Value::Null => Mapping::new(),
@@ -63,13 +91,13 @@ pub fn plan(repo: &Repo, file: &str, text: String, local: bool) -> Result<Plan> 
     if let Some(key) = ["extends", "jobs", "remotes", "rc"].into_iter().find(|k| top.contains_key(k)) {
         return stop(format!("uses `{key}`"));
     }
-    if let Err(problem) = block_layout(&text) {
+    if let Err(problem) = block_layout(text) {
         return stop(problem);
     }
     if top.get("pre-commit").and_then(|b| b.get("commands")).and_then(|c| c.get("shipcraft")).is_some() {
-        return twice(repo, file);
+        return twice();
     }
-    let mut new = text.clone();
+    let mut new = text.to_string();
     for (block, run) in BLOCKS {
         let mut map = match top.get(block) {
             None | Some(Value::Null) => Mapping::new(),
@@ -103,23 +131,7 @@ pub fn plan(repo: &Repo, file: &str, text: String, local: bool) -> Result<Plan> 
     if !matches!(parse(&new), Ok(back) if back == Value::Mapping(top)) {
         return stop("cannot prove where to put shipcraft commands without changing the rest".into());
     }
-    // The notice also names a `pre-commit` the lefthook still has to install.
-    let pre = repo.hook_path("pre-commit")?;
-    let mut missing = if is_executable(&pre) { vec![] } else { vec!["pre-commit"] };
-    for (block, _) in BLOCKS {
-        let hook = repo.hook_path(block)?;
-        let shown = hook.strip_prefix(repo.root()).unwrap_or(&hook).display().to_string();
-        if hook.symlink_metadata().is_err() {
-            missing.push(block);
-        } else if !fs::read_to_string(&hook).is_ok_and(|t| is_lefthook(&t, block)) {
-            let what = format!("installed hook {block} ({shown}) is not from lefthook");
-            return alien(what.clone(), &what);
-        } else if !is_executable(&hook) {
-            missing.push(block);
-        }
-    }
-    let new = (new != text).then_some(new);
-    Ok(Plan { file: file.to_string(), old: text, new, missing })
+    Ok((new != text).then_some(new))
 }
 
 /// 15b.1 and 20.2: the script `lefthook install` writes ends in this call,
