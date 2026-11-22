@@ -164,7 +164,7 @@ pub fn status(repo: &Repo) -> Result<()> {
         say!("{line}");
     }
     let path = format!("repos/{{owner}}/{{repo}}/branches/{base}/protection");
-    let line = match gh::run(repo, &["api", &path]) {
+    let line = match gh::ask(repo, &["api", &path]) {
         Ok(out) => {
             let value: serde_json::Value = serde_json::from_str(&out).unwrap_or_default();
             let contexts = &value["required_status_checks"]["contexts"];
@@ -193,15 +193,20 @@ fn export_line(repo: &Repo, base: &str) -> Option<String> {
     Some(format!("shipcraft: origin/{base} has no .shipcraft.toml: if this project does not use Shipcraft, make the branch for its PR with `shipcraft export --base origin/{base} <new branch>` once the lock is closed"))
 }
 
-/// Item 136: the protection line for a failed call, with `e` the error text;
-/// only GitHub's own words prove there is no protection.
-fn protection_unread(e: &str, base: &str) -> String {
-    if e.contains("Upgrade to GitHub Pro") {
+/// Item 136: the protection line for a failed call; only GitHub's own words
+/// prove there is no protection, never a local failure's text (item 151).
+fn protection_unread(failure: &gh::Failure, base: &str) -> String {
+    let answer = match failure {
+        gh::Failure::Answer(e) => e.as_str(),
+        gh::Failure::Local(_) => "",
+    };
+    let e = failure.to_string();
+    if answer.contains("Upgrade to GitHub Pro") {
         "shipcraft: this repository has no branch protection (GitHub free plan): `shipcraft merge` is the gate"
             .to_string()
-    } else if e.contains("Branch not protected") {
+    } else if answer.contains("Branch not protected") {
         format!("shipcraft: {base} has no branch protection: `shipcraft merge` is the gate")
-    } else if e.contains("HTTP 404") {
+    } else if answer.contains("HTTP 404") {
         format!("shipcraft: could not read branch protection on {base} (GitHub answers 404 when this account is not an admin of the repository, so protection may exist): use `shipcraft merge` as the gate")
     } else {
         format!(
@@ -214,10 +219,22 @@ fn protection_unread(e: &str, base: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::protection_unread;
+    use crate::gh::Failure;
+
+    #[test]
+    fn a_local_failure_never_reads_as_github_words() {
+        for words in ["Upgrade to GitHub Pro", "Branch not protected", "HTTP 404"] {
+            let e = format!("could not read origin's repository: `git remote get-url origin` failed: fatal: bad config line 1 in file {words}\nmore");
+            assert_eq!(
+                protection_unread(&Failure::Local(e), "trunk"),
+                format!("shipcraft: could not read branch protection (could not read origin's repository: `git remote get-url origin` failed: fatal: bad config line 1 in file {words}): use `shipcraft merge` as the gate")
+            );
+        }
+    }
 
     #[test]
     fn only_github_words_prove_no_protection() {
-        let line = |e: &str| protection_unread(e, "trunk");
+        let line = |e: &str| protection_unread(&Failure::Answer(e.to_string()), "trunk");
         assert!(line("gh: Upgrade to GitHub Pro (HTTP 403)").contains("(GitHub free plan)"));
         assert!(line("gh: Branch not protected (HTTP 404)").starts_with("shipcraft: trunk has no branch protection"));
         assert!(line("gh: Not Found (HTTP 404) {\"status\":\"404\"}")
