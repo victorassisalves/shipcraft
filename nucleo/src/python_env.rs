@@ -184,11 +184,16 @@ pub fn borrow(command: String, suite: &Suite, root: &Path) -> (String, bool) {
 /// in-project `.venv`, and the main folder's project is another folder.
 fn poetry_project(command: &str, suite: &Suite, root: &Path) -> Option<String> {
     let words: Vec<&str> = suite.comando.split_ascii_whitespace().take(3).collect();
-    if words != ["poetry", "run", "python"] || has_own_venv(root, &suite.raiz) {
+    if words != ["poetry", "run", "python"] {
+        return None;
+    }
+    let here = std::fs::canonicalize(root).ok()?;
+    let top =
+        root.ancestors().nth(Path::new(&suite.raiz).components().count()).and_then(|t| std::fs::canonicalize(t).ok());
+    if has_own_venv(&here, top.as_deref()) {
         return None;
     }
     let project = std::fs::canonicalize(main_folder()?.join(&suite.raiz)).ok()?;
-    let here = std::fs::canonicalize(root).ok()?;
     if !project.is_dir() || project == here {
         return None;
     }
@@ -201,13 +206,16 @@ fn poetry_project(command: &str, suite: &Suite, root: &Path) -> Option<String> {
     Some(replaced)
 }
 
-/// Whether the first folder holding a `pyproject.toml`, from `root` up to the
-/// top of the tree it runs in (`root` less the suite's `raiz`, a normalized
-/// relative path), holds a `.venv` folder. No such folder: false.
-fn has_own_venv(root: &Path, raiz: &str) -> bool {
-    let up = Path::new(raiz).components().count();
-    root.ancestors()
-        .take(up + 1)
+/// Whether the first folder holding a `pyproject.toml`, from the canonical
+/// run folder `here` up to the canonical top of the tree it runs in (`root`
+/// less the suite's `raiz`, a normalized relative path; included), holds a
+/// `.venv` folder. A `here` outside `top` (a suite root linked elsewhere), or
+/// no `top`, walks up to the filesystem root. No such folder: false.
+fn has_own_venv(here: &Path, top: Option<&Path>) -> bool {
+    let top = top.filter(|t| here.starts_with(t));
+    let mut reached = false;
+    here.ancestors()
+        .take_while(|folder| !std::mem::replace(&mut reached, Some(*folder) == top))
         .find(|folder| is_file(&folder.join("pyproject.toml")))
         .is_some_and(|folder| std::fs::metadata(folder.join(".venv")).is_ok_and(|m| m.is_dir()))
 }
@@ -243,9 +251,15 @@ fn main_folder() -> Option<PathBuf> {
 /// `git rev-parse --path-format=absolute --git-common-dir --git-dir` in this
 /// process's working directory: the common dir (the answer trimmed, its first
 /// line) and the git dir. A failed spawn, a nonzero exit or an empty answer
-/// reads nothing.
+/// reads nothing; so does a bare repository (review round 1), whose linked
+/// worktrees have no main worktree to borrow from or name to Poetry.
 fn git_dirs() -> Option<(String, Option<String>)> {
+    git_dirs_in(Path::new("."))
+}
+
+fn git_dirs_in(cwd: &Path) -> Option<(String, Option<String>)> {
     let out = Command::new("git")
+        .current_dir(cwd)
         .args(["rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir"])
         .stdin(Stdio::null())
         .stderr(Stdio::null())
@@ -257,7 +271,20 @@ fn git_dirs() -> Option<(String, Option<String>)> {
     let said = text(&out.stdout);
     let mut lines = said.trim().lines();
     let common = lines.next().filter(|l| !l.is_empty())?.to_string();
-    Some((common, lines.next().map(str::to_string)))
+    let git_dir = lines.next().map(str::to_string);
+    (!is_bare(cwd)).then_some((common, git_dir))
+}
+
+/// `git config --bool --get core.bare` prints `true`; a failure, a nonzero
+/// exit or any other answer is git's default, not bare.
+fn is_bare(cwd: &Path) -> bool {
+    let out = Command::new("git")
+        .current_dir(cwd)
+        .args(["config", "--bool", "--get", "core.bare"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output();
+    out.is_ok_and(|o| o.status.success() && text(&o.stdout).trim() == "true")
 }
 
 fn main_of(common: &str, git_dir: &str) -> Option<PathBuf> {
@@ -439,23 +466,86 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
+    fn walk(root: &Path, raiz: &str) -> bool {
+        let here = fs::canonicalize(root).unwrap();
+        let top = root.ancestors().nth(Path::new(raiz).components().count()).and_then(|t| fs::canonicalize(t).ok());
+        has_own_venv(&here, top.as_deref())
+    }
+
     #[test]
     fn own_venv_is_the_first_pyproject_folders_up_to_the_top() {
         let top = scratch("own-venv");
         let root = top.join("services/api");
         fs::create_dir_all(&root).unwrap();
-        assert!(!has_own_venv(&root, "services/api"), "no pyproject.toml anywhere");
+        assert!(!walk(&root, "services/api"), "no pyproject.toml anywhere");
         fs::write(top.join("pyproject.toml"), "").unwrap();
-        assert!(!has_own_venv(&root, "services/api"), "the root project has no .venv");
+        assert!(!walk(&root, "services/api"), "the root project has no .venv");
         fs::write(top.join(".venv"), "").unwrap();
-        assert!(!has_own_venv(&root, "services/api"), "a .venv file is not an environment");
+        assert!(!walk(&root, "services/api"), "a .venv file is not an environment");
         fs::remove_file(top.join(".venv")).unwrap();
         fs::create_dir(top.join(".venv")).unwrap();
-        assert!(has_own_venv(&root, "services/api"));
-        assert!(!has_own_venv(&root, "api"), "the walk stops at the top of the tree");
+        assert!(walk(&root, "services/api"));
+        assert!(!walk(&root, "api"), "the walk stops at the top of the tree");
         fs::write(root.join("pyproject.toml"), "").unwrap();
-        assert!(!has_own_venv(&root, "services/api"), "the nearest project is the run's");
-        assert!(has_own_venv(&top.join(""), ""));
+        assert!(!walk(&root, "services/api"), "the nearest project is the run's");
+        assert!(walk(&top.join(""), ""));
+        let _ = fs::remove_dir_all(&top);
+    }
+
+    #[test]
+    fn own_venv_follows_a_linked_suite_root() {
+        let top = scratch("own-venv-link");
+        let demo = top.join("packages/demo");
+        fs::create_dir_all(demo.join("specs")).unwrap();
+        fs::create_dir_all(demo.join(".venv")).unwrap();
+        fs::write(demo.join("pyproject.toml"), "").unwrap();
+        std::os::unix::fs::symlink("packages/demo/specs", top.join("suite")).unwrap();
+        assert!(walk(&top.join("suite"), "suite"), "the physical folder's project has its .venv");
+        let outside = scratch("own-venv-outside");
+        fs::create_dir_all(outside.join("p/.venv")).unwrap();
+        fs::write(outside.join("p/pyproject.toml"), "").unwrap();
+        std::os::unix::fs::symlink(outside.join("p"), top.join("away")).unwrap();
+        assert!(walk(&top.join("away"), "away"), "outside the top, the walk goes up past it");
+        let _ = fs::remove_dir_all(&top);
+        let _ = fs::remove_dir_all(&outside);
+    }
+
+    fn git(cwd: &Path, args: &[&str]) {
+        let ok = Command::new("git").current_dir(cwd).args(args).stdout(Stdio::null()).stderr(Stdio::null()).status();
+        assert!(ok.unwrap().success(), "git {args:?}");
+    }
+
+    #[test]
+    fn a_bare_repository_reads_nothing() {
+        if std::env::var_os("GIT_DIR").is_some() {
+            return; // inside a git hook, git reads the hook's repository
+        }
+        let top = scratch("bare");
+        git(&top, &["init", "-q", "-b", "main"]);
+        git(
+            &top,
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "x",
+            ],
+        );
+        git(&top, &["worktree", "add", "-q", "linked-plain", "-b", "plain"]);
+        let (common, git_dir) = git_dirs_in(&top.join("linked-plain")).unwrap();
+        assert_eq!(main_of(&common, &git_dir.unwrap()), Some(fs::canonicalize(&top).unwrap()));
+        git(&top, &["clone", "-q", "--bare", ".", "storage/.git"]);
+        git(&top, &["--git-dir=storage/.git", "worktree", "add", "-q", "linked", "main"]);
+        assert!(git_dirs_in(&top.join("linked")).is_none(), "a linked worktree of a bare .git clone");
+        assert!(git_dirs_in(&top.join("storage/.git")).is_none());
+        assert!(git_dirs_in(&top).is_some());
         let _ = fs::remove_dir_all(&top);
     }
 
