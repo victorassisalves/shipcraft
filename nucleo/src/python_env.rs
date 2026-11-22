@@ -272,14 +272,19 @@ fn git_dirs_in(cwd: &Path) -> Option<(String, Option<String>)> {
     let mut lines = said.trim().lines();
     let common = lines.next().filter(|l| !l.is_empty())?.to_string();
     let git_dir = lines.next().map(str::to_string);
-    (!is_bare(cwd)).then_some((common, git_dir))
+    (!is_bare(cwd, &common)).then_some((common, git_dir))
 }
 
-/// `git config --bool --get core.bare` prints `true`; a failure, a nonzero
-/// exit or any other answer is git's default, not bare.
-fn is_bare(cwd: &Path) -> bool {
+/// `git --git-dir=<common dir> config --bool --get core.bare` prints `true`;
+/// a failure, a nonzero exit or any other answer is git's default, not bare.
+/// Read through the common dir (review round 2): with
+/// `extensions.worktreeConfig`, git keeps `core.bare` in the main
+/// worktree's `config.worktree`, which a linked worktree's own config does
+/// not show.
+fn is_bare(cwd: &Path, common: &str) -> bool {
     let out = Command::new("git")
         .current_dir(cwd)
+        .arg(format!("--git-dir={common}"))
         .args(["config", "--bool", "--get", "core.bare"])
         .stdin(Stdio::null())
         .stderr(Stdio::null())
@@ -546,6 +551,14 @@ mod tests {
         assert!(git_dirs_in(&top.join("linked")).is_none(), "a linked worktree of a bare .git clone");
         assert!(git_dirs_in(&top.join("storage/.git")).is_none());
         assert!(git_dirs_in(&top).is_some());
+        // Review round 2: core.bare moved to the bare clone's config.worktree
+        // (extensions.worktreeConfig), as git's docs tell users to do.
+        git(&top, &["clone", "-q", "--bare", ".", "wtconfig/.git"]);
+        git(&top, &["--git-dir=wtconfig/.git", "config", "extensions.worktreeConfig", "true"]);
+        git(&top, &["--git-dir=wtconfig/.git", "config", "--worktree", "core.bare", "true"]);
+        git(&top, &["--git-dir=wtconfig/.git", "config", "--unset", "core.bare"]);
+        git(&top, &["--git-dir=wtconfig/.git", "worktree", "add", "-q", "linked-wt", "main"]);
+        assert!(git_dirs_in(&top.join("linked-wt")).is_none(), "core.bare in the bare clone's config.worktree");
         let _ = fs::remove_dir_all(&top);
     }
 
