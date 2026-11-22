@@ -128,7 +128,7 @@ elif case=='fallback':
   remove('.shipcraft.toml')
   if locked:write('uv.lock','')
   p=run(binary,'init');assert p.returncode==0 and chosen(p,'python3')
-  expected='shipcraft: Python interpreter python3 from PATH (no runnable .venv/bin/python or venv/bin/python, and no uv.lock with uv on PATH), so the hook runs whichever python3 is first on PATH at commit time; to use another, edit test_command in .shipcraft.toml'
+  expected='shipcraft: Python interpreter python3 from PATH (no runnable .venv/bin/python or venv/bin/python, no uv.lock with uv on PATH, and no poetry.lock with poetry on PATH), so the hook runs whichever python3 is first on PATH at commit time; to use another, edit test_command in .shipcraft.toml'
   lines=p.stdout.splitlines();assert lines[lines.index('shipcraft: language python (runner pytest)')+1]==expected
 elif case=='lang':
  Path('requirements.txt').unlink();Path('pyproject.toml').unlink()
