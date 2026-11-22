@@ -9,26 +9,84 @@ use std::fs;
 use std::process::Command;
 use std::sync::Mutex;
 
-/// Item 144: origin's (`HOST/OWNER/REPO`, `HOST`) once `pr` or `merge` read it.
-static ORIGIN_REPO: Mutex<Option<(String, String)>> = Mutex::new(None);
+/// Item 151: the run's answer about origin's repository, kept once read.
+enum Origin {
+    NotRead,
+    /// (`HOST/OWNER/REPO`, `HOST`), or none: `gh` runs with the inherited environment.
+    Read(Option<(String, String)>),
+    /// Why `git remote get-url origin` failed: no `gh` process starts.
+    Failed(String),
+}
+
+static ORIGIN_REPO: Mutex<Origin> = Mutex::new(Origin::NotRead);
 
 /// Item 144: every later `gh` process gets `GH_REPO` and `GH_HOST` (none: as inherited).
 pub fn pin(origin: Option<(String, String)>) {
-    *ORIGIN_REPO.lock().unwrap_or_else(|e| e.into_inner()) = origin;
+    *ORIGIN_REPO.lock().unwrap_or_else(|e| e.into_inner()) = Origin::Read(origin);
+}
+
+/// Why a `gh` call failed. Only `Answer`, what `gh` itself printed, may be
+/// read for GitHub's words; `Local` (origin unread, `gh` not started, a
+/// temporary file) never is, whatever its text says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Failure {
+    Answer(String),
+    Local(String),
+}
+
+impl std::fmt::Display for Failure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Failure::Answer(e) | Failure::Local(e) => f.write_str(e),
+        }
+    }
 }
 
 /// `gh <args>` in the repository root: stdout, or the error text.
 pub fn run(repo: &Repo, args: &[&str]) -> std::result::Result<String, String> {
+    ask(repo, args).map_err(|e| e.to_string())
+}
+
+/// `gh <args>` in the repository root: stdout, or why it failed. Item 151:
+/// the first call of a run reads origin's repository unless `pr` or `merge`
+/// pinned it, and every call names it.
+pub fn ask(repo: &Repo, args: &[&str]) -> std::result::Result<String, Failure> {
+    let pair = {
+        let mut origin = ORIGIN_REPO.lock().unwrap_or_else(|e| e.into_inner());
+        if matches!(*origin, Origin::NotRead) {
+            *origin = match crate::origin_repo::read(repo) {
+                Ok(pair) => Origin::Read(pair),
+                Err(e) => Origin::Failed(e),
+            };
+        }
+        match &*origin {
+            Origin::Failed(e) => return Err(Failure::Local(format!("could not read origin's repository: {e}"))),
+            Origin::Read(pair) => pair.clone(),
+            Origin::NotRead => None,
+        }
+    };
+    spawn(repo, args, pair)
+}
+
+/// Item 130's `gh repo view <url>`: the URL names the repository, so the run's
+/// answer is neither read nor used.
+pub fn run_named(repo: &Repo, args: &[&str]) -> std::result::Result<String, String> {
+    spawn(repo, args, None).map_err(|e| e.to_string())
+}
+
+fn spawn(repo: &Repo, args: &[&str], pair: Option<(String, String)>) -> std::result::Result<String, Failure> {
     let mut command = Command::new("gh");
-    if let Some((name, host)) = ORIGIN_REPO.lock().unwrap_or_else(|e| e.into_inner()).clone() {
+    if let Some((name, host)) = pair {
         command.env("GH_REPO", name).env("GH_HOST", host);
     }
-    let out = command.args(args).current_dir(repo.root()).output().map_err(|e| format!("run gh: {e}"))?;
+    let out =
+        command.args(args).current_dir(repo.root()).output().map_err(|e| Failure::Local(format!("run gh: {e}")))?;
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     if out.status.success() {
         Ok(stdout)
     } else {
-        Err(format!("{} {}", String::from_utf8_lossy(&out.stderr).trim(), stdout.trim()).trim().to_string())
+        let text = format!("{} {}", String::from_utf8_lossy(&out.stderr).trim(), stdout.trim());
+        Err(Failure::Answer(text.trim().to_string()))
     }
 }
 
@@ -43,14 +101,14 @@ pub fn json(repo: &Repo, args: &[&str]) -> Result<Value> {
 }
 
 /// `gh <args> --input <file>` with `body` in the file.
-pub fn with_input(repo: &Repo, args: &[&str], body: &str) -> std::result::Result<String, String> {
-    let dir = TempDir::new("shipcraft-gh").map_err(|_| "temporary directory".to_string())?;
+pub fn with_input(repo: &Repo, args: &[&str], body: &str) -> std::result::Result<String, Failure> {
+    let dir = TempDir::new("shipcraft-gh").map_err(|_| Failure::Local("temporary directory".to_string()))?;
     let file = dir.path().join("corpo.json");
-    fs::write(&file, body).map_err(|e| e.to_string())?;
+    fs::write(&file, body).map_err(|e| Failure::Local(e.to_string()))?;
     let file = file.to_string_lossy().into_owned();
     let mut all: Vec<&str> = args.to_vec();
     all.extend(["--input", &file]);
-    run(repo, &all)
+    ask(repo, &all)
 }
 
 /// A file holding `text`, for `--body-file` (kept while the TempDir lives).

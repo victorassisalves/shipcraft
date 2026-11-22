@@ -214,7 +214,7 @@ for s in scenarios:
   assert p.returncode==0 and p.stderr.decode()==s.get('stderr',''),(p.returncode,p.stderr)
   assert [r['args'] for r in cs]==s.get('calls',[P,C(7)]),cs
   assert all(Path(r['cwd'])==root for r in cs),cs
-  assert not gitcalls.exists(),'ledger launched git'
+  assert (eval(gitcalls.read_text())[1:]==['remote','get-url','origin']) if gitcalls.exists() else not cs,'ledger launched git'
   if 'reason' in s:
    if s.get('json',True):assert [json.loads(x) for x in p.stdout.splitlines()]==[dict(kind='findings_not_read',reason=s['reason'])],p.stdout
    else:assert p.stdout.decode()=='review findings not read: '+s['reason']+'\n',p.stdout

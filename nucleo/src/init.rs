@@ -264,16 +264,19 @@ fn protect(repo: &Repo, review: bool) {
     );
     let required = if review { "shipcraft/ci and shipcraft/review" } else { "shipcraft/ci" };
     let path = format!("repos/{{owner}}/{{repo}}/branches/{branch}/protection");
-    match gh::with_input(repo, &["api", "-X", "PUT", &path], &body) {
-        Ok(_) => println!("shipcraft: GitHub now requires {required} to merge into {branch}."),
-        Err(e) if e.contains("Upgrade to GitHub Pro") => {
-            println!("{}", crate::inv::route("shipcraft: this repository has no branch protection on its GitHub plan: `shipcraft merge` is the gate."))
-        }
-        Err(e) => println!(
-            "{}",
-            crate::inv::route(&format!(
-                "shipcraft: could not mark statuses as required ({e}); `shipcraft merge` is the gate."
-            ))
+    println!("{}", protect_line(gh::with_input(repo, &["api", "-X", "PUT", &path], &body), required, &branch));
+}
+
+/// The one line `protect` prints; only GitHub's own words, never a local
+/// failure's text (item 151), say the plan has no protection.
+fn protect_line(result: std::result::Result<String, gh::Failure>, required: &str, branch: &str) -> String {
+    match result {
+        Ok(_) => format!("shipcraft: GitHub now requires {required} to merge into {branch}."),
+        Err(gh::Failure::Answer(e)) if e.contains("Upgrade to GitHub Pro") => crate::inv::route(
+            "shipcraft: this repository has no branch protection on its GitHub plan: `shipcraft merge` is the gate.",
         ),
+        Err(e) => crate::inv::route(&format!(
+            "shipcraft: could not mark statuses as required ({e}); `shipcraft merge` is the gate."
+        )),
     }
 }

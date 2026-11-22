@@ -80,7 +80,7 @@ elif case=='control-fault':
 elif case=='control-gh':
  red();s=output(rows(),('--json','--github'));assert records(ghcalls)==[['pr','view','7','--json','number,state,mergedAt,headRefOid,mergeCommit']] and select(s,'github')[0]['missing']=={'gh failed':1},s
 elif case=='control-findings':
- red();s=output(rows(),('--findings','--json'));assert records(ghcalls)==[['pr','list','--state','merged','--limit','1000','--json','number']] and not calls.exists(),s
+ red();s=output(rows(),('--findings','--json'));assert records(ghcalls)==[['pr','list','--state','merged','--limit','1000','--json','number']] and records(calls)==[['remote','get-url','origin']],s
  assert s==[dict(kind='findings_not_read',reason='gh failed')],s
 elif case=='merge':
  git('checkout','-qb','topic');sha=red();git('checkout','main');write('main','diverged');main=commit(at=T+20);git('checkout',sha,'--','.shipcraft');commit(b'merge\n',[main,sha],T+30)

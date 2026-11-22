@@ -165,7 +165,7 @@ for i,s in enumerate(scenarios):
   assert p.returncode==0,('exit',p.returncode,p.stderr)
   assert [r['args'] for r in cs]==s.get('calls',[P,C(7)]),cs
   assert all(Path(r['cwd'])==root for r in cs),cs
-  assert not gitcalls.exists(),'findings launched git'
+  assert (eval(gitcalls.read_text())[1:]==['remote','get-url','origin']) if gitcalls.exists() else not cs,'findings launched git'
   assert p.stderr.decode()==s.get('stderr',''),('stderr',p.stderr)
   if 'text' in s:assert p.stdout.decode()==s['text'],('text',p.stdout)
   else:assert [json.loads(x) for x in p.stdout.splitlines()]==s['rows'],('rows',p.stdout)
