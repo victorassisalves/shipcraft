@@ -376,6 +376,23 @@ Python with uv (instead of the block above, for a project with `uv.lock`):
 
 `uv sync --frozen` installs the default groups, `dev` included (a project whose pytest is in another group adds `--group <name>`), and creates `.venv` where the command `init` writes looks for it, unless `UV_PROJECT_ENVIRONMENT` moves it.
 
+Python with Poetry (instead of the blocks above, for a project with poetry.lock):
+
+```yaml
+      - uses: actions/setup-python@v5
+        if: steps.layer.outputs.run == 'true'
+        with:
+          python-version: "3.x"
+      - name: Install dependencies
+        if: steps.layer.outputs.run == 'true'
+        run: |
+          pipx install poetry
+          poetry env use python3
+          poetry install
+```
+
+`poetry install` installs the locked dependencies, the project and its non-optional groups into Poetry's environment for the checkout folder, which `poetry run` uses in the same job (a project whose pytest is in an optional group adds `--with <name>`). `python-version` must be one the project's `requires-python` accepts (for example `"3.11"`), since `poetry env use python3` creates the environment with that Python.
+
 Node:
 
 ```yaml
