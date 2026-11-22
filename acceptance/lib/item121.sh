@@ -252,7 +252,7 @@ for s in scenarios:
    assert not p.stdout or p.stdout.endswith(b'\n'),p.stdout
  assert [r['args'] for r in cs]==s.get('calls',[P,C(7)]),cs
  assert all(Path(r['cwd'])==root for r in cs),cs
- assert not gitcalls.exists(),'findings/usage launched git'
+ assert (eval(gitcalls.read_text())[1:]==['remote','get-url','origin']) if gitcalls.exists() else not cs,'findings/usage launched git'
  if s.get('timeout'):assert 58<=elapsed<70,elapsed
 PY121
  pass

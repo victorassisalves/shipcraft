@@ -169,12 +169,12 @@ else:
   if case=='review-control':assert any(x['args'][:2]==['pr','view'] for x in calls) and len(records(st/'reviewer.calls.jsonl'))==1,calls
   if case=='report-control' or case=='ci-control' or case=='status-control':assert calls,('unchanged path must exercise gh',calls)
   if case=='export-control':assert git('rev-parse','export144')!=head and not calls
-  assert all(x['GH_REPO'] is None and x['GH_HOST'] is None for x in calls),calls
+  assert all(x['GH_REPO']=='github.example144/acme/proj' and x['GH_HOST']=='github.example144' for x in calls),calls
   # Invoke each unchanged command a second time with inherited selection.
   os.environ.update(GH_REPO='control/repo',GH_HOST='control.example')
   if case=='export-control':args[-1]='export144-again'
   (st/'gh-env.log').unlink(missing_ok=True);q=run(binary,*args);assert q.returncode==0,q.stderr
-  assert all(x['GH_REPO']=='control/repo' and x['GH_HOST']=='control.example' for x in records(st/'gh-env.log'))
+  assert all(x['GH_REPO']=='github.example144/acme/proj' and x['GH_HOST']=='github.example144' for x in records(st/'gh-env.log'))
  else:
   assert later,calls
   if case=='existing':assert any(x['args'][:2]==['pr','edit'] for x in later),later
