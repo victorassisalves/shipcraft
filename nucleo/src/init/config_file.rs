@@ -113,4 +113,22 @@ mod tests {
             assert_eq!(table["pr"]["warn_lines"].as_integer(), Some(500));
         }
     }
+
+    #[test]
+    fn a_local_failure_never_reads_as_a_plan_without_protection() {
+        let e = "could not read origin's repository: `git remote get-url origin` failed: fatal: bad include Upgrade to GitHub Pro";
+        let line = super::super::protect_line(Err(crate::gh::Failure::Local(e.to_string())), "shipcraft/ci", "main");
+        assert!(
+            line.contains(&format!(
+                "shipcraft: could not mark statuses as required ({e}); `shipcraft merge` is the gate."
+            )),
+            "{line}"
+        );
+        let line = super::super::protect_line(
+            Err(crate::gh::Failure::Answer("gh: Upgrade to GitHub Pro (HTTP 403)".into())),
+            "shipcraft/ci",
+            "main",
+        );
+        assert!(line.contains("no branch protection on its GitHub plan"), "{line}");
+    }
 }

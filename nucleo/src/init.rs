@@ -280,24 +280,3 @@ fn protect_line(result: std::result::Result<String, gh::Failure>, required: &str
         )),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::protect_line;
-    use crate::gh::Failure;
-
-    #[test]
-    fn a_local_failure_never_reads_as_a_plan_without_protection() {
-        let e = "could not read origin's repository: `git remote get-url origin` failed: fatal: bad include Upgrade to GitHub Pro";
-        let line = protect_line(Err(Failure::Local(e.to_string())), "shipcraft/ci", "main");
-        assert!(
-            line.contains(&format!(
-                "shipcraft: could not mark statuses as required ({e}); `shipcraft merge` is the gate."
-            )),
-            "{line}"
-        );
-        let line =
-            protect_line(Err(Failure::Answer("gh: Upgrade to GitHub Pro (HTTP 403)".into())), "shipcraft/ci", "main");
-        assert!(line.contains("no branch protection on its GitHub plan"), "{line}");
-    }
-}
