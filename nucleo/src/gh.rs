@@ -9,18 +9,52 @@ use std::fs;
 use std::process::Command;
 use std::sync::Mutex;
 
-/// Item 144: origin's (`HOST/OWNER/REPO`, `HOST`) once `pr` or `merge` read it.
-static ORIGIN_REPO: Mutex<Option<(String, String)>> = Mutex::new(None);
+/// Item 151: the run's answer about origin's repository, kept once read.
+enum Origin {
+    NotRead,
+    /// (`HOST/OWNER/REPO`, `HOST`), or none: `gh` runs with the inherited environment.
+    Read(Option<(String, String)>),
+    /// Why `git remote get-url origin` failed: no `gh` process starts.
+    Failed(String),
+}
+
+static ORIGIN_REPO: Mutex<Origin> = Mutex::new(Origin::NotRead);
 
 /// Item 144: every later `gh` process gets `GH_REPO` and `GH_HOST` (none: as inherited).
 pub fn pin(origin: Option<(String, String)>) {
-    *ORIGIN_REPO.lock().unwrap_or_else(|e| e.into_inner()) = origin;
+    *ORIGIN_REPO.lock().unwrap_or_else(|e| e.into_inner()) = Origin::Read(origin);
 }
 
-/// `gh <args>` in the repository root: stdout, or the error text.
+/// `gh <args>` in the repository root: stdout, or the error text. Item 151:
+/// the first call of a run reads origin's repository unless `pr` or `merge`
+/// pinned it, and every call names it.
 pub fn run(repo: &Repo, args: &[&str]) -> std::result::Result<String, String> {
+    let pair = {
+        let mut origin = ORIGIN_REPO.lock().unwrap_or_else(|e| e.into_inner());
+        if matches!(*origin, Origin::NotRead) {
+            *origin = match crate::origin_repo::read(repo) {
+                Ok(pair) => Origin::Read(pair),
+                Err(e) => Origin::Failed(e),
+            };
+        }
+        match &*origin {
+            Origin::Failed(e) => return Err(format!("could not read origin's repository: {e}")),
+            Origin::Read(pair) => pair.clone(),
+            Origin::NotRead => None,
+        }
+    };
+    spawn(repo, args, pair)
+}
+
+/// Item 130's `gh repo view <url>`: the URL names the repository, so the run's
+/// answer is neither read nor used.
+pub fn run_named(repo: &Repo, args: &[&str]) -> std::result::Result<String, String> {
+    spawn(repo, args, None)
+}
+
+fn spawn(repo: &Repo, args: &[&str], pair: Option<(String, String)>) -> std::result::Result<String, String> {
     let mut command = Command::new("gh");
-    if let Some((name, host)) = ORIGIN_REPO.lock().unwrap_or_else(|e| e.into_inner()).clone() {
+    if let Some((name, host)) = pair {
         command.env("GH_REPO", name).env("GH_HOST", host);
     }
     let out = command.args(args).current_dir(repo.root()).output().map_err(|e| format!("run gh: {e}"))?;

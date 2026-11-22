@@ -1,17 +1,55 @@
 //! Item 144: `pr` and `merge` name origin's repository to every `gh` call they
 //! make after item 130's check, as `GH_REPO=HOST/OWNER/REPO` and `GH_HOST=HOST`.
+//! Item 151: every other command's `gh` calls name it too, read once per run.
 
-use crate::git::{text, Repo};
-use crate::refusal::Result;
+use crate::git::{git_in, text, Repo};
+use crate::refusal::{Result, Stop};
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 /// Reads origin's fetch URL and pins its repository (or none) for `gh::run`.
 pub fn pin(repo: &Repo) -> Result<()> {
-    let out = text(&repo.run(&["remote", "get-url", "origin"])?);
-    let first = out.split('\n').next().unwrap_or_default();
-    let url = first.strip_suffix('\r').unwrap_or(first);
-    crate::gh::pin(parse(url, ssh_hostname));
+    crate::gh::pin(named(&repo.run(&["remote", "get-url", "origin"])?));
     Ok(())
+}
+
+/// Item 151: origin's repository for a run's first `gh` call, or why it could
+/// not be read (`Repo::run`'s text). A failed `get-url` with no `origin` in a
+/// readable `git remote` listing means there is no origin: no repository.
+pub fn read(repo: &Repo) -> std::result::Result<Option<(String, String)>, String> {
+    let error = match repo.run(&["remote", "get-url", "origin"]) {
+        Ok(out) => return Ok(named(&out)),
+        Err(Stop::Failed(e)) => e,
+        Err(Stop::Refused(r)) => r.to_string(),
+    };
+    match git_in(repo.root(), &["remote"]) {
+        Ok(out) if out.status.success() && !lists_origin(&out.stdout) => Ok(None),
+        _ => Err(error),
+    }
+}
+
+/// Item 151: `report`'s read at `<root>`, as item 79 runs `gh` there (the
+/// repository-selecting git variables removed); any failure names none.
+pub fn read_quietly(root: &Path) -> Option<(String, String)> {
+    let mut command = Command::new("git");
+    command.args(["remote", "get-url", "origin"]).current_dir(root).env("GH_PROMPT_DISABLED", "1");
+    for var in crate::relatorio::REPOSITORY_VARS {
+        command.env_remove(var);
+    }
+    let out = command.stdin(Stdio::null()).stderr(Stdio::null()).output().ok()?;
+    out.status.success().then(|| named(&out.stdout)).flatten()
+}
+
+/// The repository `get-url`'s stdout names: its first line, one `\r` removed.
+fn named(stdout: &[u8]) -> Option<(String, String)> {
+    let out = text(stdout);
+    let first = out.split('\n').next().unwrap_or_default();
+    parse(first.strip_suffix('\r').unwrap_or(first), ssh_hostname)
+}
+
+/// `git remote`'s stdout names a remote `origin` (pieces split on `\n`, one `\r` removed).
+fn lists_origin(stdout: &[u8]) -> bool {
+    text(stdout).split('\n').any(|piece| piece.strip_suffix('\r').unwrap_or(piece) == "origin")
 }
 
 /// `<url>` as (`HOST/OWNER/REPO`, `HOST`); `translate` maps an SSH host to its
@@ -74,7 +112,19 @@ fn ssh_hostname(host: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse;
+    use super::{lists_origin, parse};
+
+    #[test]
+    fn the_remote_listing_names_origin_only_as_a_whole_piece() {
+        assert!(lists_origin(b"origin\n"));
+        assert!(lists_origin(b"upstream\norigin\r\n"));
+        assert!(lists_origin(b"origin"));
+        assert!(!lists_origin(b""));
+        assert!(!lists_origin(b"upstream\norigin2\n"));
+        assert!(!lists_origin(b"origin\r\r\n"));
+        assert!(!lists_origin(b" origin\n"));
+        assert!(!lists_origin(b"\xffrigin\n"));
+    }
 
     fn read(url: &str) -> Option<(String, String)> {
         parse(url, |host| match host {

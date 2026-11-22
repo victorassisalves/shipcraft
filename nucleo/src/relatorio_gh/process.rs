@@ -7,9 +7,13 @@ use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{channel, TryRecvError};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 const LIMIT: Duration = Duration::from_secs(60);
+
+/// Item 151: origin's repository at the root, read once per run before the first call.
+static ORIGIN_REPO: OnceLock<Option<(String, String)>> = OnceLock::new();
 
 pub(super) enum Ran {
     Out(Vec<u8>),
@@ -19,14 +23,18 @@ pub(super) enum Ran {
 
 /// `gh <args>` at the root, in its own process group, stdin from /dev/null,
 /// stderr discarded, without the repository-selecting git variables and with
-/// no prompt. The limit covers its start, its output and its exit; at the
+/// no prompt, naming origin's repository (item 151). The limit covers its start, its output and its exit; at the
 /// limit the group is killed and its output no longer waited for.
 pub(super) fn run(root: &Path, args: &[&str]) -> Ran {
+    let origin = ORIGIN_REPO.get_or_init(|| crate::origin_repo::read_quietly(root));
     let started = Instant::now();
     let mut command = Command::new("gh");
     command.args(args).current_dir(root).env("GH_PROMPT_DISABLED", "1");
     for var in REPOSITORY_VARS {
         command.env_remove(var);
+    }
+    if let Some((name, host)) = origin {
+        command.env("GH_REPO", name).env("GH_HOST", host);
     }
     let spawned = command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).process_group(0).spawn();
     let Ok(mut child) = spawned else { return Ran::Failed };

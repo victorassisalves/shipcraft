@@ -25,7 +25,7 @@ pub fn check_pr(repo: &Repo) -> Result<()> {
     }
     for url in &urls {
         let url = without_userinfo(url);
-        match decide(gh::run(repo, &["repo", "view", &url, "--json", "nameWithOwner,viewerPermission"])) {
+        match decide(gh::run_named(repo, &["repo", "view", &url, "--json", "nameWithOwner,viewerPermission"])) {
             Answer::Pass => {}
             Answer::NotWritable { name, permission } => {
                 return refuse(
