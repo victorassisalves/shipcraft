@@ -22,6 +22,8 @@ pub enum Choice {
     Venv(&'static str),
     /// `uv.lock` at the root and `uv` on `PATH`.
     Uv,
+    /// `poetry.lock` at the root and `poetry` on `PATH` (item 152).
+    Poetry,
     Path,
 }
 
@@ -31,8 +33,12 @@ impl Choice {
             return Choice::Venv(dir);
         }
         // fs::metadata follows a link: a link to a file counts, a dangling one does not.
-        if std::fs::metadata(root.join("uv.lock")).is_ok_and(|m| m.is_file()) && on_path("uv") {
+        let locked = |file: &str, tool: &str| is_file(&root.join(file)) && on_path(tool);
+        if locked("uv.lock", "uv") {
             return Choice::Uv;
+        }
+        if locked("poetry.lock", "poetry") {
+            return Choice::Poetry;
         }
         Choice::Path
     }
@@ -41,6 +47,7 @@ impl Choice {
         let python = match self {
             Choice::Venv(dir) => format!("{dir}/bin/python"),
             Choice::Uv => "uv run --frozen python".to_string(),
+            Choice::Poetry => "poetry run python".to_string(),
             Choice::Path => "python3".to_string(),
         };
         format!("{python} {PYTEST_ARGS}")
@@ -53,7 +60,8 @@ impl Choice {
                 format!("shipcraft: Python interpreter {dir}/bin/python (the project's virtual environment); {EDIT}")
             }
             Choice::Uv => format!("shipcraft: Python through uv run --frozen (uv.lock and uv on PATH, no runnable .venv/bin/python or venv/bin/python); {EDIT}"),
-            Choice::Path => format!("shipcraft: Python interpreter python3 from PATH (no runnable .venv/bin/python or venv/bin/python, and no uv.lock with uv on PATH), so the hook runs whichever python3 is first on PATH at commit time; {EDIT}"),
+            Choice::Poetry => format!("shipcraft: Python through poetry run (poetry.lock and poetry on PATH, no runnable .venv/bin/python or venv/bin/python, and no uv.lock with uv on PATH); {EDIT}"),
+            Choice::Path => format!("shipcraft: Python interpreter python3 from PATH (no runnable .venv/bin/python or venv/bin/python, no uv.lock with uv on PATH, and no poetry.lock with poetry on PATH), so the hook runs whichever python3 is first on PATH at commit time; {EDIT}"),
         }
     }
 
@@ -63,6 +71,12 @@ impl Choice {
             _ => None,
         }
     }
+}
+
+/// `fs::metadata` follows a link: a link to a file counts, a dangling one,
+/// a folder or any error does not.
+fn is_file(path: &Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|m| m.is_file())
 }
 
 /// Point 2's warning, when git does not ignore the venv's interpreter
@@ -107,18 +121,18 @@ pub struct Advice {
 }
 
 /// Point 3: when the suite wrote no report and its command's first word is an
-/// interpreter the folder where it ran (`root`) does not have, or `uv` off
-/// `PATH`: the tail of the first line, and the advice. None keeps today's refusal.
+/// interpreter the folder where it ran (`root`) does not have, or `uv` (or,
+/// item 152, `poetry`) off `PATH`: the tail of the first line, and the advice. None keeps today's refusal.
 pub fn missing_interpreter(command: &str, root: &Path, shown_root: &str, key: &str) -> Option<(String, Advice)> {
     let word = first_word(command)?;
-    if word == "uv" {
-        if on_path("uv") {
+    if word == "uv" || word == "poetry" {
+        if on_path(word) {
             return None;
         }
-        let why = "the suite's command runs through uv".to_string();
+        let why = format!("the suite's command runs through {word}");
         return Some((
-            "; uv is not on PATH".to_string(),
-            Advice { why, next: format!("install uv or edit {key} in {CONFIG_FILE}; then try again") },
+            format!("; {word} is not on PATH"),
+            Advice { why, next: format!("install {word} or edit {key} in {CONFIG_FILE}; then try again") },
         ));
     }
     let dir = venv_dir(word)?;
@@ -138,9 +152,13 @@ pub fn missing_interpreter(command: &str, root: &Path, shown_root: &str, key: &s
 /// Point 3's worktree rule, right before a suite's command runs in `root`:
 /// a relative venv interpreter missing here, in a linked worktree whose main
 /// worktree has it, runs from there. Returns the command to run and whether
-/// it was replaced.
+/// it was replaced. Item 152: a `poetry run python` command run outside the
+/// project's folder names that folder to Poetry, never `borrowed`.
 pub fn borrow(command: String, suite: &Suite, root: &Path) -> (String, bool) {
     let Some(word) = first_word(&suite.comando) else { return (command, false) };
+    if word == "poetry" {
+        return (poetry_project(&command, suite, root).unwrap_or(command), false);
+    }
     let Some(dir) = venv_dir(word) else { return (command, false) };
     if Path::new(word).is_absolute() || is_executable(&root.join(word)) {
         return (command, false);
@@ -161,6 +179,39 @@ pub fn borrow(command: String, suite: &Suite, root: &Path) -> (String, bool) {
     (replaced, true)
 }
 
+/// Item 152's point 2: the command with `poetry -P <project folder>`, when the
+/// config's command is `poetry run python ...`, the run's Poetry project has no
+/// in-project `.venv`, and the main folder's project is another folder.
+fn poetry_project(command: &str, suite: &Suite, root: &Path) -> Option<String> {
+    let words: Vec<&str> = suite.comando.split_ascii_whitespace().take(3).collect();
+    if words != ["poetry", "run", "python"] || has_own_venv(root, &suite.raiz) {
+        return None;
+    }
+    let project = std::fs::canonicalize(main_folder()?.join(&suite.raiz)).ok()?;
+    let here = std::fs::canonicalize(root).ok()?;
+    if !project.is_dir() || project == here {
+        return None;
+    }
+    let path = project.to_str()?;
+    let replaced = replace_first(command, "poetry", &format!("poetry -P {}", shell_quote(path)))?;
+    eprintln!(
+        "shipcraft: suite {} runs poetry -P {path} (Poetry keys its environment to the project folder, and this run is in another folder)",
+        suite.name()
+    );
+    Some(replaced)
+}
+
+/// Whether the first folder holding a `pyproject.toml`, from `root` up to the
+/// top of the tree it runs in (`root` less the suite's `raiz`, a normalized
+/// relative path), holds a `.venv` folder. No such folder: false.
+fn has_own_venv(root: &Path, raiz: &str) -> bool {
+    let up = Path::new(raiz).components().count();
+    root.ancestors()
+        .take(up + 1)
+        .find(|folder| is_file(&folder.join("pyproject.toml")))
+        .is_some_and(|folder| std::fs::metadata(folder.join(".venv")).is_ok_and(|m| m.is_dir()))
+}
+
 /// `command` with its first word, when it is `word`, replaced by `with`.
 fn replace_first(command: &str, word: &str, with: &str) -> Option<String> {
     let rest = command.trim_start_matches(|c: char| c.is_ascii_whitespace());
@@ -177,6 +228,23 @@ fn replace_first(command: &str, word: &str, with: &str) -> Option<String> {
 /// reads the caller's environment, so in a hook (`GIT_DIR` set) it is the
 /// hook's repository, also when the suite runs in a checkout copy.
 fn main_worktree() -> Option<PathBuf> {
+    let (common, git_dir) = git_dirs()?;
+    main_of(&common, git_dir.as_deref()?)
+}
+
+/// Item 152: the main folder, the parent of a common dir named `.git`, from
+/// the main worktree or a linked one (a bare repository reads nothing).
+fn main_folder() -> Option<PathBuf> {
+    let (common, _) = git_dirs()?;
+    let common = Path::new(&common);
+    (common.file_name()? == ".git").then(|| common.parent().map(Path::to_path_buf))?
+}
+
+/// `git rev-parse --path-format=absolute --git-common-dir --git-dir` in this
+/// process's working directory: the common dir (the answer trimmed, its first
+/// line) and the git dir. A failed spawn, a nonzero exit or an empty answer
+/// reads nothing.
+fn git_dirs() -> Option<(String, Option<String>)> {
     let out = Command::new("git")
         .args(["rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir"])
         .stdin(Stdio::null())
@@ -187,8 +255,9 @@ fn main_worktree() -> Option<PathBuf> {
         return None;
     }
     let said = text(&out.stdout);
-    let mut lines = said.lines();
-    main_of(lines.next()?, lines.next()?)
+    let mut lines = said.trim().lines();
+    let common = lines.next().filter(|l| !l.is_empty())?.to_string();
+    Some((common, lines.next().map(str::to_string)))
 }
 
 fn main_of(common: &str, git_dir: &str) -> Option<PathBuf> {
@@ -323,6 +392,90 @@ mod tests {
         assert_eq!(main_of("/r/.git", "/r/.git/worktrees/w"), Some(PathBuf::from("/r")));
         assert_eq!(main_of("/r/.git", "/r/.git"), None);
         assert_eq!(main_of("/r/repo.git", "/r/repo.git/worktrees/w"), None);
+    }
+
+    fn suite(raiz: &str, comando: &str) -> Suite {
+        Suite {
+            nome: String::new(),
+            raiz: raiz.to_string(),
+            comando: comando.to_string(),
+            verifica: None,
+            globs: Vec::new(),
+            filtra: crate::config::Filtra::Shipcraft,
+        }
+    }
+
+    #[test]
+    fn poetry_command_and_lines() {
+        assert_eq!(Choice::Poetry.command(), "poetry run python -m pytest -p no:cacheprovider --junitxml={junit}");
+        assert_eq!(Choice::Poetry.line(), "shipcraft: Python through poetry run (poetry.lock and poetry on PATH, no runnable .venv/bin/python or venv/bin/python, and no uv.lock with uv on PATH); to use another, edit test_command in .shipcraft.toml");
+        assert_eq!(Choice::Path.line(), "shipcraft: Python interpreter python3 from PATH (no runnable .venv/bin/python or venv/bin/python, no uv.lock with uv on PATH, and no poetry.lock with poetry on PATH), so the hook runs whichever python3 is first on PATH at commit time; to use another, edit test_command in .shipcraft.toml");
+        assert_eq!(Choice::Poetry.venv(), None);
+    }
+
+    #[test]
+    fn poetry_lock_alone_is_not_poetry_without_the_tool() {
+        let root = scratch("poetry-pick");
+        fs::write(root.join("poetry.lock"), "").unwrap();
+        if !on_path("poetry") {
+            assert_eq!(Choice::pick(&root), Choice::Path);
+        }
+        python(&root, ".venv", 0o755);
+        assert_eq!(Choice::pick(&root), Choice::Venv(".venv"), "a venv beside poetry.lock wins");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn missing_poetry_says_so() {
+        let root = scratch("missing-poetry");
+        if !on_path("poetry") {
+            let (tail, advice) =
+                missing_interpreter("poetry run python -m pytest", &root, ".", "test_command").unwrap();
+            assert_eq!(tail, "; poetry is not on PATH");
+            assert_eq!(advice.why, "the suite's command runs through poetry");
+            assert_eq!(advice.next, "install poetry or edit test_command in .shipcraft.toml; then try again");
+        }
+        assert!(missing_interpreter("poetryx run python", &root, ".", "k").is_none());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn own_venv_is_the_first_pyproject_folders_up_to_the_top() {
+        let top = scratch("own-venv");
+        let root = top.join("services/api");
+        fs::create_dir_all(&root).unwrap();
+        assert!(!has_own_venv(&root, "services/api"), "no pyproject.toml anywhere");
+        fs::write(top.join("pyproject.toml"), "").unwrap();
+        assert!(!has_own_venv(&root, "services/api"), "the root project has no .venv");
+        fs::write(top.join(".venv"), "").unwrap();
+        assert!(!has_own_venv(&root, "services/api"), "a .venv file is not an environment");
+        fs::remove_file(top.join(".venv")).unwrap();
+        fs::create_dir(top.join(".venv")).unwrap();
+        assert!(has_own_venv(&root, "services/api"));
+        assert!(!has_own_venv(&root, "api"), "the walk stops at the top of the tree");
+        fs::write(root.join("pyproject.toml"), "").unwrap();
+        assert!(!has_own_venv(&root, "services/api"), "the nearest project is the run's");
+        assert!(has_own_venv(&top.join(""), ""));
+        let _ = fs::remove_dir_all(&top);
+    }
+
+    #[test]
+    fn poetry_rewrite_needs_poetry_run_python() {
+        let root = scratch("poetry-forms");
+        for form in ["poetry run pytest", "poetry -P . run python", "poetry --project . run python", "poetry run"] {
+            let command = format!("{form} -x");
+            assert_eq!(borrow(command.clone(), &suite("", &command), &root), (command, false));
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn poetry_word_becomes_poetry_dash_p() {
+        assert_eq!(
+            replace_first("poetry run python -m pytest", "poetry", "poetry -P '/a b'").unwrap(),
+            "poetry -P '/a b' run python -m pytest"
+        );
+        assert_eq!(shell_quote("/x/it's"), "'/x/it'\"'\"'s'");
     }
 
     #[test]
