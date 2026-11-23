@@ -143,7 +143,9 @@ if case.startswith('refuse-'):
   assert not any(l.startswith('Next:') and FULL in l for l in text(p).splitlines()),text(p)
  else:
   lines=refusal(p,full,needle)
-  if c=='foreign-hook':assert 'shipcraft check' in lines[-1],lines
+  if c=='foreign-hook':
+   assert lines[-1].startswith('Next: '),lines
+   assert ', or make ' not in lines[-1] and 'manually' not in lines[-1],lines
   if c in ('glob-order','glob-order-reverse'):assert b not in '\n'.join(lines[:2]),lines
  assert_snapshot(before,'refused init changed tree or git state')
  sys.exit()

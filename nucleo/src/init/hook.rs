@@ -6,7 +6,7 @@ use crate::git::{git_in, text, Repo};
 use crate::init_hooks;
 use crate::init_msg::{self, Plan};
 use crate::init_tool::{self, Tool};
-use crate::refusal::{failed, Result};
+use crate::refusal::{failed, firm, refuse, Refusal, Result, Stop};
 use crate::suite::shell_quote;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -25,6 +25,8 @@ pub(super) enum Hook {
     Own(Vec<PathBuf>),
     Msg(Plan),
     Tool(Tool),
+    /// Item 153: hooks wired by hand, both paths as shown (`<commit-msg>, <post-commit>`).
+    Hand(String),
 }
 
 /// `shipcraft status`: whether commits go through shipcraft; any doubt reads as no hook.
@@ -38,6 +40,11 @@ pub fn hook_status(repo: &Repo) -> String {
         }
     }
     match path.and_then(|path| decide_hook_with(repo, false, path)) {
+        // Item 153, point 5: through a yielding refusal, hooks wired by hand.
+        Ok(Hook::Hand(_)) => "shipcraft: hooks call shipcraft, wired by hand (commit-msg and post-commit)".into(),
+        Err(Stop::Refused(r)) if r.what() == RUNS_CHECK => {
+            format!("shipcraft: missing hook: `shipcraft init` refuses: {}", r.what())
+        }
         decided if init_tool::present(repo) => {
             init_tool::status(
                 decided.and_then(|h| if let Hook::Tool(t) = h { Ok(t) } else { Err(failed(String::new())) }),
@@ -187,13 +194,22 @@ pub(super) fn decide_hook(repo: &Repo, local: bool) -> Result<Hook> {
     decide_hook_with(repo, local, hooks_path(repo)?)
 }
 
-/// `decide_hook` with `core.hooksPath` already read.
+/// `decide_hook` with `core.hooksPath` already read; item 153: a yielding refusal
+/// goes to the hand-wired route.
 fn decide_hook_with(repo: &Repo, local: bool, path: HooksPath) -> Result<Hook> {
+    match route(repo, local, path) {
+        Err(Stop::Refused(refusal)) if refusal.yields() => hand(repo, refusal),
+        decided => decided,
+    }
+}
+
+/// The routes of items 15a, 15b, 20 and 25, in their order.
+fn route(repo: &Repo, local: bool, path: HooksPath) -> Result<Hook> {
     let stop = |what: String| init_msg::alien(what.clone(), &what);
     let dir = match path {
         HooksPath::Unset => None,
         HooksPath::Set(dir) => Some(dir),
-        HooksPath::Fails(why) => return stop(format!("git config fails ({why})")),
+        HooksPath::Fails(why) => return stop(format!("git config fails ({why})")).map_err(firm),
     };
     // Item 25 (changes 15a.2 and 15a.3): `.husky/` or the pre-commit config.
     if init_tool::present(repo) || init_tool::husky_path(dir.as_deref()) {
@@ -222,6 +238,52 @@ fn decide_hook_with(repo: &Repo, local: bool, path: HooksPath) -> Result<Hook> {
         }
         [file] => lefthook_hook(repo, file, local),
         files => stop(format!("there is more than one lefthook file at the root ({})", files.join(", "))),
+    }
+}
+
+/// Item 153, point 4's pre-commit check, also read by `status` (point 5).
+const RUNS_CHECK: &str = "the installed pre-commit hook runs `shipcraft check`";
+
+/// Item 153, points 3 and 4: hooks wired by hand (point 1) in place of a yielding
+/// `refusal`, or `refusal` with the manual branch naming the two files `init` reads.
+fn hand(repo: &Repo, refusal: Refusal) -> Result<Hook> {
+    let mut printed = Vec::new();
+    for hook in ["commit-msg", "post-commit"] {
+        // Point 3: the refusal as it is when git's path fails or is not UTF-8 (point 4 could not show it).
+        match repo.hook_path_as_git(hook) {
+            Ok(Some(path)) => printed.push(path),
+            _ => return Err(Stop::Refused(refusal)),
+        }
+    }
+    let paths: Vec<PathBuf> = printed.iter().map(|p| repo.root().join(p)).collect();
+    // Point 3: no manual branch; hooks not wired by hand leave the refusal as it is.
+    if !init_hooks::wired(&paths) {
+        return Err(Stop::Refused(refusal));
+    }
+    // Point 4: with the installed pre-commit hook running the suite, it would run twice per commit.
+    let pre = repo.hook_path("pre-commit")?;
+    let runs = init_hooks::runnable(&pre)
+        && fs::read(&pre).is_ok_and(|b| {
+            b.windows(HOOK_MARK.len()).any(|w| w == HOOK_MARK.as_bytes()) || init_hooks::calls(&b, &["check"])
+        });
+    if runs {
+        return refuse(
+            "foreign-hook",
+            RUNS_CHECK,
+            "shipcraft does not replace or edit another tool's hook: when in doubt, this step stays manual",
+            "with it, the suite would run twice per commit: remove it and run `shipcraft init` again",
+        );
+    }
+    Ok(Hook::Hand(printed.iter().map(|p| shown(repo.root(), p)).collect::<Vec<_>>().join(", ")))
+}
+
+/// Item 153.4: a relative path as git printed it; an absolute one relative to the
+/// root when under it with no `..` after it, else as git printed it.
+fn shown(root: &Path, printed: &str) -> String {
+    let path = Path::new(printed);
+    match path.strip_prefix(root) {
+        Ok(rest) if !rest.components().any(|c| c == std::path::Component::ParentDir) => rest.display().to_string(),
+        _ => printed.to_string(),
     }
 }
 
@@ -305,6 +367,16 @@ pub(crate) fn written_hook(msg: bool, bytes: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shows_hook_paths_relative_only_without_parent_steps() {
+        let root = Path::new("/r/repo");
+        assert_eq!(shown(root, "/r/repo/.githooks/commit-msg"), ".githooks/commit-msg");
+        assert_eq!(shown(root, "/r/repo/../shared/hooks/commit-msg"), "/r/repo/../shared/hooks/commit-msg");
+        assert_eq!(shown(root, "/m/.git/hooks/post-commit"), "/m/.git/hooks/post-commit");
+        assert_eq!(shown(root, "../shared/hooks/commit-msg"), "../shared/hooks/commit-msg");
+        assert_eq!(shown(root, ".git/hooks/commit-msg"), ".git/hooks/commit-msg");
+    }
 
     #[test]
     fn reads_the_hooks_init_writes() {

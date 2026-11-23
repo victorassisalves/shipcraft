@@ -2658,7 +2658,8 @@ PY_LOCK
     run_cmd_stdin /dev/null shipcraft init
     chk "shipcraft init refused" rc_nonzero
     msg_check || fail "refused, but $MSGERR"
-    chk "the refusal says where to put shipcraft check" last3_has 'shipcraft check'
+    chk "the refusal ends with Next" match '^Next: ' "$(grep '[^[:space:]]' "$OUT" | tail -n 1)"
+    chk "the refusal offers no manual branch" nomatch ', or make |manually' "$(grep '[^[:space:]]' "$OUT" | tail -n 1)"
     chk "init did not ask the reviewer before refusing" out_hasnt '(who reviews|provider|Which reviewer|created \.shipcraft\.toml)'
     chk "init did not create .shipcraft.toml, .github or .shipcraft" init_untouched
     chk "the tree is clean" tree_clean
@@ -2677,7 +2678,8 @@ PY_LOCK
     chmod 700 .github
     chk "shipcraft init refused" rc_nonzero
     msg_check || fail "decide-before-write: $MSGERR"
-    chk "refusal is the alien-hook one (mentions shipcraft check), not an OS write error on .github" last3_has 'shipcraft check'
+    chk "the refusal ends with Next" match '^Next: ' "$(grep '[^[:space:]]' "$OUT" | tail -n 1)"
+    chk "the refusal offers no manual branch" nomatch ', or make |manually' "$(grep '[^[:space:]]' "$OUT" | tail -n 1)"
     chk "init did not ask the reviewer" out_hasnt '(who reviews|provider|Which reviewer)'
     chk "pre-existing .shipcraft.toml was not overwritten or deleted" eq "$(cat .shipcraft.toml 2>/dev/null)" "# rascunho-preexistente"
     chk "lefthook.yml was not modified" cmp -s lefthook.yml "$CW/lh.orig"
@@ -2723,7 +2725,7 @@ PY_LOCK
     chmod 700 .git/hooks
     pass ;;
   v1-15a.2-hook-pre-commit-alheio)
-    # Item 15a, rule 2: another hook in pre-commit (husky, the pre-commit framework) is refused in three lines naming shipcraft check, writing nothing.
+    # Item 15a, rule 2: another hook in pre-commit (husky, the pre-commit framework) is refused in three lines with a Next step and no manual branch, writing nothing.
     EXPECT="husky and pre-commit hooks refused cleanly"
     v1_start codex claude
     cat > .git/hooks/commit-msg <<'SH'
@@ -2747,7 +2749,7 @@ SH
     chk "pre-commit framework hook untouched" cmp -s .git/hooks/commit-msg "$CW/precommit.orig"
     pass ;;
   v1-15a.2-hook-script-ou-link-quebrado)
-    # Item 15a, rule 2 (edge): a broken symlink or any script in pre-commit is also refused in three lines naming shipcraft check, writing nothing.
+    # Item 15a, rule 2 (edge): a broken symlink or any script in pre-commit is also refused in three lines with a Next step and no manual branch, writing nothing.
     EXPECT="broken symlink and custom script refused cleanly"
     v1_start codex claude
     ln -s /caminho/inexistente/pre-commit .git/hooks/commit-msg
@@ -2763,7 +2765,7 @@ SH
     chk "non-executable hook untouched" cmp -s .git/hooks/commit-msg "$CW/script.orig"
     pass ;;
   v1-15a.2-core-hookspath-fora)
-    # Item 15a, rule 2: core.hooksPath pointing outside .git/hooks is refused in three lines naming shipcraft check, writing nothing.
+    # Item 15a, rule 2: core.hooksPath pointing outside .git/hooks is refused in three lines with a Next step and no manual branch, writing nothing.
     EXPECT="core.hooksPath outside .git/hooks refused"
     v1_start codex claude
     mkdir -p .githooks
@@ -2885,7 +2887,13 @@ SH
     chk "lefthook.yml was not modified" cmp -s lefthook.yml "$CW/lh.orig"
     rm -f .pre-commit-config.yaml
     mkdir -p .husky && printf 'npm test\n' > .husky/pre-commit
-    init_must_refuse_hook ".husky/ alongside lefthook.yml"
+    local before_husky_lefthook
+    before_husky_lefthook=$("$PY" -c 'import sys; sys.path.insert(0, sys.argv[1]); from lefthook_fixture import snapshot; print(sorted(snapshot().items()))' "$ACEITE/tools") || fail "snapshot before husky + lefthook"
+    run_cmd_stdin /dev/null shipcraft init
+    chk "husky + lefthook: exit 1" eq "$RC" 1
+    chk "husky + lefthook: nothing written" eq "$("$PY" -c 'import sys; sys.path.insert(0, sys.argv[1]); from lefthook_fixture import snapshot; print(sorted(snapshot().items()))' "$ACEITE/tools")" "$before_husky_lefthook"
+    chk "husky + lefthook: exactly three refusal lines" awk 'NR == 1 && !/^shipcraft refused:/ { exit 1 } NR == 2 && !/^Why:/ { exit 1 } NR == 3 && !/^Next:/ { exit 1 } END { if (NR != 3) exit 1 }' "$OUT"
+    chk "husky + lefthook: exact Next line" grep -Fx 'Next: keep only one and run `shipcraft init` again' "$OUT"
     chk "lefthook.yml was not modified" cmp -s lefthook.yml "$CW/lh.orig"
     pass ;;
   v1-15a.2-lefthook-dois-nomes-ou-hook-alheio)
@@ -2950,18 +2958,20 @@ init_literal_refused() { # returns without ending the case, to probe every spell
   [ "$RC" -ne 0 ] || return 1
   msg_check || return 1
   MSGERR="refusal must precede questions and writes, preserve config"
-  last3_has 'shipcraft check' &&
+  match '^Next: ' "$(grep '[^[:space:]]' "$OUT" | tail -n 1)" &&
+    nomatch ', or make |manually' "$(grep '[^[:space:]]' "$OUT" | tail -n 1)" &&
     out_hasnt '(who reviews|provider|Which reviewer|created \.shipcraft\.toml)' &&
     init_untouched &&
     [ ! -e .git/hooks/commit-msg ] && [ ! -L .git/hooks/commit-msg ] &&
     cmp -s .git/config "$1"
 }
-init_must_refuse_hook() { # alien-hook refusal: rc != 0, 3 lines with shipcraft check, nothing created and no reviewer question
+init_must_refuse_hook() { # alien-hook refusal: rc != 0, 3 lines with a Next step and no manual branch, nothing created and no reviewer question
   local label="$1"
   run_cmd_stdin /dev/null shipcraft init
   [ "$RC" -ne 0 ] || fail "$label: accepted (rc=0)"
   msg_check || fail "$label: refused, but $MSGERR"
-  chk "$label: last 3 lines mention shipcraft check" last3_has 'shipcraft check'
+  chk "$label: last line starts with Next" match '^Next: ' "$(grep '[^[:space:]]' "$OUT" | tail -n 1)"
+  chk "$label: Next offers no manual branch" nomatch ', or make |manually' "$(grep '[^[:space:]]' "$OUT" | tail -n 1)"
   chk "$label: did not create .shipcraft.toml, .github or .shipcraft" init_untouched
   chk "$label: did not ask the reviewer before refusing" out_hasnt '(who reviews|provider|Which reviewer|created \.shipcraft\.toml)'
 }

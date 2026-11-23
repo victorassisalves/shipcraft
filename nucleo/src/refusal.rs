@@ -11,6 +11,8 @@ pub struct Refusal {
     what: String,
     why: String,
     how: String,
+    /// Item 153: the hand-wired route may replace this refusal (see `init::hand`).
+    yields: bool,
 }
 
 impl Refusal {
@@ -22,6 +24,11 @@ impl Refusal {
     /// How to go on: the third line, without its prefix.
     pub fn how(&self) -> &str {
         &self.how
+    }
+
+    /// Item 153: whether hooks wired by hand replace this refusal.
+    pub fn yields(&self) -> bool {
+        self.yields
     }
 }
 
@@ -47,7 +54,23 @@ pub fn refuse<T>(
     why: impl Into<String>,
     how: impl Into<String>,
 ) -> Result<T> {
-    Err(Stop::Refused(Refusal { code, what: what.into(), why: why.into(), how: how.into() }))
+    Err(Stop::Refused(Refusal { code, what: what.into(), why: why.into(), how: how.into(), yields: false }))
+}
+
+/// Item 153: a refusal that hooks wired by hand replace (point 2).
+pub fn refuse_yielding<T>(code: &'static str, what: String, why: &str, how: String) -> Result<T> {
+    refuse(code, what, why, how).map_err(|stop| match stop {
+        Stop::Refused(r) => Stop::Refused(Refusal { yields: true, ..r }),
+        other => other,
+    })
+}
+
+/// Item 153: a stop that no hook by hand gets past (point 2's refusals that do not yield).
+pub fn firm(stop: Stop) -> Stop {
+    match stop {
+        Stop::Refused(r) => Stop::Refused(Refusal { yields: false, ..r }),
+        other => other,
+    }
 }
 
 pub fn failed(message: impl Into<String>) -> Stop {

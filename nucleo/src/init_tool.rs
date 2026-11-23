@@ -8,7 +8,7 @@
 use crate::config::CONFIG_FILE;
 use crate::git::Repo;
 use crate::init::{is_executable, layout, on_path, single_source, LOCAL};
-use crate::refusal::{failed, refuse, short_list, Result, Stop};
+use crate::refusal::{failed, firm, refuse, refuse_yielding, short_list, Result, Stop};
 use serde_norway::Value;
 use std::fs;
 use std::path::Path;
@@ -74,10 +74,12 @@ pub fn decide(repo: &Repo, dir: Option<&str>, local: bool) -> Result<Tool> {
         single_source(repo, "").err().map(|source| format!("{tool} and lefthook ({source})"))
     };
     if let Some(both) = other {
-        return alien(format!("the project uses two hook tools: {both}"), "keep only one");
+        let refused = alien(format!("the project uses two hook tools: {both}"), "keep only one");
+        // Item 153: with husky, hooks by hand are not a way out (point 2).
+        return if husky { refused.map_err(firm) } else { refused };
     }
     if husky {
-        crate::init_husky::plan(repo, dir, local)
+        crate::init_husky::plan(repo, dir, local).map_err(firm)
     } else {
         pre_commit_plan(repo, dir, local)
     }
@@ -140,7 +142,7 @@ fn pre_commit_plan(repo: &Repo, dir: Option<&str>, local: bool) -> Result<Tool> 
         };
         let shipcraft = words.first().is_some_and(|w| w.rsplit('/').next() == Some("shipcraft"));
         if pre && shipcraft && words.get(1).is_some_and(|w| w == "check") {
-            return alien(format!("{PRE_COMMIT_CONFIG} has an `shipcraft check` in pre-commit"), TWICE);
+            return alien(format!("{PRE_COMMIT_CONFIG} has an `shipcraft check` in pre-commit"), TWICE).map_err(firm);
         }
     }
     let mut writes = Vec::new();
@@ -159,7 +161,7 @@ fn pre_commit_plan(repo: &Repo, dir: Option<&str>, local: bool) -> Result<Tool> 
     }
     let pre = fs::read_to_string(repo.hook_path("pre-commit")?).ok();
     if pre.as_deref().is_some_and(|t| t.contains("# shipcraft hook") || checks(t)) {
-        return alien("the installed pre-commit hook runs `shipcraft check`".into(), TWICE);
+        return alien("the installed pre-commit hook runs `shipcraft check`".into(), TWICE).map_err(firm);
     }
     // 133.3: a file that cannot be read is no launcher of either kind.
     let (mut prek, mut classic) = (pre.as_deref().is_some_and(|t| is_prek(t, "pre-commit")), false);
@@ -423,15 +425,10 @@ pub(crate) fn alien_plain<T>(what: &str, how: &str) -> Result<T> {
 
 const WHY: &str = "shipcraft does not replace or edit another tool's hook: when in doubt, this step stays manual";
 
-/// The `hook-alheio` refusal of this route: what keeps the integration, and
-/// the commands by hand, never the `pre-commit`.
+/// The `hook-alheio` refusal of this route: what keeps the integration, never
+/// the `pre-commit`. Item 153: it yields to hooks wired by hand, which add the manual branch otherwise.
 pub(crate) fn alien<T>(what: String, how: &str) -> Result<T> {
-    refuse(
-        "foreign-hook",
-        what,
-        WHY,
-        format!("{how} and run `shipcraft init` again, or manually put `shipcraft check --commit-msg` in commit-msg and `shipcraft close` in post-commit"),
-    )
+    refuse_yielding("foreign-hook", what, WHY, format!("{how} and run `shipcraft init` again"))
 }
 #[cfg(test)]
 mod tests {

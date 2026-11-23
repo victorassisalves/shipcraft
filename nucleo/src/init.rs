@@ -25,7 +25,7 @@ use crate::init_tool;
 use crate::lang::{self, Lang};
 use crate::lock::LOCK_DIR;
 use crate::python_env;
-use crate::refusal::{failed, Result};
+use crate::refusal::{failed, firm, Result};
 use crate::tsbuild;
 use std::fs;
 
@@ -61,7 +61,8 @@ pub fn open() -> Result<Repo> {
         let out = git_in(&cwd, &["rev-parse", "--show-toplevel"])?;
         let why = text(&out.stderr).lines().next().unwrap_or_default().to_string();
         let what = format!("git cannot open this repository ({why})");
-        init_msg::alien(what.clone(), &what)
+        // Item 153: git's own failure, which no hook by hand gets past.
+        init_msg::alien(what.clone(), &what).map_err(firm)
     })
 }
 
@@ -144,6 +145,12 @@ pub fn run(repo: &Repo, options: &Options) -> Result<()> {
         config.and_then(|()| write_once(repo, &mut created, &format!("{LOCK_DIR}/.gitkeep"), "")).and_then(|()| {
             match &hook {
                 Hook::Own(hooks) => install_hooks(hooks, local, &mut created),
+                Hook::Hand(shown) => {
+                    println!(
+                        "shipcraft: commit-msg and post-commit hooks call shipcraft, wired by hand ({shown}), kept"
+                    );
+                    Ok(false)
+                }
                 Hook::Msg(plan) => init_msg::write(repo, plan, raise.as_ref()).map(|()| plan.new.is_some()),
                 Hook::Tool(tool) => init_tool::write(repo, tool, raise.as_ref()).map(|()| !tool.writes.is_empty()),
             }
@@ -201,7 +208,7 @@ pub fn run(repo: &Repo, options: &Options) -> Result<()> {
     let lefthook = match &hook {
         Hook::Msg(Plan { file, .. }) => format!(", {file}"),
         Hook::Tool(tool) => tool.writes.iter().map(|(file, ..)| format!(", {file}")).collect(),
-        Hook::Own(_) => String::new(),
+        Hook::Own(_) | Hook::Hand(_) => String::new(),
     };
     // Item 147: a React app's first DOM test, in a config this run writes.
     if !kept && lang == Some(Lang::Node) && !workspace && lang::react_without_dom(repo.root()) {

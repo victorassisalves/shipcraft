@@ -131,8 +131,8 @@ These readings remain part of the acceptance contract. Historical item numbers i
 60. Even explicitly listed pytest test files are narrowed to RED files in the hook; the old-test probe stays empty.
 61. Init refuses before reviewer questions and writes no config, workflow, state or hook on refusal.
 62. Failed init writes roll back newly created files and preserve existing files and config symlink targets, whether present or absent.
-63. Foreign hooks and unsupported sources refuse with three lines naming `shipcraft check`; supported husky/pre-commit integration is covered by item 25 fixed points.
-64. Only literal `.git/hooks` is accepted as core.hooksPath; spaces, trailing slash, leading `./` and absolute equivalents refuse without normalization.
+63. Foreign hooks and unsupported sources refuse with three lines. The last line starts with `Next: ` and contains neither `, or make ` nor `manually`: no `foreign-hook` refusal names `shipcraft check` or offers hooks wired by hand (item 153). Supported husky/pre-commit integration is covered by item 25 fixed points.
+64. Shipcraft’s own hook route accepts only literal `.git/hooks` as core.hooksPath. Spaces, trailing slash, leading `./` and absolute equivalents refuse without normalization unless item 153 accepts hooks wired by hand. Hooks wired by hand are accepted under any `core.hooksPath`.
 65. Multiple lefthook sources, foreign launchers and unsupported YAML/layout refuse before writing; the later route rules in item 20 supersede the original parallel-only restriction.
 
 ## Points by item

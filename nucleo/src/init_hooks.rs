@@ -93,8 +93,16 @@ fn skip_blanks(s: &[u8]) -> &[u8] {
 
 /// Whether any line of `text` is a call line with these arguments, compared
 /// as bytes: split on `\n`, a trailing `\r` stripped, `#` lines skipped.
-fn calls(text: &[u8], args: &[&str]) -> bool {
+pub(crate) fn calls(text: &[u8], args: &[&str]) -> bool {
     text.split(|b| *b == b'\n').any(|line| call_line(line.strip_suffix(b"\r").unwrap_or(line), args))
+}
+
+/// Item 153, points 1 and 4: a regular file (links followed) that this user may
+/// execute, as git checks it (`access(X_OK)`), not any execute bit.
+pub(crate) fn runnable(path: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(c) = std::ffi::CString::new(path.as_os_str().as_bytes()) else { return false };
+    fs::metadata(path).is_ok_and(|m| m.is_file()) && unsafe { libc::access(c.as_ptr(), libc::X_OK) } == 0
 }
 
 /// Item 143: whether a line of `text` calls `shipcraft check --commit-msg` or `shipcraft close`.
@@ -130,32 +138,86 @@ fn shell_word(line: &[u8]) -> Option<(Vec<u8>, &[u8])> {
 /// `/` component is `shipcraft`, then blanks and each argument, each followed
 /// by blanks or the end of the line.
 fn call_line(line: &[u8], args: &[&str]) -> bool {
+    call_rest(line, args).is_some()
+}
+
+/// `call_line`'s reading: the rest of the line after the arguments (empty or blank-led).
+fn call_rest<'a>(line: &'a [u8], args: &[&str]) -> Option<&'a [u8]> {
     let mut rest = skip_blanks(line);
     if rest.first() == Some(&b'#') {
-        return false;
+        return None;
     }
     if let Some(after) = rest.strip_prefix(b"exec") {
         if after.first().is_some_and(|b| blank(*b)) {
             rest = skip_blanks(after);
         }
     }
-    let Some((word, mut rest)) = shell_word(rest) else { return false };
+    let (word, mut rest) = shell_word(rest)?;
     if word.rsplit(|b| *b == b'/').next() != Some(b"shipcraft".as_slice()) {
-        return false;
+        return None;
     }
     for arg in args {
         if !rest.first().is_some_and(|b| blank(*b)) {
-            return false;
+            return None;
         }
-        let Some(after) = skip_blanks(rest).strip_prefix(arg.as_bytes()) else { return false };
-        rest = after;
+        rest = skip_blanks(rest).strip_prefix(arg.as_bytes())?;
     }
-    rest.first().is_none_or(|b| blank(*b))
+    rest.first().is_none_or(|b| blank(*b)).then_some(rest)
+}
+
+/// Item 153, point 1: whether both hooks (`commit-msg`, then `post-commit`) are wired by hand.
+pub(crate) fn wired(paths: &[PathBuf]) -> bool {
+    HOOKS.iter().zip(paths).all(|((name, args, _), path)| {
+        runnable(path) && fs::read(path).is_ok_and(|bytes| hand_wired(&bytes, args, *name == "commit-msg"))
+    })
+}
+
+const SHELLS: [&[u8]; 4] = [b"#!/bin/sh", b"#!/bin/bash", b"#!/usr/bin/env sh", b"#!/usr/bin/env bash"];
+
+/// Point 1 on a hook's bytes: a shell's `#!`, no CR, the last command line a terminal call
+/// (`msg`: an optional `"$1"` or `$1`), and no `exit` or `exec` command line before it.
+fn hand_wired(bytes: &[u8], args: &[&str], msg: bool) -> bool {
+    let mut lines = bytes.split(|b| *b == b'\n');
+    let first = lines.next().unwrap_or_default();
+    let shebang = &first[..first.len() - first.iter().rev().take_while(|b| blank(**b)).count()];
+    if bytes.contains(&b'\r') || !SHELLS.contains(&shebang) {
+        return false;
+    }
+    let commands: Vec<&[u8]> = lines.map(skip_blanks).filter(|l| l.first().is_some_and(|b| *b != b'#')).collect();
+    let Some((last, earlier)) = commands.split_last() else { return false };
+    let first_word = |l: &&[u8]| l.split(|b| blank(*b)).next().is_some_and(|w| w == b"exit" || w == b"exec");
+    let Some(mut rest) = call_rest(last, args) else { return false };
+    if msg {
+        let after = skip_blanks(rest);
+        if let Some(word) = [b"\"$1\"".as_slice(), b"$1"].iter().find_map(|w| after.strip_prefix(*w)) {
+            if word.first().is_none_or(|b| blank(*b)) {
+                rest = word;
+            }
+        }
+    }
+    let tail = skip_blanks(rest);
+    (tail.is_empty() || tail[0] == b'#') && !earlier.iter().any(first_word)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runnable_follows_the_owner_bit_not_any_bit() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("shipcraft-i153-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("hook");
+        fs::write(&p, "#!/bin/sh\nshipcraft close\n").unwrap();
+        for (mode, ok) in [(0o755, true), (0o700, true), (0o655, false), (0o644, false)] {
+            fs::set_permissions(&p, fs::Permissions::from_mode(mode)).unwrap();
+            assert_eq!(runnable(&p), ok, "{mode:o}");
+        }
+        assert!(!runnable(&dir));
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     const MSG: &[&str] = &["check", "--commit-msg"];
     const CLOSE: &[&str] = &["close"];
@@ -215,6 +277,37 @@ mod tests {
     fn bytes_not_utf8_do_not_hide_a_call() {
         assert!(calls(b"# coment\xe1rio em Latin-1\nshipcraft close\n", CLOSE));
         assert!(calls(b"shipcraft close # \xff\xfe", CLOSE));
+    }
+
+    #[test]
+    fn terminal_calls_are_wired_by_hand() {
+        let msg = |t: &str| hand_wired(t.as_bytes(), MSG, true);
+        let close = |t: &str| hand_wired(t.as_bytes(), CLOSE, false);
+        assert!(msg("#!/bin/sh\nshipcraft check --commit-msg \"$1\"\n"));
+        assert!(msg("#!/bin/bash \t\necho hi\nexec /usr/local/bin/shipcraft check --commit-msg \"$1\" # shipcraft\n"));
+        assert!(msg("#!/usr/bin/env bash\nshipcraft check --commit-msg $1\n\n  # done\n\n"));
+        assert!(msg("#!/bin/sh\nshipcraft check --commit-msg\n"));
+        assert!(close("#!/usr/bin/env sh\n./node_modules/.bin/shipcraft close\n"));
+        assert!(close("#!/bin/sh\nshipcraft close #x"));
+        for text in [
+            "#!/bin/sh\nshipcraft check --commit-msg \"$1\" || true\n",
+            "#!/bin/sh\nshipcraft check --commit-msg \"$1\" &\n",
+            "#!/bin/sh\nshipcraft check --commit-msg \"$1\"\nprintf done\n",
+            "#!/bin/sh\nexit 0\nshipcraft check --commit-msg \"$1\"\n",
+            "#!/bin/sh\n  exec true\nshipcraft check --commit-msg \"$1\"\n",
+            "#!/bin/sh\r\nshipcraft check --commit-msg \"$1\"\r\n",
+            "#!/bin/sh -n\nshipcraft check --commit-msg \"$1\"\n",
+            "shipcraft check --commit-msg \"$1\"\n",
+            "#!/bin/sh\nshipcraft check --commit-msg \"$1\"x\n",
+            "#!/bin/sh\nshipcraft check --commit-msg $10\n",
+            "#!/bin/sh\nshipcraft check\n",
+            "#!/bin/sh\nshipcraft close\n",
+            "#!/bin/sh\n",
+        ] {
+            assert!(!msg(text), "{text:?}");
+        }
+        assert!(!close("#!/bin/sh\nshipcraft close \"$1\"\n"));
+        assert!(!close("#!/bin/sh\nshipcraft close; true\n"));
     }
 
     #[test]
