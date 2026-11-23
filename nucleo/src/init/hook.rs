@@ -198,7 +198,7 @@ pub(super) fn decide_hook(repo: &Repo, local: bool) -> Result<Hook> {
 /// goes to the hand-wired route.
 fn decide_hook_with(repo: &Repo, local: bool, path: HooksPath) -> Result<Hook> {
     match route(repo, local, path) {
-        Err(Stop::Refused(refusal)) if refusal.yields() => hand(repo, refusal, local),
+        Err(Stop::Refused(refusal)) if refusal.yields() => hand(repo, refusal),
         decided => decided,
     }
 }
@@ -246,18 +246,21 @@ const RUNS_CHECK: &str = "the installed pre-commit hook runs `shipcraft check`";
 
 /// Item 153, points 3 and 4: hooks wired by hand (point 1) in place of a yielding
 /// `refusal`, or `refusal` with the manual branch naming the two files `init` reads.
-fn hand(repo: &Repo, refusal: Refusal, local: bool) -> Result<Hook> {
+fn hand(repo: &Repo, refusal: Refusal) -> Result<Hook> {
     let mut printed = Vec::new();
     for hook in ["commit-msg", "post-commit"] {
-        // Point 3: no branch when git's path fails or is not UTF-8 (it could not be shown as it is).
+        // Point 3: the refusal as it is when git's path fails or is not UTF-8 (point 4 could not show it).
         match repo.hook_path_as_git(hook) {
             Ok(Some(path)) => printed.push(path),
-            _ => return Err(Stop::Refused(refusal.branch("", Vec::new()))),
+            _ => return Err(Stop::Refused(refusal)),
         }
     }
     let paths: Vec<PathBuf> = printed.iter().map(|p| repo.root().join(p)).collect();
-    let shown: Vec<String> = printed.iter().map(|p| shown(repo.root(), p)).collect();
-    // Point 4's check first: with it, following the branch would refuse again.
+    // Point 3: no manual branch; hooks not wired by hand leave the refusal as it is.
+    if !init_hooks::wired(&paths) {
+        return Err(Stop::Refused(refusal));
+    }
+    // Point 4: with the installed pre-commit hook running the suite, it would run twice per commit.
     let pre = repo.hook_path("pre-commit")?;
     let runs = init_hooks::runnable(&pre)
         && fs::read(&pre).is_ok_and(|b| {
@@ -271,21 +274,10 @@ fn hand(repo: &Repo, refusal: Refusal, local: bool) -> Result<Hook> {
             "with it, the suite would run twice per commit: remove it and run `shipcraft init` again",
         );
     }
-    if !init_hooks::wired(&paths) {
-        // Point 3: no branch when a folder above a hook exists and is not a folder (`/dev/null`, a `.git` file).
-        if paths.iter().any(|p| p.ancestors().skip(1).any(|d| fs::metadata(d).is_ok_and(|m| !m.is_dir()))) {
-            return Err(Stop::Refused(refusal.branch("", Vec::new())));
-        }
-        let bin = if local { LOCAL } else { "shipcraft" };
-        let branch = format!(
-            ", or make `{bin} check --commit-msg \"$1\"` the last command of \u{1} and `{bin} close` the last command of \u{1}, each file starting with `#!/bin/sh` and with no `exit` or `exec` line before that call, both executable, and run `shipcraft init` again"
-        );
-        return Err(Stop::Refused(refusal.branch(&branch, shown)));
-    }
-    Ok(Hook::Hand(shown.join(", ")))
+    Ok(Hook::Hand(printed.iter().map(|p| shown(repo.root(), p)).collect::<Vec<_>>().join(", ")))
 }
 
-/// Item 153.3: a relative path as git printed it; an absolute one relative to the
+/// Item 153.4: a relative path as git printed it; an absolute one relative to the
 /// root when under it with no `..` after it, else as git printed it.
 fn shown(root: &Path, printed: &str) -> String {
     let path = Path::new(printed);
