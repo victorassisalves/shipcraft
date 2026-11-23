@@ -49,7 +49,11 @@ review = "local"
 # Revert: drop red and green, and set shipcraft_min back to "2.18".
 red = { agent = "codex", model = "gpt-6.1-sol", effort = "medium" }
 green = "claude"
-review = "codex"
+# Review pinned to Codex gpt-6.1-sol at medium effort (2026-11-22, Victor: "Sim, segue"):
+# the default model, gpt-6.2-sol, was refused by OpenAI's cybersecurity filter on both
+# review runs of PR 178 (item 156), with no verdict; item 155's RED hit the same filter.
+# Metric: 0 refused reviews over the next 5 PRs. Revert: review = "codex".
+review = { agent = "codex", model = "gpt-6.1-sol", effort = "medium" }
 
 [review]
 spec = "docs/spec.md"
