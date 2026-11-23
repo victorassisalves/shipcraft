@@ -72,10 +72,18 @@ fn tokens(command: &str) -> std::result::Result<Vec<Tok>, &'static str> {
                     lx.word = None; // its file descriptor
                 }
                 lx.end();
-                if c == '<' && chars.get(i + 1) == Some(&'<') {
+                let mut ops = Vec::new(); // its other characters, past line continuations
+                while let Some(&n) = chars.get(i + 1) {
+                    match n {
+                        '\\' if chars.get(i + 2) == Some(&'\n') => i += 1,
+                        '<' | '>' | '&' | '|' => ops.push(n),
+                        _ => break,
+                    }
+                    i += 1;
+                }
+                if c == '<' && ops.first() == Some(&'<') {
                     return Err("it holds a here-document");
                 }
-                i += chars[i + 1..].iter().take_while(|c| matches!(c, '<' | '>' | '&' | '|')).count();
                 lx.operand = true;
             }
             '#' if lx.word.is_none() => {
@@ -245,10 +253,7 @@ fn options(word: &str, args: &[String]) -> Item {
         if (is_config && config.is_some()) || (!is_config && root.is_some()) {
             return Err(format!("{long} is given more than once"));
         }
-        let value = match value {
-            Some(v) if !v.is_empty() => v,
-            _ => return Err(format!("{name} has no value")),
-        };
+        let Some(value) = value.filter(|v| !v.is_empty()) else { return Err(format!("{name} has no value")) };
         let shown = one_line(value);
         if value.contains(['$', '`', '*', '?', '[']) || value.starts_with('~') {
             return Err(format!("{name} {shown} is not a plain path"));
@@ -267,13 +272,7 @@ fn options(word: &str, args: &[String]) -> Item {
 
 /// `folder`, then each folder above it up to the repository root ("").
 fn folders(dir: &str) -> Vec<String> {
-    let mut out = vec![dir.to_string()];
-    let mut at = dir;
-    while !at.is_empty() {
-        at = folder(at);
-        out.push(at.to_string());
-    }
-    out
+    std::iter::successors(Some(dir), |at| (!at.is_empty()).then(|| folder(at))).map(str::to_string).collect()
 }
 
 /// The walk's names in one folder, in vitest's order.
@@ -503,6 +502,8 @@ mod tests {
         assert_eq!(words("\\2026>x '2026'>x \"2026\">x 2>x b"), ["2026", "2026", "2026", "b"]);
         assert_eq!([tokens("a 'b"), tokens("a \"b"), tokens("a \\")], [Err(QUOTES), Err(QUOTES), Err(QUOTES)]);
         assert_eq!(tokens("cat <<EOF\nx\nEOF"), Err("it holds a here-document"));
+        assert_eq!(tokens(": <\\\n<EOF\nx\nEOF"), Err("it holds a here-document"));
+        assert_eq!(words("a >\\\n&2 b <\\\n\\\n>c d"), ["a", "b", "d"]);
     }
 
     #[test]
@@ -536,6 +537,7 @@ mod tests {
         assert_eq!(read("vitest -t --config x"), Ok(vec![inv("vitest", path("x"), None)]));
         assert_eq!(read("vitest -uc x"), Ok(vec![inv("vitest", Named::Walk, None)]));
         assert_eq!(read("vitest -c a.ts -c b.ts"), Ok(vec![bad("--config is given more than once")]));
+        assert_eq!(read("vitest --config >\\\n&2 c.mjs"), Ok(vec![inv("vitest", path("c.mjs"), None)]));
         assert_eq!(read("vitest -r"), Ok(vec![bad("-r has no value")]));
         assert_eq!(read("vitest -r --reporter=x"), Ok(vec![bad("-r has no value")]));
         assert_eq!(read("vitest --config= x"), Ok(vec![bad("--config has no value")]));
