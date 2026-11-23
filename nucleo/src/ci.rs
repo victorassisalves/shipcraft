@@ -154,7 +154,7 @@ pub fn check_commit(
         if !matches!(change, Change::Opened(_)) {
             check_lefthook(repo, &parents, &snapshot, path)?;
             crate::vitest_files::check_added(repo, &parents, &snapshot, path, lock)?;
-            crate::pytest_config::check_changed(repo, &parents, &snapshot, path)?;
+            crate::pytest_config::check_changed(repo, &parents, &snapshot, path, lock)?;
             crate::jest_files::check_changed(repo, &parents, &snapshot, path)?;
         }
     }
