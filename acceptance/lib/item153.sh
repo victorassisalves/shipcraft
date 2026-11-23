@@ -3,7 +3,7 @@ item153_cases() {
   local c
   for c in repro pre-custom flow foreign-commit two-tools pre-foreign lefthook-invalid \
     pre-link foreign-post two-lefthooks extends lefthook-foreign symlink kept commit \
-    trailing-command early-exit operator cr comments manual-pre \
+    dispatcher early-exit operator cr comments manual-pre \
     manual-local only-commit rollback check-only worktree pre-duplicate lefthook-duplicate \
     husky-pre husky-lefthook husky-empty husky-other husky-check husky-link git-bad \
     installed-check status-fallback status-custom status-partial control-own; do
@@ -127,13 +127,6 @@ def assert_refusal(result, reason, next_text, explanation=why):
     assert result.stdout + result.stderr == expected, (expected, result.stdout, result.stderr)
 
 
-def manual(next_text, paths, command='shipcraft', rerun='shipcraft init'):
-    commit_path, post_path = paths
-    return (f'{next_text}, or make `{command} check --commit-msg "$1"` the last command of {commit_path}'
-            f' and `{command} close` the last command of {post_path}, each file starting with `#!/bin/sh`'
-            f' and with no `exit` or `exec` line before that call, both executable, and run `{rerun}` again')
-
-
 def paths(folder):
     return tuple(folder / event for event in events)
 
@@ -247,7 +240,7 @@ elif case == 'foreign-commit':
     assert not Path('ran-hook153').exists(), 'init or status ran the hook'
     (plain / 'post-commit').unlink()
     reason = 'a commit-msg hook not owned by shipcraft already exists (.git/hooks/commit-msg)'
-    refuse(reason, manual(plain_next(reason), paths(plain)))
+    refuse(reason, plain_next(reason))
 elif case == 'two-tools':
     write(pre, yaml_block)
     write(lefthook, lefthook_block)
@@ -325,31 +318,49 @@ elif case == 'commit':
     git('commit', '-qm', 'test: hand-wired commit', environment=hook_env)
     row, = map(json.loads, log.read_bytes().splitlines())
     assert row['layer'] == 'hook' and row['result'] == 'passed', row
-elif case == 'trailing-command':
+elif case == 'dispatcher':
     set_custom()
-    pair(custom, post=post_call + b'\nprintf done')
-    refuse(custom_reason, manual(custom_next, paths(custom)))
+    script(custom / 'dispatcher', b'case "$0" in\n  *commit-msg) : ;;\n  *post-commit) : ;;\nesac')
+    for event in events:
+        (custom / event).symlink_to('dispatcher')
+    before = snapshot()
+    first = init()
+    assert snapshot() == before, 'first refused init changed dispatcher, links, modes or Git config'
+    with (custom / 'commit-msg').open('ab') as hook:
+        hook.write(commit_call + b'\n')
+    with (custom / 'post-commit').open('ab') as hook:
+        hook.write(post_call + b'\n')
+    assert hook_state(custom)['commit-msg'][0] == hook_state(custom)['post-commit'][0]
+    assert (custom / 'dispatcher').read_bytes().endswith(commit_call + b'\n' + post_call + b'\n')
+    before = snapshot()
+    second = init()
+    assert snapshot() == before, 'second refused init changed dispatcher, links, modes or Git config'
+    assert_refusal(first, custom_reason, custom_next)
+    assert_refusal(second, custom_reason, custom_next)
 elif case == 'early-exit':
     set_custom()
     for early in (b'exit 0', b'\texec true'):
         pair(custom, commit=early + b'\n' + commit_call)
-        refuse(custom_reason, manual(custom_next, paths(custom)))
+        refuse(custom_reason, custom_next)
 elif case == 'operator':
     set_custom()
+    # Merged v1-153.trailing-command: keep its fixture and assertion.
+    pair(custom, post=post_call + b'\nprintf done')
+    refuse(custom_reason, custom_next)
     for suffix in (b' || true', b' &'):
         pair(custom, commit=commit_call + suffix)
-        refuse(custom_reason, manual(custom_next, paths(custom)))
+        refuse(custom_reason, custom_next)
     pair(custom, post=post_call + b'; true')
-    refuse(custom_reason, manual(custom_next, paths(custom)))
+    refuse(custom_reason, custom_next)
 elif case == 'cr':
     set_custom()
     pair(custom)
     script(custom / 'post-commit', post_call + b'\r', b'#!/bin/sh\r')
-    refuse(custom_reason, manual(custom_next, paths(custom)))
+    refuse(custom_reason, custom_next)
     pair(custom, header=b'#!/bin/sh -n')
-    refuse(custom_reason, manual(custom_next, paths(custom)))
+    refuse(custom_reason, custom_next)
     pair(custom, header=b'\xef\xbb\xbf#!/bin/sh')
-    refuse(custom_reason, manual(custom_next, paths(custom)))
+    refuse(custom_reason, custom_next)
 elif case == 'comments':
     pair(plain, commit=commit_call + b'\n\n\t # comment \xff\n\t',
          post=b'\tshipcraft close  # terminal\n\n # comment', header=b'#!/usr/bin/env bash')
@@ -357,7 +368,7 @@ elif case == 'comments':
 elif case == 'manual-pre':
     write(pre, yaml_block)
     script(plain / 'commit-msg', b'echo foreign')
-    refuse(pre_foreign, manual('remove it and run `shipcraft init` again', paths(plain)))
+    refuse(pre_foreign, 'remove it and run `shipcraft init` again')
 elif case == 'manual-local':
     set_custom()
     destination = root / 'node_modules/shipcraft-fixture/bin/shipcraft'
@@ -367,16 +378,19 @@ elif case == 'manual-local':
     executable.parent.mkdir()
     executable.symlink_to(destination)
     rerun = 'npx -- shipcraft init'
-    refuse(custom_reason, manual(plain_next(custom_reason, rerun), paths(custom),
-                                 './node_modules/.bin/shipcraft', rerun), executable)
+    before = snapshot()
+    result = init(executable)
+    assert snapshot() == before, 'refused init changed the tree, modes or Git config'
+    assert b'node_modules/.bin/shipcraft' not in result.stdout + result.stderr
+    assert_refusal(result, custom_reason, plain_next(custom_reason, rerun))
 elif case == 'only-commit':
     set_custom()
-    refuse(custom_reason, manual(custom_next, paths(custom)))
+    refuse(custom_reason, custom_next)
     script(custom / 'commit-msg', commit_call)
-    refuse(custom_reason, manual(custom_next, paths(custom)))
+    refuse(custom_reason, custom_next)
     script(custom / 'post-commit', post_call)
     (custom / 'post-commit').chmod(0o644)
-    refuse(custom_reason, manual(custom_next, paths(custom)))
+    refuse(custom_reason, custom_next)
 elif case == 'rollback':
     set_custom()
     pair(custom)
@@ -393,7 +407,7 @@ elif case == 'check-only':
     for bad_call in (b'shipcraft check', b'shipcraft check --commit-msg-extra "$1"',
                      b'shipcraft check --commit-msg "$2"', b'npx --no -- ' + commit_call):
         pair(custom, commit=bad_call)
-        refuse(custom_reason, manual(custom_next, paths(custom)))
+        refuse(custom_reason, custom_next)
 elif case == 'worktree':
     git('add', '.')
     git('commit', '-qm', 'test: linked worktree base')
@@ -405,9 +419,18 @@ elif case == 'worktree':
     folder = root / plain
     reason = f'a commit-msg hook not owned by shipcraft already exists ({folder}/commit-msg)'
     assert paths(folder) == tuple(Path(os.fsdecode(git('rev-parse', '--git-path', f'hooks/{event}').rstrip(b'\n'))) for event in events)
-    refuse(reason, manual(plain_next(reason), paths(folder)))
+    before = snapshot()
+    refusal = init()
+    assert snapshot() == before, 'linked refusal changed the linked tree or Git config'
+    os.chdir(root)
+    assert snapshot() == root_before, 'linked refusal changed the main repository'
+    pair(folder)
+    root_before = snapshot()
+    os.chdir(linked)
+    accept(folder)
     os.chdir(root)
     assert snapshot() == root_before, 'linked init changed the main repository'
+    assert_refusal(refusal, reason, plain_next(reason))
 elif case == 'pre-duplicate':
     write(pre, b'repos:\n  - repo: local\n    hooks:\n      - id: check\n        name: check\n'
                b'        entry: shipcraft check\n        language: system\n        stages: [pre-commit]\n')

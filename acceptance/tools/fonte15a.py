@@ -136,7 +136,8 @@ def main(case):
             assert lines[0].startswith('shipcraft refused: git cannot open this repository (')
             assert 'manually' not in out, 'Git config refusal offers manual hook integration'
         else:
-            assert 'shipcraft check' in lines[-1], 'last line does not say where to put shipcraft check'
+            assert lines[-1].startswith('Next: '), 'last line does not start with Next: '
+            assert ', or make ' not in lines[-1] and 'manually' not in lines[-1], 'Next offers a manual branch'
         assert not any(word in out.lower() for word in ('who reviews', 'which reviewer', 'provider', 'red', 'green')), 'asked before refusing'
     finally:
         if locked is not None:
