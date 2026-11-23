@@ -247,22 +247,16 @@ const RUNS_CHECK: &str = "the installed pre-commit hook runs `shipcraft check`";
 /// Item 153, points 3 and 4: hooks wired by hand (point 1) in place of a yielding
 /// `refusal`, or `refusal` with the manual branch naming the two files `init` reads.
 fn hand(repo: &Repo, refusal: Refusal, local: bool) -> Result<Hook> {
-    let mut paths = Vec::new();
+    let mut printed = Vec::new();
     for hook in ["commit-msg", "post-commit"] {
-        match repo.hook_path(hook) {
-            Ok(path) => paths.push(path),
+        match repo.hook_path_as_git(hook) {
+            Ok(path) => printed.push(path),
             Err(_) => return Err(Stop::Refused(refusal.branch(""))),
         }
     }
-    let shown: Vec<String> = paths.iter().map(|p| shown(repo.root(), p)).collect();
-    if !init_hooks::wired(&paths) {
-        let bin = if local { LOCAL } else { "shipcraft" };
-        let branch = format!(
-            ", or make `{bin} check --commit-msg \"$1\"` the last command of {} and `{bin} close` the last command of {}, each file starting with `#!/bin/sh` and with no `exit` or `exec` line before that call, both executable, and run `shipcraft init` again",
-            shown[0], shown[1]
-        );
-        return Err(Stop::Refused(refusal.branch(&branch)));
-    }
+    let paths: Vec<PathBuf> = printed.iter().map(|p| repo.root().join(p)).collect();
+    let shown: Vec<String> = printed.iter().map(|p| shown(repo.root(), p)).collect();
+    // Point 4's check first: with it, following the branch would refuse again.
     let pre = repo.hook_path("pre-commit")?;
     let runs = init_hooks::runnable(&pre)
         && fs::read(&pre).is_ok_and(|b| {
@@ -276,14 +270,28 @@ fn hand(repo: &Repo, refusal: Refusal, local: bool) -> Result<Hook> {
             "with it, the suite would run twice per commit: remove it and run `shipcraft init` again",
         );
     }
+    if !init_hooks::wired(&paths) {
+        // Point 3: no branch when a hook's folder exists and is not a folder (`/dev/null`).
+        if paths.iter().any(|p| p.parent().is_some_and(|d| fs::metadata(d).is_ok_and(|m| !m.is_dir()))) {
+            return Err(Stop::Refused(refusal.branch("")));
+        }
+        let bin = if local { LOCAL } else { "shipcraft" };
+        let branch = format!(
+            ", or make `{bin} check --commit-msg \"$1\"` the last command of {} and `{bin} close` the last command of {}, each file starting with `#!/bin/sh` and with no `exit` or `exec` line before that call, both executable, and run `shipcraft init` again",
+            shown[0], shown[1]
+        );
+        return Err(Stop::Refused(refusal.branch(&branch)));
+    }
     Ok(Hook::Hand(shown.join(", ")))
 }
 
-/// Item 153.3: relative to the root when under it with no `..` after it, else as git names it.
-fn shown(root: &Path, path: &Path) -> String {
+/// Item 153.3: a relative path as git printed it; an absolute one relative to the
+/// root when under it with no `..` after it, else as git printed it.
+fn shown(root: &Path, printed: &str) -> String {
+    let path = Path::new(printed);
     match path.strip_prefix(root) {
         Ok(rest) if !rest.components().any(|c| c == std::path::Component::ParentDir) => rest.display().to_string(),
-        _ => path.display().to_string(),
+        _ => printed.to_string(),
     }
 }
 
@@ -371,9 +379,11 @@ mod tests {
     #[test]
     fn shows_hook_paths_relative_only_without_parent_steps() {
         let root = Path::new("/r/repo");
-        assert_eq!(shown(root, Path::new("/r/repo/.githooks/commit-msg")), ".githooks/commit-msg");
-        assert_eq!(shown(root, Path::new("/r/repo/../shared/hooks/commit-msg")), "/r/repo/../shared/hooks/commit-msg");
-        assert_eq!(shown(root, Path::new("/m/.git/hooks/post-commit")), "/m/.git/hooks/post-commit");
+        assert_eq!(shown(root, "/r/repo/.githooks/commit-msg"), ".githooks/commit-msg");
+        assert_eq!(shown(root, "/r/repo/../shared/hooks/commit-msg"), "/r/repo/../shared/hooks/commit-msg");
+        assert_eq!(shown(root, "/m/.git/hooks/post-commit"), "/m/.git/hooks/post-commit");
+        assert_eq!(shown(root, "../shared/hooks/commit-msg"), "../shared/hooks/commit-msg");
+        assert_eq!(shown(root, ".git/hooks/commit-msg"), ".git/hooks/commit-msg");
     }
 
     #[test]
