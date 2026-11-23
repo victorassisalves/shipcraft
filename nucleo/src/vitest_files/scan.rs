@@ -287,7 +287,7 @@ pub fn scan_with(text: &str, keys: &Keys, modules: &Modules) -> Vec<Read> {
             continue;
         }
         // The value runs to its `,` or closing bracket; keys inside it name nothing.
-        let end = value_end(&toks, i + 2);
+        let end = value_end(&toks, i + 2, true);
         if let Some(module) = module.filter(|_| ends_value(toks.get(end))) {
             let value = &toks[i + 2..end];
             let items = if modules.single == Some(module) { item(value).into_iter().collect() } else { items(value) };
@@ -299,16 +299,32 @@ pub fn scan_with(text: &str, keys: &Keys, modules: &Modules) -> Vec<Read> {
     found.into_iter().map(|(_, read)| read).collect()
 }
 
-/// The index of the first `,` or unmatched closing bracket from `toks[i]`.
-fn value_end(toks: &[Tok], mut i: usize) -> usize {
-    let mut depth = 0usize;
+/// Brackets matched by kind: an opener is pushed; a closer pops down to its
+/// opener when one is on `stack` (true), and is ignored otherwise.
+fn bracket(stack: &mut Vec<u8>, tok: &Tok) -> bool {
+    let open = match tok {
+        Tok::Punct(b @ (b'(' | b'[' | b'{')) => {
+            stack.push(*b);
+            return false;
+        }
+        Tok::Punct(b')') => b'(',
+        Tok::Punct(b']') => b'[',
+        Tok::Punct(b'}') => b'{',
+        _ => return false,
+    };
+    stack.iter().rposition(|b| *b == open).map(|at| stack.truncate(at)).is_some()
+}
+
+/// The index of the first `,` with no bracket open from `toks[i]`, or of a
+/// closer there when `closes` (the enclosing bracket); otherwise the end.
+fn value_end(toks: &[Tok], mut i: usize, closes: bool) -> usize {
+    let mut stack = Vec::new();
     while let Some(tok) = toks.get(i) {
-        match tok {
-            Tok::Punct(b'(' | b'[' | b'{') => depth += 1,
-            Tok::Punct(b')' | b']' | b'}') if depth == 0 => break,
-            Tok::Punct(b')' | b']' | b'}') => depth -= 1,
-            Tok::Punct(b',') if depth == 0 => break,
-            _ => {}
+        let open = !stack.is_empty();
+        if (!open && *tok == Tok::Punct(b','))
+            || (!bracket(&mut stack, tok) && !open && closes && matches!(tok, Tok::Punct(b')' | b']' | b'}')))
+        {
+            break;
         }
         i += 1;
     }
@@ -330,17 +346,15 @@ fn item(toks: &[Tok]) -> Option<Item> {
 /// the group's own commas (an empty part, after a trailing comma, dropped).
 fn parts<'t, 'a>(toks: &'t [Tok<'a>], open: u8) -> Option<Vec<&'t [Tok<'a>]>> {
     let inner = toks.get(1..toks.len().checked_sub(1)?)?;
-    if toks.first() != Some(&Tok::Punct(open)) || !matches!(toks.last(), Some(Tok::Punct(b')' | b']' | b'}'))) {
+    let mut stack = Vec::new();
+    let closed = toks.iter().position(|tok| bracket(&mut stack, tok) && stack.is_empty());
+    if toks.first() != Some(&Tok::Punct(open)) || closed != Some(toks.len() - 1) {
         return None;
     }
     let mut out = Vec::new();
     let mut start = 0;
     while start < inner.len() {
-        let end = value_end(inner, start);
-        // An unmatched closing bracket inside: the group closed before the end.
-        if end < inner.len() && inner[end] != Tok::Punct(b',') {
-            return None;
-        }
+        let end = value_end(inner, start, false);
         out.push(&inner[start..end]);
         start = end + 1;
     }
@@ -545,6 +559,9 @@ mod tests {
     fn keys_inside_module_and_data_values_name_nothing() {
         let text = "{ reporters: [['./rep.js', {transform: './t.txt'}]], globals: {testEnvironment: './g.js'}, testEnvironment: './e.js' }";
         assert_eq!(modules(text), [lit("reporters", "./rep.js"), lit("testEnvironment", "./e.js")]);
+        // Brackets match by kind: a bracket in a regular expression literal opens nothing.
+        let text = "{ reporters: [['./r.js', {a: /[(]/, b: /)/}], /[{]/], testEnvironment: '<rootDir>/env.js' }";
+        assert_eq!(modules(text), [lit("reporters", "./r.js"), lit("testEnvironment", "<rootDir>/env.js")]);
         // Item 132's events go on inside a value, at their place in text order.
         let text = "{ setupFiles: './s', testEnvironment: require('./env'), transform: {x: './t.js'}, globalSetup: g }";
         assert_eq!(

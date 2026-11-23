@@ -152,15 +152,15 @@ fn replaced(literal: &str) -> String {
 /// Item 155: the path a module item names before its candidates, with its
 /// literal: a literal joined to `root` (`<rootDir>` replaced; one without
 /// `./`, `../` or `<rootDir>` only when `packages`), a relative
-/// `require.resolve` joined to `own`; None names nothing, an absolute literal
-/// is a reason.
+/// `require.resolve` joined to `own`, None when it joins above the repository
+/// root; None names nothing, an absolute literal is a reason.
 fn target<'i>(
     item: &'i Item,
     root: &str,
     own: &str,
     packages: bool,
     first: &mut Option<String>,
-) -> Option<(&'i str, String)> {
+) -> Option<(&'i str, Option<String>)> {
     let (literal, folder, content) = match item {
         Item::Literal(literal) if literal.starts_with('/') => {
             first.get_or_insert_with(|| format!("{} is an absolute path", one_line(literal)));
@@ -172,7 +172,7 @@ fn target<'i>(
         Item::Resolve(literal) if relative(literal) => (literal, own, literal.clone()),
         Item::Literal(_) | Item::Resolve(_) => return None,
     };
-    Some((literal, join(folder, &content)?))
+    Some((literal, join(folder, &content)))
 }
 
 /// Item 155: a `moduleNameMapper` literal holds `$` and a digit (`$1`).
@@ -268,7 +268,8 @@ impl Discovery<'_> {
                 return Ok(());
             }
         }
-        let Some((literal, base)) = target(&item, root, own, true, first) else { return Ok(()) };
+        // Above the repository root a module literal names nothing (item 140).
+        let Some((literal, Some(base))) = target(&item, root, own, true, first) else { return Ok(()) };
         let index = join(&base, "index").expect("a join below base");
         let (named, files) = self.candidates(&base, false, first)?;
         let (indexed, more) = self.candidates(&index, false, first)?;
@@ -283,6 +284,11 @@ impl Discovery<'_> {
     /// and read as a module the config imports, from the config's root folder.
     fn preset(&mut self, item: Item, root: &str, own: &str, first: &mut Option<String>) -> Result<()> {
         let Some((literal, base)) = target(&item, root, own, false, first) else { return Ok(()) };
+        let Some(base) = base else {
+            // A relative preset above the repository root has no candidate in it.
+            first.get_or_insert_with(|| format!("{} names no file in the repository", one_line(literal)));
+            return Ok(());
+        };
         let exts = ["json", "js", "cjs", "mjs"];
         let all = std::iter::once(base.clone())
             .chain(exts.iter().map(|ext| format!("{base}.{ext}")))

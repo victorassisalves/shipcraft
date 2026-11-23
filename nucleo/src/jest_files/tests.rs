@@ -277,6 +277,18 @@ fn a_relative_preset_is_read_like_a_config() {
         why("jest.config.js", "./nope names no file in the repository")
     );
     assert_eq!(one("module.exports = { preset: '/p' }", ("x", "")), why("jest.config.js", "/p is an absolute path"));
+    // A relative preset above the repository root has no candidate in it.
+    let above = why("jest.config.js", "../shared/jest-preset.js names no file in the repository");
+    assert_eq!(one("module.exports = { preset: '../shared/jest-preset.js' }", ("x", "")), above);
+    let resolve = why("jest.config.js", "../../p names no file in the repository");
+    assert_eq!(one("module.exports = { preset: require.resolve('../../p') }", ("x", "")), resolve);
+    let json = found(&[("package.json", "{\"jest\": {\"preset\": \"<rootDir>/../p\"}}")]).1;
+    assert_eq!(json, why("package.json", "<rootDir>/../p names no file in the repository"));
+    // A module literal of another key above the root names nothing (item 140's rule).
+    assert_eq!(
+        one("module.exports = { testEnvironment: '../env.js', transform: {x: '<rootDir>/../t.js'} }", ("x", "")),
+        None
+    );
 }
 
 #[test]
