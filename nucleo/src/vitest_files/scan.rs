@@ -17,7 +17,8 @@ pub enum Event {
     /// A literal of a read setup key.
     Setup(String),
     /// Item 140: a read root key of a Jest module, its literal or None for
-    /// `import.meta.dirname` and `__dirname`.
+    /// `import.meta.dirname` and `__dirname`; item 154: a vitest root key
+    /// `import.meta.dirname` or `__dirname` (None).
     Root(Option<String>),
     /// The literal of `from`, `import`, `import(` or `require(`.
     Import(String),
@@ -217,6 +218,9 @@ fn positioned(text: &str, keys: &Keys) -> Vec<(usize, Event)> {
             },
             (Some(name), _) if colon && name == keys.root => match root_value(&toks, i + 2) {
                 Some(after) => {
+                    if matches!(toks[i + 2], Tok::Word("import" | "__dirname")) {
+                        events.push(Event::Root(None));
+                    }
                     i = after;
                     continue;
                 }
@@ -433,7 +437,7 @@ mod tests {
         let lit = [setup("./src/test-setup.ts")];
         assert_eq!(scan("export default {test:{setupFiles\u{2028}:\u{2029}\"./src/test-setup.ts\"}};"), lit);
         assert_eq!(scan("\u{FEFF}{ setupFiles:\u{0B}[\u{A0}'./src/test-setup.ts'\u{3000},\u{2003}]\u{FEFF}}"), lit);
-        assert_eq!(scan("{\u{202F}root\u{205F}:\u{1680}import.meta.dirname\u{2029}}"), []);
+        assert_eq!(scan("{\u{202F}root\u{205F}:\u{1680}import.meta.dirname\u{2029}}"), [Root(None)]);
         assert_eq!(scan("require\u{2028}(\u{A0}'./a'\u{2009})"), [Import("./a".into())]);
         // A `//` comment ends at U+2028 and U+2029 as at LF and CR.
         assert_eq!(scan("// c\u{2028}{ setupFiles: x }"), [bad("setupFiles is not a string or an array of strings")]);
@@ -479,6 +483,9 @@ mod tests {
             assert!(!scan(ok).iter().any(|e| matches!(e, Bad(_))), "{ok}");
         }
         assert_eq!(scan("{ root: './src' }"), [bad("it sets root")]);
+        // Item 154: the folder of the module is reported, the folder vitest runs in is not.
+        assert_eq!(scan("{ root: import.meta.dirname, test: { root: __dirname } }"), [Root(None), Root(None)]);
+        assert_eq!(scan("{ root: '.', test: { 'root': './' } }"), []);
         assert_eq!(scan("{ root: path.resolve(__dirname) }"), [bad("it sets root")]);
         assert_eq!(scan("const root = 'x'; path.resolve('root'); a.root"), []);
     }
