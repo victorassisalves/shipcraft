@@ -3,7 +3,8 @@
 //! the setup files they name, reading `package.json`'s `jest` key too; it
 //! refuses what it cannot read (`setup-unreadable`). The hook and CI refuse an
 //! added Jest config (`runner-config-added`, in `vitest_files::check_added`)
-//! and a changed `jest` key (`jest-config-changed`).
+//! and a changed `jest` key (`jest-config-changed`). Item 155: `red` also
+//! locks the files the module keys name and reads a relative `preset`.
 
 use crate::config::{Config, Suite};
 use crate::git::{Repo, Snapshot};
@@ -11,7 +12,7 @@ use crate::jsonc;
 use crate::pytest_config::{all_paths, holds, Judge, Settings};
 use crate::red::one_line;
 use crate::refusal::{failed, refuse, Result};
-use crate::vitest_files::scan::{self, Event};
+use crate::vitest_files::scan::{self, Event, Item, Modules, Read};
 use crate::vitest_files::{folder, join, kind, relative, Found, Kind, JS_EXTS};
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -19,6 +20,36 @@ use std::fs;
 
 /// The extensions of a Jest config name.
 const CONFIG_EXTS: [&str; 7] = ["ts", "mts", "cts", "js", "mjs", "cjs", "json"];
+
+/// Item 155: the keys whose values name modules Jest loads, in order; in
+/// JSON, `hasteImplModulePath` is read inside `haste`.
+const MODULE_KEYS: [&str; 17] = [
+    "snapshotSerializers",
+    "testEnvironment",
+    "transform",
+    "moduleNameMapper",
+    "resolver",
+    "snapshotResolver",
+    "testSequencer",
+    "testRunner",
+    "runner",
+    "runtime",
+    "testResultsProcessor",
+    "reporters",
+    "watchPlugins",
+    "dependencyExtractor",
+    "filter",
+    "prettierPath",
+    "hasteImplModulePath",
+];
+
+/// Item 155: what a Jest config module's scan reads besides item 140's keys;
+/// inside a preset, `preset` is not read.
+const DATA_KEYS: &[&str] = &["globals", "testEnvironmentOptions"];
+const IN_CONFIG: Modules = Modules { keys: &MODULE_KEYS, single: Some("preset"), data: DATA_KEYS };
+/// Inside a preset, `preset` is data: what its value holds names nothing.
+const IN_PRESET: Modules =
+    Modules { keys: &MODULE_KEYS, single: None, data: &["globals", "testEnvironmentOptions", "preset"] };
 
 /// The suites whose command contains `jest`.
 pub fn suites(config: &Config) -> Vec<Suite> {
@@ -62,15 +93,19 @@ enum RootRule {
     Project,
 }
 
+/// A module to read: its path, None for a locked config or the root folder of
+/// the config that reached it, and whether it was reached from a preset.
+type Module = (String, Option<String>, bool);
+
 struct Discovery<'a> {
     repo: &'a Repo,
     present: BTreeSet<String>,
     paths: BTreeSet<String>,
-    /// The first reason of each read, by path, then by root folder.
-    why: BTreeMap<String, BTreeMap<String, String>>,
-    /// Modules to read: a locked config (None) or a module and its root folder.
-    queue: Vec<(String, Option<String>)>,
-    seen: BTreeSet<(String, Option<String>)>,
+    /// The first reason of each read, by path, then by root folder (a read as
+    /// a preset after the other read with the same root folder).
+    why: BTreeMap<String, BTreeMap<(String, bool), String>>,
+    queue: Vec<Module>,
+    seen: BTreeSet<Module>,
 }
 
 /// Point 1's discovery on the working tree, run to the end.
@@ -90,8 +125,8 @@ pub fn discover(repo: &Repo, config: &Config) -> Result<Found> {
     };
     for path in configs(&suites, &listed) {
         match kind(repo, &path)? {
-            Kind::File => d.push(path, None),
-            Kind::Link => d.note(&path, folder(&path), format!("{} is a symbolic link", one_line(&path))),
+            Kind::File => d.push(path, None, false),
+            Kind::Link => d.note(&path, folder(&path), false, format!("{} is a symbolic link", one_line(&path))),
             Kind::Folder => {}
         }
     }
@@ -100,11 +135,70 @@ pub fn discover(repo: &Repo, config: &Config) -> Result<Found> {
             d.manifest(&path)?;
         }
     }
-    while let Some((module, root)) = d.queue.pop() {
-        d.read(&module, root)?;
+    while let Some((module, root, preset)) = d.queue.pop() {
+        d.read(&module, root, preset)?;
     }
     let unreadable = d.why.into_iter().next().and_then(|(path, reads)| Some((path, reads.into_values().next()?)));
     Ok(Found { paths: d.paths, unreadable })
+}
+
+/// A literal with a leading `<rootDir>/` replaced by `./`, `<rootDir>` alone by `.`.
+fn replaced(literal: &str) -> String {
+    match literal.strip_prefix("<rootDir>") {
+        Some("") => ".".to_string(),
+        Some(rest) if rest.starts_with('/') => format!(".{rest}"),
+        _ => literal.to_string(),
+    }
+}
+
+/// Item 155: the path a module item names before its candidates, with its
+/// literal: a literal joined to `root` (`<rootDir>` replaced; one without
+/// `./`, `../` or `<rootDir>` only when `packages`), a relative
+/// `require.resolve` joined to `own`, None when it joins above the repository
+/// root; None names nothing, an absolute literal is a reason.
+fn target<'i>(
+    item: &'i Item,
+    root: &str,
+    own: &str,
+    packages: bool,
+    first: &mut Option<String>,
+) -> Option<(&'i str, Option<String>)> {
+    let (literal, folder, content) = match item {
+        Item::Literal(literal) if literal.starts_with('/') => {
+            first.get_or_insert_with(|| format!("{} is an absolute path", one_line(literal)));
+            return None;
+        }
+        Item::Literal(literal) if packages || relative(literal) || literal.starts_with("<rootDir>") => {
+            (literal, root, replaced(literal))
+        }
+        Item::Resolve(literal) if relative(literal) => (literal, own, literal.clone()),
+        Item::Literal(_) | Item::Resolve(_) => return None,
+    };
+    Some((literal, join(folder, &content)))
+}
+
+/// Item 155: a `moduleNameMapper` literal holds `$` and a digit (`$1`).
+fn captures(literal: &str) -> bool {
+    literal.as_bytes().windows(2).any(|pair| pair[0] == b'$' && pair[1].is_ascii_digit())
+}
+
+/// Item 155: the module literals of a JSON module key's value: a string, an
+/// array's strings and its tuples' strings, an object's values read as array
+/// items (in `serde_json`'s map order).
+fn json_items(value: &Value) -> Vec<&str> {
+    fn strings(value: &Value) -> Vec<&str> {
+        match value {
+            Value::String(one) => vec![one.as_str()],
+            Value::Array(items) => items.iter().filter_map(Value::as_str).collect(),
+            _ => Vec::new(),
+        }
+    }
+    match value {
+        Value::String(one) => vec![one.as_str()],
+        Value::Array(items) => items.iter().flat_map(strings).collect(),
+        Value::Object(map) => map.values().flat_map(strings).collect(),
+        _ => Vec::new(),
+    }
 }
 
 /// The root folder a root key's value names from `folder`: `None` is the
@@ -118,20 +212,25 @@ fn root_of(folder: &str, value: &Option<String>) -> Option<String> {
 }
 
 impl Discovery<'_> {
-    fn push(&mut self, module: String, root: Option<String>) {
-        if self.seen.insert((module.clone(), root.clone())) {
-            self.queue.push((module, root));
+    fn push(&mut self, module: String, root: Option<String>, preset: bool) {
+        if self.seen.insert((module.clone(), root.clone(), preset)) {
+            self.queue.push((module, root, preset));
         }
     }
 
-    fn note(&mut self, path: &str, root: &str, reason: String) {
-        self.why.entry(path.to_string()).or_default().entry(root.to_string()).or_insert(reason);
+    fn note(&mut self, path: &str, root: &str, preset: bool, reason: String) {
+        self.why.entry(path.to_string()).or_default().entry((root.to_string(), preset)).or_insert(reason);
     }
 
     /// The candidates of `base` that are repository files (a link is a reason).
     fn candidates(&self, base: &str, json: bool, first: &mut Option<String>) -> Result<(bool, Vec<String>)> {
         let exts = JS_EXTS.iter().copied().chain(json.then_some("json"));
-        let all = std::iter::once(base.to_string()).chain(exts.map(|ext| format!("{base}.{ext}")));
+        self.qualify(std::iter::once(base.to_string()).chain(exts.map(|ext| format!("{base}.{ext}"))), first)
+    }
+
+    /// Which of `all` are repository files, and whether any is in the
+    /// repository (a folder is skipped, a link is a reason).
+    fn qualify(&self, all: impl Iterator<Item = String>, first: &mut Option<String>) -> Result<(bool, Vec<String>)> {
         let (mut named, mut files) = (false, Vec::new());
         for candidate in all.filter(|c| self.present.contains(c)) {
             match kind(self.repo, &candidate)? {
@@ -152,12 +251,7 @@ impl Discovery<'_> {
             first.get_or_insert_with(|| format!("{} is an absolute path", one_line(literal)));
             return Ok(());
         }
-        let content = match literal.strip_prefix("<rootDir>") {
-            Some("") => ".".to_string(),
-            Some(rest) if rest.starts_with('/') => format!(".{rest}"),
-            _ => literal.to_string(),
-        };
-        let Some(base) = join(root, &content) else { return Ok(()) };
+        let Some(base) = join(root, &replaced(literal)) else { return Ok(()) };
         let (named, files) = self.candidates(&base, false, first)?;
         self.paths.extend(files);
         if !named && (relative(literal) || literal.starts_with("<rootDir>")) {
@@ -166,9 +260,54 @@ impl Discovery<'_> {
         Ok(())
     }
 
+    /// Item 155: a module item of `key`, a literal resolved like a setup
+    /// literal or a `require.resolve` resolved from the module's folder `own`;
+    /// the candidates also follow the path with `/index`.
+    fn module(&mut self, key: &str, item: Item, root: &str, own: &str, first: &mut Option<String>) -> Result<()> {
+        let mapper = key == "moduleNameMapper";
+        if let (true, Item::Literal(literal)) = (mapper, &item) {
+            if !literal.starts_with("<rootDir>") || captures(literal) {
+                return Ok(());
+            }
+        }
+        // Above the repository root a module literal names nothing (item 140).
+        let Some((literal, Some(base))) = target(&item, root, own, true, first) else { return Ok(()) };
+        let index = join(&base, "index").expect("a join below base");
+        let (named, files) = self.candidates(&base, false, first)?;
+        let (indexed, more) = self.candidates(&index, false, first)?;
+        self.paths.extend(files.into_iter().chain(more));
+        if !named && !indexed && !mapper && (relative(literal) || literal.starts_with("<rootDir>")) {
+            first.get_or_insert_with(|| format!("{} names no file in the repository", one_line(literal)));
+        }
+        Ok(())
+    }
+
+    /// Item 155: a relative preset; every candidate in the repository is locked
+    /// and read as a module the config imports, from the config's root folder.
+    fn preset(&mut self, item: Item, root: &str, own: &str, first: &mut Option<String>) -> Result<()> {
+        let Some((literal, base)) = target(&item, root, own, false, first) else { return Ok(()) };
+        let Some(base) = base else {
+            // A relative preset above the repository root has no candidate in it.
+            first.get_or_insert_with(|| format!("{} names no file in the repository", one_line(literal)));
+            return Ok(());
+        };
+        let exts = ["json", "js", "cjs", "mjs"];
+        let all = std::iter::once(base.clone())
+            .chain(exts.iter().map(|ext| format!("{base}.{ext}")))
+            .chain(exts.iter().filter_map(|ext| join(&base, &format!("jest-preset.{ext}"))));
+        let (named, files) = self.qualify(all, first)?;
+        for file in files {
+            self.push(file, Some(root.to_string()), true);
+        }
+        if !named {
+            first.get_or_insert_with(|| format!("{} names no file in the repository", one_line(literal)));
+        }
+        Ok(())
+    }
+
     /// One read of a module: a locked config (`inherited` None) or a module
     /// reached by an import from a config whose root folder is `inherited`.
-    fn read(&mut self, module: &str, inherited: Option<String>) -> Result<()> {
+    fn read(&mut self, module: &str, inherited: Option<String>, preset: bool) -> Result<()> {
         self.paths.insert(module.to_string());
         let ext = module.rsplit_once('.').map_or("", |(_, ext)| ext);
         if ext != "json" && !JS_EXTS.contains(&ext) {
@@ -187,7 +326,7 @@ impl Discovery<'_> {
             match parsed {
                 Some(Value::Object(map)) => {
                     let rule = if inherited.is_some() { RootRule::Forbidden } else { RootRule::Own };
-                    self.options(&map, &base, rule, &mut first)?
+                    self.options(&map, &base, rule, preset, &mut first)?
                 }
                 _ => {
                     first = Some("it is not a JSON object".to_string());
@@ -195,10 +334,10 @@ impl Discovery<'_> {
                 }
             }
         } else {
-            self.script(module, &bytes, &inherited, &mut first)?
+            self.script(module, &bytes, &inherited, preset, &mut first)?
         };
         if let Some(reason) = first {
-            self.note(module, &root, reason);
+            self.note(module, &root, preset, reason);
         }
         Ok(())
     }
@@ -209,17 +348,31 @@ impl Discovery<'_> {
         module: &str,
         bytes: &[u8],
         inherited: &Option<String>,
+        preset: bool,
         first: &mut Option<String>,
     ) -> Result<String> {
         let own = folder(module);
-        let events = scan::scan(&String::from_utf8_lossy(bytes), &scan::JEST);
-        let first_root = events.iter().find_map(|e| if let Event::Root(value) = e { Some(value) } else { None });
+        let modules = if preset { &IN_PRESET } else { &IN_CONFIG };
+        let events = scan::scan_with(&String::from_utf8_lossy(bytes), &scan::JEST, modules);
+        let first_root =
+            events.iter().find_map(|e| if let Read::Event(Event::Root(value)) = e { Some(value) } else { None });
         let root = match inherited {
             Some(root) => root.clone(),
             None => first_root.and_then(|value| root_of(own, value)).unwrap_or_else(|| own.to_string()),
         };
         let mut roots = 0;
         for event in events {
+            let event = match event {
+                Read::Event(event) => event,
+                Read::Module("preset", item) => {
+                    self.preset(item, &root, own, first)?;
+                    continue;
+                }
+                Read::Module(key, item) => {
+                    self.module(key, item, &root, own, first)?;
+                    continue;
+                }
+            };
             match event {
                 Event::Bad(reason) => {
                     first.get_or_insert(reason);
@@ -235,7 +388,7 @@ impl Discovery<'_> {
                     let Some(base) = join(own, &content) else { continue };
                     let (named, files) = self.candidates(&base, true, first)?;
                     for file in files {
-                        self.push(file, Some(root.clone()));
+                        self.push(file, Some(root.clone()), preset);
                     }
                     if !named {
                         first.get_or_insert_with(|| format!("{} names no file in the repository", one_line(&content)));
@@ -247,13 +400,15 @@ impl Discovery<'_> {
         Ok(root)
     }
 
-    /// The JSON reader: an options object's `rootDir`, its setup keys and its
-    /// `projects` objects, depth first; returns its root folder.
+    /// The JSON reader: an options object's `rootDir`, its setup keys, its
+    /// `preset` (not inside a preset), its module keys and its `projects`
+    /// objects, depth first; returns its root folder.
     fn options(
         &mut self,
         map: &Map<String, Value>,
         base: &str,
         rule: RootRule,
+        preset: bool,
         first: &mut Option<String>,
     ) -> Result<String> {
         let root = match (map.get("rootDir"), rule) {
@@ -284,9 +439,19 @@ impl Discovery<'_> {
                 self.setup(literal, &root, first)?;
             }
         }
+        if let Some(Value::String(named)) = map.get("preset").filter(|_| !preset) {
+            self.preset(Item::Literal(named.clone()), &root, "", first)?;
+        }
+        let haste = map.get("haste").and_then(Value::as_object);
+        for key in MODULE_KEYS {
+            let value = if key == "hasteImplModulePath" { haste.and_then(|h| h.get(key)) } else { map.get(key) };
+            for literal in value.map(json_items).unwrap_or_default() {
+                self.module(key, Item::Literal(literal.to_string()), &root, "", first)?;
+            }
+        }
         if let Some(Value::Array(projects)) = map.get("projects") {
             for project in projects.iter().filter_map(Value::as_object) {
-                self.options(project, &root, RootRule::Project, first)?;
+                self.options(project, &root, RootRule::Project, preset, first)?;
             }
         }
         Ok(root)
@@ -302,12 +467,12 @@ impl Discovery<'_> {
         let own = folder(path);
         match jest {
             Value::Object(options) => {
-                self.options(options, own, RootRule::Own, &mut first)?;
+                self.options(options, own, RootRule::Own, false, &mut first)?;
             }
             _ => first = Some("its jest key is not an object".to_string()),
         }
         if let Some(reason) = first {
-            self.note(path, own, reason);
+            self.note(path, own, false, reason);
         }
         Ok(())
     }

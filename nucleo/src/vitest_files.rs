@@ -4,6 +4,7 @@
 //! (`setup-unreadable`), and the hook and CI refuse a runner config added
 //! while a lock is open (`runner-config-added`).
 
+pub(crate) mod command;
 pub(crate) mod scan;
 
 use crate::config::{Config, Suite, CONFIG_FILE};
@@ -113,10 +114,12 @@ pub fn discover(repo: &Repo, config: &Config) -> Result<Found> {
     }
     let listed = repo.files()?;
     let present: BTreeSet<&str> = listed.iter().map(String::as_str).collect();
+    let (runners, taken) = (runner_configs(&suites, &listed), command::taken(repo, config, &suites, &present)?);
+    let dirs = command::dirs(repo, &present, &runners, &taken)?;
     let mut why: BTreeMap<String, String> = BTreeMap::new();
     let mut paths = BTreeSet::new();
     let mut queue = Vec::new();
-    for path in runner_configs(&suites, &listed) {
+    for path in runners.into_iter().chain(taken.into_iter().map(|t| t.path)).collect::<BTreeSet<_>>() {
         match kind(repo, &path)? {
             Kind::File => queue.push(path),
             Kind::Link => {
@@ -148,9 +151,17 @@ pub fn discover(repo: &Repo, config: &Config) -> Result<Found> {
                 Event::Import(content) if relative(&content) => (content, true),
                 Event::Import(_) | Event::Root(_) => continue,
             };
-            let Some(base) = join(folder(&module), &content) else { continue };
+            // Item 154: a setup literal resolves from each of the module's folders.
+            let own = BTreeSet::from([folder(&module).to_string()]);
+            let from = if import { &own } else { dirs.get(&module).unwrap_or(&own) };
+            let bases: Vec<String> = from.iter().filter_map(|d| join(d, &content)).collect();
+            if bases.is_empty() {
+                continue;
+            }
             let mut named = false;
-            let candidates = [base.clone()].into_iter().chain(JS_EXTS.iter().map(|ext| format!("{base}.{ext}")));
+            let candidates = bases.iter().flat_map(|base| {
+                [base.clone()].into_iter().chain(JS_EXTS.iter().map(move |ext| format!("{base}.{ext}")))
+            });
             for candidate in candidates.filter(|c| present.contains(c.as_str())) {
                 match kind(repo, &candidate)? {
                     Kind::File => named = true,
@@ -251,7 +262,10 @@ pub fn check_added(repo: &Repo, parents: &[Snapshot], snapshot: &Snapshot, lock_
     }
     let paths = snapshot_paths(repo, snapshot)?;
     let jest = crate::jest_files::configs(&jest, &paths);
-    for path in runner_configs(&suites, &paths).into_iter().chain(jest.iter().cloned()).collect::<BTreeSet<_>>() {
+    let listed: BTreeSet<&str> = paths.iter().map(String::as_str).collect();
+    let named = suites.iter().flat_map(|suite| command::in_snapshot(suite, &listed));
+    let candidates: BTreeSet<String> = runner_configs(&suites, &paths).into_iter().chain(named).collect();
+    for path in candidates.into_iter().chain(jest.iter().cloned()).collect::<BTreeSet<_>>() {
         if lock.files.contains_key(&path) {
             continue;
         }
