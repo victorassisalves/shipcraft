@@ -29,6 +29,7 @@ enum Tok {
 struct Lexer {
     out: Vec<Tok>,
     word: Option<String>,
+    /// The word holds a quoted or escaped character.
     quoted: bool,
     /// The next word is a redirection's operand.
     operand: bool,
@@ -83,6 +84,7 @@ fn tokens(command: &str) -> std::result::Result<Vec<Tok>, &'static str> {
             '\\' if chars.get(i + 1) == Some(&'\n') => i += 1,
             '\\' => {
                 lx.push(*chars.get(i + 1).ok_or(QUOTES)?);
+                lx.quoted = true;
                 i += 1;
             }
             '\'' => {
@@ -498,10 +500,8 @@ mod tests {
         assert_eq!(words("# vitest -c x\nb #c d"), ["Control", "b"]);
         assert_eq!(words("a#b $X `y` *"), ["a#b", "$X", "`y`", "*"]);
         assert_eq!(words("a 2>&1 b >out c>>log d <in e >|f"), ["a", "b", "c", "d", "e"]);
-        assert_eq!(words("a \"2\">x b"), ["a", "2", "b"]);
-        assert_eq!(tokens("a 'b"), Err(QUOTES));
-        assert_eq!(tokens("a \"b"), Err(QUOTES));
-        assert_eq!(tokens("a \\"), Err(QUOTES));
+        assert_eq!(words("\\2026>x '2026'>x \"2026\">x 2>x b"), ["2026", "2026", "2026", "b"]);
+        assert_eq!([tokens("a 'b"), tokens("a \"b"), tokens("a \\")], [Err(QUOTES), Err(QUOTES), Err(QUOTES)]);
         assert_eq!(tokens("cat <<EOF\nx\nEOF"), Err("it holds a here-document"));
     }
 
@@ -549,8 +549,7 @@ mod tests {
 
     #[test]
     fn the_walk_and_the_snapshot() {
-        assert_eq!(folders("a/b"), ["a/b", "a", ""]);
-        assert_eq!(folders(""), [""]);
+        assert_eq!([folders("a/b"), folders("")], [vec!["a/b", "a", ""], vec![""]]);
         let order: Vec<String> = names("web").collect();
         assert_eq!(
             [&order[0], &order[5], &order[6]],
