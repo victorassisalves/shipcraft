@@ -6,7 +6,7 @@ use crate::git::{git_in, text, Repo};
 use crate::init_hooks;
 use crate::init_msg::{self, Plan};
 use crate::init_tool::{self, Tool};
-use crate::refusal::{failed, Result};
+use crate::refusal::{failed, firm, refuse, Refusal, Result, Stop};
 use crate::suite::shell_quote;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -25,6 +25,8 @@ pub(super) enum Hook {
     Own(Vec<PathBuf>),
     Msg(Plan),
     Tool(Tool),
+    /// Item 153: hooks wired by hand, both paths as shown (`<commit-msg>, <post-commit>`).
+    Hand(String),
 }
 
 /// `shipcraft status`: whether commits go through shipcraft; any doubt reads as no hook.
@@ -38,6 +40,11 @@ pub fn hook_status(repo: &Repo) -> String {
         }
     }
     match path.and_then(|path| decide_hook_with(repo, false, path)) {
+        // Item 153, point 5: through a yielding refusal, hooks wired by hand.
+        Ok(Hook::Hand(_)) => "shipcraft: hooks call shipcraft, wired by hand (commit-msg and post-commit)".into(),
+        Err(Stop::Refused(r)) if r.what() == RUNS_CHECK => {
+            format!("shipcraft: missing hook: `shipcraft init` refuses: {}", r.what())
+        }
         decided if init_tool::present(repo) => {
             init_tool::status(
                 decided.and_then(|h| if let Hook::Tool(t) = h { Ok(t) } else { Err(failed(String::new())) }),
@@ -187,13 +194,22 @@ pub(super) fn decide_hook(repo: &Repo, local: bool) -> Result<Hook> {
     decide_hook_with(repo, local, hooks_path(repo)?)
 }
 
-/// `decide_hook` with `core.hooksPath` already read.
+/// `decide_hook` with `core.hooksPath` already read; item 153: a yielding refusal
+/// goes to the hand-wired route.
 fn decide_hook_with(repo: &Repo, local: bool, path: HooksPath) -> Result<Hook> {
+    match route(repo, local, path) {
+        Err(Stop::Refused(refusal)) if refusal.yields() => hand(repo, refusal, local),
+        decided => decided,
+    }
+}
+
+/// The routes of items 15a, 15b, 20 and 25, in their order.
+fn route(repo: &Repo, local: bool, path: HooksPath) -> Result<Hook> {
     let stop = |what: String| init_msg::alien(what.clone(), &what);
     let dir = match path {
         HooksPath::Unset => None,
         HooksPath::Set(dir) => Some(dir),
-        HooksPath::Fails(why) => return stop(format!("git config fails ({why})")),
+        HooksPath::Fails(why) => return stop(format!("git config fails ({why})")).map_err(firm),
     };
     // Item 25 (changes 15a.2 and 15a.3): `.husky/` or the pre-commit config.
     if init_tool::present(repo) || init_tool::husky_path(dir.as_deref()) {
@@ -223,6 +239,45 @@ fn decide_hook_with(repo: &Repo, local: bool, path: HooksPath) -> Result<Hook> {
         [file] => lefthook_hook(repo, file, local),
         files => stop(format!("there is more than one lefthook file at the root ({})", files.join(", "))),
     }
+}
+
+/// Item 153, point 4's pre-commit check, also read by `status` (point 5).
+const RUNS_CHECK: &str = "the installed pre-commit hook runs `shipcraft check`";
+
+/// Item 153, points 3 and 4: hooks wired by hand (point 1) in place of a yielding
+/// `refusal`, or `refusal` with the manual branch naming the two files `init` reads.
+fn hand(repo: &Repo, refusal: Refusal, local: bool) -> Result<Hook> {
+    let mut paths = Vec::new();
+    for hook in ["commit-msg", "post-commit"] {
+        match repo.hook_path(hook) {
+            Ok(path) => paths.push(path),
+            Err(_) => return Err(Stop::Refused(refusal.branch(""))),
+        }
+    }
+    let shown: Vec<String> =
+        paths.iter().map(|p| p.strip_prefix(repo.root()).unwrap_or(p).display().to_string()).collect();
+    if !init_hooks::wired(&paths) {
+        let bin = if local { LOCAL } else { "shipcraft" };
+        let branch = format!(
+            ", or make `{bin} check --commit-msg \"$1\"` the last command of {} and `{bin} close` the last command of {}, each file starting with `#!/bin/sh` and with no `exit` or `exec` line before that call, both executable, and run `shipcraft init` again",
+            shown[0], shown[1]
+        );
+        return Err(Stop::Refused(refusal.branch(&branch)));
+    }
+    let pre = repo.hook_path("pre-commit")?;
+    let runs = is_executable(&pre)
+        && fs::read(&pre).is_ok_and(|b| {
+            b.windows(HOOK_MARK.len()).any(|w| w == HOOK_MARK.as_bytes()) || init_hooks::calls(&b, &["check"])
+        });
+    if runs {
+        return refuse(
+            "foreign-hook",
+            RUNS_CHECK,
+            "shipcraft does not replace or edit another tool's hook: when in doubt, this step stays manual",
+            "with it, the suite would run twice per commit: remove it and run `shipcraft init` again",
+        );
+    }
+    Ok(Hook::Hand(shown.join(", ")))
 }
 
 /// One lefthook file at the root: the conditions (15b.1, 15b.3), then the

@@ -7,16 +7,13 @@ use crate::config::{minimum_version, version_parts, CONFIG_FILE};
 use crate::git::{Repo, Snapshot};
 use crate::init::{block_layout, insert_text, is_executable, LOCAL};
 use crate::lock::{lock_files, Lock};
-use crate::refusal::{failed, refuse, Result};
+use crate::refusal::{failed, refuse, refuse_yielding, Result};
 use serde_norway::{Mapping, Value};
 use std::fs;
 
 /// The two blocks this route writes, and the `run` of each `shipcraft` command.
 pub const BLOCKS: [(&str, &str); 2] =
     [("commit-msg", "shipcraft check --commit-msg"), ("post-commit", "shipcraft close")];
-
-const BY_HAND: &str =
-    "or manually put `shipcraft check --commit-msg` in commit-msg and `shipcraft close` in post-commit";
 
 /// The lefthook file, its text, the new text (None: both commands are there)
 /// and the hooks of the two blocks that git does not run yet.
@@ -149,7 +146,7 @@ fn twice<T>(repo: &Repo, file: &str) -> Result<T> {
         "foreign-hook",
         format!("{file} has an `shipcraft` command in pre-commit, and integration uses commit-msg"),
         "with both, the suite would run twice per commit",
-        format!("{first}remove the shipcraft command from {file} pre-commit and run `shipcraft init` again, {BY_HAND}"),
+        format!("{first}remove the shipcraft command from {file} pre-commit and run `shipcraft init` again"),
     )
 }
 
@@ -162,12 +159,13 @@ fn open_lock(repo: &Repo) -> bool {
 
 /// The `hook-alheio` refusal of this route: the 3rd line says what keeps the
 /// integration from happening, never to put `shipcraft check` in the `pre-commit`.
+/// Item 153: it yields to hooks wired by hand, which add the manual branch otherwise.
 pub fn alien<T>(what: String, problem: &str) -> Result<T> {
-    refuse(
+    refuse_yielding(
         "foreign-hook",
         what,
         "shipcraft does not replace or edit another tool's hook: when in doubt, this step stays manual",
-        format!("what prevents commit-msg integration: {problem}; fix it and run `shipcraft init` again, {BY_HAND}"),
+        format!("what prevents commit-msg integration: {problem}; fix it and run `shipcraft init` again"),
     )
 }
 
