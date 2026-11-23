@@ -130,7 +130,13 @@ def main(case):
         lines = [line for line in out.splitlines() if line.strip()]
         assert len(lines) == 3, 'refusal must have exactly three lines'
         assert len(set(lines)) == 3, 'refusal repeats lines'
-        assert 'shipcraft check' in lines[-1], 'last line does not say where to put shipcraft check'
+        if case == 'git-config-falha':
+            assert p.returncode == 1, 'invalid Git config must exit 1'
+            assert len(out.splitlines()) == 3, 'Git config refusal must have exactly three lines'
+            assert lines[0].startswith('shipcraft refused: git cannot open this repository (')
+            assert 'manually' not in out, 'Git config refusal offers manual hook integration'
+        else:
+            assert 'shipcraft check' in lines[-1], 'last line does not say where to put shipcraft check'
         assert not any(word in out.lower() for word in ('who reviews', 'which reviewer', 'provider', 'red', 'green')), 'asked before refusing'
     finally:
         if locked is not None:

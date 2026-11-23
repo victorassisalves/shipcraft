@@ -2885,7 +2885,13 @@ SH
     chk "lefthook.yml was not modified" cmp -s lefthook.yml "$CW/lh.orig"
     rm -f .pre-commit-config.yaml
     mkdir -p .husky && printf 'npm test\n' > .husky/pre-commit
-    init_must_refuse_hook ".husky/ alongside lefthook.yml"
+    local before_husky_lefthook
+    before_husky_lefthook=$("$PY" -c 'import sys; sys.path.insert(0, sys.argv[1]); from lefthook_fixture import snapshot; print(sorted(snapshot().items()))' "$ACEITE/tools") || fail "snapshot before husky + lefthook"
+    run_cmd_stdin /dev/null shipcraft init
+    chk "husky + lefthook: exit 1" eq "$RC" 1
+    chk "husky + lefthook: nothing written" eq "$("$PY" -c 'import sys; sys.path.insert(0, sys.argv[1]); from lefthook_fixture import snapshot; print(sorted(snapshot().items()))' "$ACEITE/tools")" "$before_husky_lefthook"
+    chk "husky + lefthook: exactly three refusal lines" awk 'NR == 1 && !/^shipcraft refused:/ { exit 1 } NR == 2 && !/^Why:/ { exit 1 } NR == 3 && !/^Next:/ { exit 1 } END { if (NR != 3) exit 1 }' "$OUT"
+    chk "husky + lefthook: exact Next line" grep -Fx 'Next: keep only one and run `shipcraft init` again' "$OUT"
     chk "lefthook.yml was not modified" cmp -s lefthook.yml "$CW/lh.orig"
     pass ;;
   v1-15a.2-lefthook-dois-nomes-ou-hook-alheio)
