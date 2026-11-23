@@ -47,7 +47,9 @@ const MODULE_KEYS: [&str; 17] = [
 /// inside a preset, `preset` is not read.
 const DATA_KEYS: &[&str] = &["globals", "testEnvironmentOptions"];
 const IN_CONFIG: Modules = Modules { keys: &MODULE_KEYS, single: Some("preset"), data: DATA_KEYS };
-const IN_PRESET: Modules = Modules { keys: &MODULE_KEYS, single: None, data: DATA_KEYS };
+/// Inside a preset, `preset` is data: what its value holds names nothing.
+const IN_PRESET: Modules =
+    Modules { keys: &MODULE_KEYS, single: None, data: &["globals", "testEnvironmentOptions", "preset"] };
 
 /// The suites whose command contains `jest`.
 pub fn suites(config: &Config) -> Vec<Suite> {

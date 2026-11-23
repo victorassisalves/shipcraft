@@ -277,6 +277,12 @@ fn a_relative_preset_is_read_like_a_config() {
         why("jest.config.js", "./nope names no file in the repository")
     );
     assert_eq!(one("module.exports = { preset: '/p' }", ("x", "")), why("jest.config.js", "/p is an absolute path"));
+    // Inside a preset (and a module it imports), `preset`'s value names nothing, in JavaScript and JSON.
+    let nested = "module.exports = { preset: { resolver: './absent.js' }, ...require('./more.js') };";
+    let more = ("more.js", "module.exports = { preset: ['x', { testRunner: './absent.js' }] };");
+    assert_eq!(found(&[("jest.config.js", cfg), ("p.js", nested), more]).1, None);
+    assert_eq!(one(cfg, ("p.json", "{\"preset\": {\"resolver\": \"./absent.js\"}}")), None);
+    assert_eq!(one(cfg, ("p.json", "{\"preset\": \"./absent\"}")), None);
     // A relative preset above the repository root has no candidate in it.
     let above = why("jest.config.js", "../shared/jest-preset.js names no file in the repository");
     assert_eq!(one("module.exports = { preset: '../shared/jest-preset.js' }", ("x", "")), above);
