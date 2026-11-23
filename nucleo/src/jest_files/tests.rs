@@ -187,3 +187,118 @@ fn the_jest_settings_of_a_manifest() {
     assert!(matches!(jest_settings("p", b"[1]".to_vec()), Settings::Bytes(_)));
     assert!(!same(a, "{broken"), "one that stops parsing has changed");
 }
+
+#[test]
+fn the_module_keys_lock_what_they_name() {
+    let config = "module.exports = { rootDir: 'src', testEnvironment: '<rootDir>/env', transform: { '\\\\.ts$': ['<rootDir>/ts.js', { tsconfig: './tsconfig.test.json' }], x: require.resolve('./jest/t.js') }, reporters: ['default', ['./rep.js', {resolver: './none.txt'}]], globals: {filter: './none.json'}, snapshotSerializers: [path.join(__dirname, 'x.js')] }";
+    let files = [
+        ("jest.config.js", config),
+        ("src/env/index.js", ""),
+        ("src/ts.js", ""),
+        ("src/tsconfig.test.json", ""),
+        ("jest/t.js", ""),
+        ("src/rep.js", ""),
+        ("src/x.js", ""),
+    ];
+    let (paths, why_) = found(&files);
+    assert_eq!(why_, None);
+    assert_eq!(paths, ["jest.config.js", "jest/t.js", "src/env/index.js", "src/rep.js", "src/ts.js"]);
+    // A package names nothing; a missing relative file, an absolute path and a link are reasons.
+    let one = |text: &str| found(&[("jest.config.js", text)]).1;
+    assert_eq!(
+        one("module.exports = { transform: {x: 'babel-jest'}, testEnvironment: 'jsdom', preset: 'ts-jest' }"),
+        None
+    );
+    let missing = "module.exports = { transform: { '\\\\.js$': '<rootDir>/jest/missing.js' } };";
+    assert_eq!(one(missing), why("jest.config.js", "<rootDir>/jest/missing.js names no file in the repository"));
+    assert_eq!(
+        one("module.exports = { resolver: '/opt/r.js' }"),
+        why("jest.config.js", "/opt/r.js is an absolute path")
+    );
+    let resolve = "module.exports = { testEnvironment: require.resolve('./missing.js') }";
+    assert_eq!(one(resolve), why("jest.config.js", "./missing.js names no file in the repository"));
+    let order = "module.exports = { reporters: ['./r-missing.js'], setupFiles: './s-missing.js' };";
+    assert_eq!(one(order), why("jest.config.js", "./r-missing.js names no file in the repository"), "text order");
+}
+
+#[test]
+fn a_module_name_mapper_keeps_root_dir_literals_without_captures() {
+    let config = "module.exports = { moduleNameMapper: { '^a$': '<rootDir>/test/fake.js', '^b$': ['<rootDir>/opt/none.js', '<rootDir>/test/alt.js', '<rootDir>/src/$1'], '^c$': './test/rel.js', '^d$': 'identity-obj-proxy', '^e$': '<rootDir>/test/price$.js', '^s$': require.resolve('./test/mock.js') } }";
+    let files = [
+        ("jest.config.js", config),
+        ("test/fake.js", ""),
+        ("test/alt.js", ""),
+        ("test/rel.js", ""),
+        ("test/price$.js", ""),
+        ("test/mock.js", ""),
+        ("src/$1.js", ""),
+    ];
+    let (paths, why_) = found(&files);
+    assert_eq!(why_, None);
+    assert_eq!(paths, ["jest.config.js", "test/alt.js", "test/fake.js", "test/mock.js", "test/price$.js"]);
+}
+
+#[test]
+fn a_relative_preset_is_read_like_a_config() {
+    let files = [
+        ("jest.config.js", "module.exports = { rootDir: 'web', preset: '<rootDir>/presets/web' };"),
+        (
+            "web/presets/web.js",
+            "module.exports = { preset: './missing', testEnvironment: 'node', ...require('./base.js') };",
+        ),
+        ("web/presets/base.js", "module.exports = { preset: './missing-too', transform: {x: './jest/t.js'} };"),
+        ("web/presets/web/jest-preset.cjs", "module.exports = { testEnvironment: '<rootDir>/test/env.js' };"),
+        ("web/presets/web.json", "{\"setupFiles\": \"<rootDir>/boot.js\", \"preset\": \"./nope\"}"),
+        ("web/test/env.js", ""),
+        ("web/boot.js", ""),
+        ("web/jest/t.js", ""),
+    ];
+    let (paths, why_) = found(&files);
+    assert_eq!(why_, None);
+    let all = [
+        "jest.config.js",
+        "web/boot.js",
+        "web/jest/t.js",
+        "web/presets/base.js",
+        "web/presets/web.js",
+        "web/presets/web.json",
+        "web/presets/web/jest-preset.cjs",
+        "web/test/env.js",
+    ];
+    assert_eq!(paths, all);
+    let one = |config: &str, preset: (&str, &str)| found(&[("jest.config.js", config), preset]).1;
+    let cfg = "module.exports = { preset: './p' }";
+    assert_eq!(one(cfg, ("p.json", "[1]")), why("p.json", "it is not a JSON object"));
+    assert_eq!(one(cfg, ("p.json", "{// c\n}")), why("p.json", "it is not a JSON object"), "parsed strictly");
+    assert_eq!(one(cfg, ("p.js", "module.exports = { rootDir: 'src' };")), why("p.js", "it sets rootDir"));
+    assert_eq!(one(cfg, ("p", "{}")), None, "an extensionless preset is locked, not read");
+    assert_eq!(
+        one("module.exports = { preset: './nope' }", ("x", "")),
+        why("jest.config.js", "./nope names no file in the repository")
+    );
+    assert_eq!(one("module.exports = { preset: '/p' }", ("x", "")), why("jest.config.js", "/p is an absolute path"));
+}
+
+#[test]
+fn the_json_reader_reads_preset_and_the_module_keys_in_order() {
+    let manifest = "{\"jest\":{\"preset\":\"./jest-preset.json\",\"transform\":{\"x\":\"<rootDir>/jest/t.js\"},\"haste\":{\"hasteImplModulePath\":\"./h.js\"},\"projects\":[{\"rootDir\":\"<rootDir>/pkg\",\"testEnvironment\":\"./env.js\"}]}}";
+    let files = [
+        ("package.json", manifest),
+        ("jest-preset.json", "{\"reporters\": [[\"./rep.js\", {}]], \"preset\": \"./ignored\"}"),
+        ("jest/t.js", ""),
+        ("h.js", ""),
+        ("rep.js", ""),
+        ("pkg/env.js", ""),
+    ];
+    let (paths, why_) = found(&files);
+    assert_eq!(why_, None);
+    assert_eq!(paths, ["h.js", "jest-preset.json", "jest/t.js", "pkg/env.js", "rep.js"]);
+    let one = |text: &str| found(&[("package.json", text)]).1;
+    let order = "{\"jest\":{\"transform\":{\"x\":\"./a-missing.js\"},\"preset\":\"./b-missing\"}}";
+    assert_eq!(one(order), why("package.json", "./b-missing names no file in the repository"), "preset first");
+    let keys =
+        "{\"jest\":{\"watchPlugins\":[\"./w-missing.js\"],\"testEnvironment\":\"./e-missing.js\",\"setupFiles\":3}}";
+    assert_eq!(one(keys), why("package.json", "setupFiles is not a string or an array of strings"));
+    let keys = "{\"jest\":{\"watchPlugins\":[\"./w-missing.js\"],\"testEnvironment\":\"./e-missing.js\"}}";
+    assert_eq!(one(keys), why("package.json", "./e-missing.js names no file in the repository"), "the key order");
+}

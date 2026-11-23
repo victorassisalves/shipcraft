@@ -168,10 +168,35 @@ fn jest_root(toks: &[Tok], i: usize) -> Option<(Option<String>, usize)> {
 
 /// The events of one config module, in text order (lossy UTF-8 text).
 pub fn scan(text: &str, keys: &Keys) -> Vec<Event> {
+    positioned(text, keys).into_iter().map(|(_, event)| event).collect()
+}
+
+/// Item 155: events with the index of the token where each was found.
+#[derive(Default)]
+struct Events {
+    list: Vec<(usize, Event)>,
+    at: usize,
+}
+
+impl Events {
+    fn push(&mut self, event: Event) {
+        self.list.push((self.at, event));
+    }
+
+    fn extend(&mut self, events: impl IntoIterator<Item = Event>) {
+        for event in events {
+            self.push(event);
+        }
+    }
+}
+
+/// `scan`'s events, each with its token index.
+fn positioned(text: &str, keys: &Keys) -> Vec<(usize, Event)> {
     let toks = tokens(text);
-    let mut events = Vec::new();
+    let mut events = Events::default();
     let mut i = 0;
     while i < toks.len() {
+        events.at = i;
         let colon = toks.get(i + 1) == Some(&Tok::Punct(b':'));
         match (key(&toks[i]), &toks[i]) {
             (Some(name), _) if keys.setup.contains(&name) => match colon.then(|| setup_value(&toks, i + 2)).flatten() {
@@ -221,7 +246,132 @@ pub fn scan(text: &str, keys: &Keys) -> Vec<Event> {
         }
         i += 1;
     }
-    events
+    events.list
+}
+
+/// Item 155: a module item, a string literal or `require.resolve(<literal>)`.
+#[derive(Debug, PartialEq)]
+pub enum Item {
+    Literal(String),
+    Resolve(String),
+}
+
+/// Item 155: what `scan_with` found, in text order.
+#[derive(Debug, PartialEq)]
+pub enum Read {
+    /// One of `scan`'s events.
+    Event(Event),
+    /// A module item of a read module key's value.
+    Module(&'static str, Item),
+}
+
+/// Item 155: the module keys a scan reads, the one whose value is a single
+/// module item (`preset`), and the data keys whose values name nothing.
+pub struct Modules {
+    pub keys: &'static [&'static str],
+    pub single: Option<&'static str>,
+    pub data: &'static [&'static str],
+}
+
+/// `scan`'s events with the module items of `modules`' keys, in text order.
+pub fn scan_with(text: &str, keys: &Keys, modules: &Modules) -> Vec<Read> {
+    let toks = tokens(text);
+    let mut found: Vec<(usize, Read)> =
+        positioned(text, keys).into_iter().map(|(at, event)| (at, Read::Event(event))).collect();
+    let mut i = 0;
+    while i < toks.len() {
+        let name = key(&toks[i]).filter(|_| toks.get(i + 1) == Some(&Tok::Punct(b':')));
+        let module = name.and_then(|name| modules.keys.iter().chain(&modules.single).find(|k| **k == name).copied());
+        if module.is_none() && !name.is_some_and(|name| modules.data.contains(&name)) {
+            i += 1;
+            continue;
+        }
+        // The value runs to its `,` or closing bracket; keys inside it name nothing.
+        let end = value_end(&toks, i + 2);
+        if let Some(module) = module.filter(|_| ends_value(toks.get(end))) {
+            let value = &toks[i + 2..end];
+            let items = if modules.single == Some(module) { item(value).into_iter().collect() } else { items(value) };
+            found.extend(items.into_iter().map(|item| (i, Read::Module(module, item))));
+        }
+        i = end.max(i + 1);
+    }
+    found.sort_by_key(|(at, _)| *at);
+    found.into_iter().map(|(_, read)| read).collect()
+}
+
+/// The index of the first `,` or unmatched closing bracket from `toks[i]`.
+fn value_end(toks: &[Tok], mut i: usize) -> usize {
+    let mut depth = 0usize;
+    while let Some(tok) = toks.get(i) {
+        match tok {
+            Tok::Punct(b'(' | b'[' | b'{') => depth += 1,
+            Tok::Punct(b')' | b']' | b'}') if depth == 0 => break,
+            Tok::Punct(b')' | b']' | b'}') => depth -= 1,
+            Tok::Punct(b',') if depth == 0 => break,
+            _ => {}
+        }
+        i += 1;
+    }
+    i
+}
+
+/// A module item that is the whole of `toks`.
+fn item(toks: &[Tok]) -> Option<Item> {
+    match toks {
+        [Tok::Str(content, true)] => Some(Item::Literal(content.to_string())),
+        [Tok::Word("require"), Tok::Punct(b'.'), Tok::Word("resolve"), Tok::Punct(b'('), Tok::Str(content, true), Tok::Punct(b')')] => {
+            Some(Item::Resolve(content.to_string()))
+        }
+        _ => None,
+    }
+}
+
+/// The parts of `toks` when it is one `open`...matching-close group, split at
+/// the group's own commas (an empty part, after a trailing comma, dropped).
+fn parts<'t, 'a>(toks: &'t [Tok<'a>], open: u8) -> Option<Vec<&'t [Tok<'a>]>> {
+    let inner = toks.get(1..toks.len().checked_sub(1)?)?;
+    if toks.first() != Some(&Tok::Punct(open)) || !matches!(toks.last(), Some(Tok::Punct(b')' | b']' | b'}'))) {
+        return None;
+    }
+    let mut out = Vec::new();
+    let mut start = 0;
+    while start < inner.len() {
+        let end = value_end(inner, start);
+        // An unmatched closing bracket inside: the group closed before the end.
+        if end < inner.len() && inner[end] != Tok::Punct(b',') {
+            return None;
+        }
+        out.push(&inner[start..end]);
+        start = end + 1;
+    }
+    Some(out.into_iter().filter(|part| !part.is_empty()).collect())
+}
+
+/// The module items of an array's items that are module items.
+fn array_items(toks: &[Tok]) -> Option<Vec<Item>> {
+    Some(parts(toks, b'[')?.into_iter().filter_map(item).collect())
+}
+
+/// A module key's value: a module item, an array (its module items, and the
+/// module items of each tuple in it) or an object (each property's value read
+/// as an array item is); any other shape names nothing.
+fn items(toks: &[Tok]) -> Vec<Item> {
+    if let Some(one) = item(toks) {
+        return vec![one];
+    }
+    let as_array_item = |part: &[Tok]| item(part).map(|one| vec![one]).or_else(|| array_items(part));
+    if let Some(list) = parts(toks, b'[') {
+        return list.into_iter().filter_map(as_array_item).flatten().collect();
+    }
+    let Some(props) = parts(toks, b'{') else { return Vec::new() };
+    props
+        .into_iter()
+        .filter_map(|prop| match prop {
+            [Tok::Word(_) | Tok::Str(..), Tok::Punct(b':'), value @ ..] => as_array_item(value),
+            _ => None,
+        })
+        .flatten()
+        .collect()
 }
 
 #[cfg(test)]
@@ -343,5 +493,75 @@ mod tests {
         assert_eq!(scan("x 'setupFiles'"), [bad("setupFiles is not a string or an array of strings")]);
         assert_eq!(scan("/* setupFiles: x"), []);
         assert_eq!(scan("'abc\\"), []);
+    }
+
+    /// Item 155: the Jest scan with the module keys, as `jest_files` calls it.
+    fn modules(text: &str) -> Vec<Read> {
+        let keys = &["transform", "testEnvironment", "reporters", "moduleNameMapper", "watchPlugins"];
+        super::scan_with(text, &JEST, &Modules { keys, single: Some("preset"), data: &["globals"] })
+    }
+
+    fn lit(key: &'static str, s: &str) -> Read {
+        Read::Module(key, Item::Literal(s.to_string()))
+    }
+
+    #[test]
+    fn module_items_of_each_value_shape() {
+        assert_eq!(modules("{ testEnvironment: '<rootDir>/env.js' }"), [lit("testEnvironment", "<rootDir>/env.js")]);
+        let res = Read::Module("testEnvironment", Item::Resolve("./e".into()));
+        assert_eq!(modules("{ testEnvironment: require.resolve('./e'), }"), [res]);
+        let text = "{ reporters: ['default', ['./rep.js', { outputDirectory: './out' }], {x: './no'}, ...more] }";
+        assert_eq!(modules(text), [lit("reporters", "default"), lit("reporters", "./rep.js")]);
+        let text = "{ transform: { '\\\\.ts$': ['./ts.js', { tsconfig: './t.json' }], \"x\": './css.js', ...base, y, m() {} } }";
+        assert_eq!(modules(text), [lit("transform", "./ts.js"), lit("transform", "./css.js")]);
+        assert_eq!(
+            modules("{ watchPlugins: [['./w.js', {key: 'k'}]], transform: {a: [['./no.js']]} }"),
+            [lit("watchPlugins", "./w.js")]
+        );
+        assert_eq!(modules("{ preset: './p', }"), [lit("preset", "./p")]);
+        assert_eq!(modules("{ preset: ['./p'] }"), []);
+    }
+
+    #[test]
+    fn other_value_shapes_name_nothing_and_are_never_bad() {
+        for text in [
+            "{ testEnvironment: './env.js' + '.bak' }",
+            "{ reporters: ['./r.js'].concat([]) }",
+            "{ testEnvironment: (x) }",
+            "{ transform: { a: './t.js' } as const }",
+            "{ testEnvironment: env }",
+            "{ testEnvironment: path.join(__dirname, 'env.js') }",
+            "{ testEnvironment: `./${e}` }",
+            "{ testEnvironment: './a\\\\b' }",
+            "{ preset: name }",
+            "transform(src); testEnvironment",
+            "{ testEnvironment: './e.js' ]",
+        ] {
+            assert_eq!(modules(text), [], "{text}");
+        }
+    }
+
+    #[test]
+    fn keys_inside_module_and_data_values_name_nothing() {
+        let text = "{ reporters: [['./rep.js', {transform: './t.txt'}]], globals: {testEnvironment: './g.js'}, testEnvironment: './e.js' }";
+        assert_eq!(modules(text), [lit("reporters", "./rep.js"), lit("testEnvironment", "./e.js")]);
+        // Item 132's events go on inside a value, at their place in text order.
+        let text = "{ setupFiles: './s', testEnvironment: require('./env'), transform: {x: './t.js'}, globalSetup: g }";
+        assert_eq!(
+            modules(text),
+            [
+                Read::Event(setup("./s")),
+                Read::Event(Import("./env".into())),
+                lit("transform", "./t.js"),
+                Read::Event(bad("globalSetup is not a string or an array of strings")),
+            ]
+        );
+    }
+
+    #[test]
+    fn scan_is_unchanged_by_the_module_keys() {
+        let text = "{ transform: {x: './t.js'}, preset: './p', setupFiles: ['./s'], rootDir: 'src' }";
+        assert_eq!(super::scan(text, &JEST), [setup("./s"), Root(Some("src".into()))]);
+        assert_eq!(scan(text), [setup("./s")]);
     }
 }
