@@ -3,10 +3,14 @@
 //! `.pytest.toml`, `pyproject.toml`'s `tool.pytest`, `setup.cfg`'s
 //! `[tool:pytest]`, `tox.ini`'s `[pytest]`) while a lock is open
 //! (`pytest-config-changed`). Nothing is locked: each judged path is compared
-//! with every parent's.
+//! with every parent's. Item 156: then the project code pytest loads as
+//! plugins (`plugins`), refused `pytest-plugin-changed`.
+
+mod plugins;
 
 use crate::config::{Config, Suite};
 use crate::git::{Repo, Snapshot};
+use crate::lock::Lock;
 use crate::red::one_line;
 use crate::refusal::{refuse, Result};
 use crate::vitest_files::snapshot_paths;
@@ -42,11 +46,11 @@ impl Settings {
     }
 }
 
-fn file_name(path: &str) -> &str {
+pub(crate) fn file_name(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
 }
 
-fn folder(path: &str) -> &str {
+pub(crate) fn folder(path: &str) -> &str {
     path.rsplit_once('/').map_or("", |(dir, _)| dir)
 }
 
@@ -152,7 +156,8 @@ fn of_bytes(name: &str, bytes: Vec<u8>) -> Settings {
 /// Point 1: the settings of `path` in `snapshot`, its bytes read with `of`.
 fn settings(repo: &Repo, snapshot: &Snapshot, path: &str, of: &dyn Fn(&str, Vec<u8>) -> Settings) -> Result<Settings> {
     match repo.mode(snapshot, path)?.as_deref() {
-        None => return Ok(Settings::None),
+        // Item 156: a folder (a linked folder's path in another snapshot) is no path.
+        None | Some("040000") => return Ok(Settings::None),
         Some("120000") => return Ok(Settings::Linked),
         Some(_) => {}
     }
@@ -176,14 +181,23 @@ pub(crate) fn all_paths(repo: &Repo, parents: &[Snapshot], snapshot: &Snapshot) 
 }
 
 /// Point 2, right after `vitest_files::check_added`: the first judged path
-/// whose settings in `snapshot` equal those of no parent.
-pub fn check_changed(repo: &Repo, parents: &[Snapshot], snapshot: &Snapshot, lock_path: &str) -> Result<()> {
+/// whose settings in `snapshot` equal those of no parent; then (item 156)
+/// the first plugin file outside the lock's `files` whose code equals no parent's.
+pub fn check_changed(
+    repo: &Repo,
+    parents: &[Snapshot],
+    snapshot: &Snapshot,
+    lock_path: &str,
+    lock: &Lock,
+) -> Result<()> {
     let Some(config) = Config::at(repo, snapshot)? else { return Ok(()) };
     let suites = pytest_suites(&config);
     if suites.is_empty() {
         return Ok(());
     }
-    let paths = watched(&suites, &all_paths(repo, parents, snapshot)?);
+    let sources: Vec<&Snapshot> = std::iter::once(snapshot).chain(parents).collect();
+    let lists = sources.iter().map(|source| snapshot_paths(repo, source)).collect::<Result<Vec<_>>>()?;
+    let paths = watched(&suites, lists.iter().flatten());
     let judge = Judge {
         code: "pytest-config-changed",
         subject: "pytest's settings",
@@ -191,7 +205,17 @@ pub fn check_changed(repo: &Repo, parents: &[Snapshot], snapshot: &Snapshot, loc
         undo: "pytest's settings",
         of: &pytest_settings,
     };
-    judge.run(repo, parents, snapshot, lock_path, paths)
+    judge.run(repo, parents, snapshot, lock_path, paths)?;
+    let mut files = plugins::files(repo, &suites, &sources, &lists)?;
+    files.retain(|path| !lock.files.contains_key(path));
+    let judge = Judge {
+        code: "pytest-plugin-changed",
+        subject: "pytest's plugins",
+        why: "pytest loads this file as plugin code before the tests (its hooks can skip, deselect or pass a case), so changing it during GREEN changes the judge mid-game",
+        undo: "pytest's plugins",
+        of: &|_: &str, bytes: Vec<u8>| Settings::Bytes(bytes),
+    };
+    judge.run(repo, parents, snapshot, lock_path, files)
 }
 
 /// A settings check: its code, its lines' words and how it reads a file.
