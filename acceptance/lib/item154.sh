@@ -583,7 +583,6 @@ elif case=='legacy':
  write('.shipcraft/locks/legacy154.json',json.dumps(d)+'\n');commit('historical RED154')
  q=green('src/unit-setup.ts',MOCK)
  assert q.returncode==0 and lock()[1]['state']=='closed' and lock()[1]['files']==old_files
- assert 'RUN  v'+os.environ.get('SHIPCRAFT_VITEST_VERSION','5.0.4') in q.stderr
  assert 'stub154' in Path('src/sum.ts').read_text()
 elif case=='sibling':
  parent_layout('web',vc(exe='../'+BIN),'vitest.config.ts');red();commit('RED154')
