@@ -315,13 +315,13 @@ fn bracket(stack: &mut Vec<u8>, tok: &Tok) -> bool {
     stack.iter().rposition(|b| *b == open).map(|at| stack.truncate(at)).is_some()
 }
 
-/// The index of the first `,` with no bracket open from `toks[i]`, or of a
-/// closer there when `closes` (the enclosing bracket); otherwise the end.
+/// The index of the first `,` or `;` with no bracket open from `toks[i]`, or
+/// of a closer there when `closes` (the enclosing bracket); otherwise the end.
 fn value_end(toks: &[Tok], mut i: usize, closes: bool) -> usize {
     let mut stack = Vec::new();
     while let Some(tok) = toks.get(i) {
         let open = !stack.is_empty();
-        if (!open && *tok == Tok::Punct(b','))
+        if (!open && matches!(tok, Tok::Punct(b',' | b';')))
             || (!bracket(&mut stack, tok) && !open && closes && matches!(tok, Tok::Punct(b')' | b']' | b'}')))
         {
             break;
@@ -550,6 +550,7 @@ mod tests {
             "{ preset: name }",
             "transform(src); testEnvironment",
             "{ testEnvironment: './e.js' ]",
+            "{ testEnvironment: './e.js'; }",
         ] {
             assert_eq!(modules(text), [], "{text}");
         }
@@ -562,6 +563,10 @@ mod tests {
         // Brackets match by kind: a bracket in a regular expression literal opens nothing.
         let text = "{ reporters: [['./r.js', {a: /[(]/, b: /)/}], /[{]/], testEnvironment: '<rootDir>/env.js' }";
         assert_eq!(modules(text), [lit("reporters", "./r.js"), lit("testEnvironment", "<rootDir>/env.js")]);
+        // A TypeScript typed local ends at its `;`: the object after it is read.
+        let text =
+            "const testEnvironment: string = \"node\";\nexport default { testEnvironment, transform: {x: './t.js'} };";
+        assert_eq!(modules(text), [lit("transform", "./t.js")]);
         // Item 132's events go on inside a value, at their place in text order.
         let text = "{ setupFiles: './s', testEnvironment: require('./env'), transform: {x: './t.js'}, globalSetup: g }";
         assert_eq!(
