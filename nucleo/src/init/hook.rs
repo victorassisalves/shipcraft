@@ -254,8 +254,7 @@ fn hand(repo: &Repo, refusal: Refusal, local: bool) -> Result<Hook> {
             Err(_) => return Err(Stop::Refused(refusal.branch(""))),
         }
     }
-    let shown: Vec<String> =
-        paths.iter().map(|p| p.strip_prefix(repo.root()).unwrap_or(p).display().to_string()).collect();
+    let shown: Vec<String> = paths.iter().map(|p| shown(repo.root(), p)).collect();
     if !init_hooks::wired(&paths) {
         let bin = if local { LOCAL } else { "shipcraft" };
         let branch = format!(
@@ -265,7 +264,7 @@ fn hand(repo: &Repo, refusal: Refusal, local: bool) -> Result<Hook> {
         return Err(Stop::Refused(refusal.branch(&branch)));
     }
     let pre = repo.hook_path("pre-commit")?;
-    let runs = is_executable(&pre)
+    let runs = init_hooks::runnable(&pre)
         && fs::read(&pre).is_ok_and(|b| {
             b.windows(HOOK_MARK.len()).any(|w| w == HOOK_MARK.as_bytes()) || init_hooks::calls(&b, &["check"])
         });
@@ -278,6 +277,14 @@ fn hand(repo: &Repo, refusal: Refusal, local: bool) -> Result<Hook> {
         );
     }
     Ok(Hook::Hand(shown.join(", ")))
+}
+
+/// Item 153.3: relative to the root when under it with no `..` after it, else as git names it.
+fn shown(root: &Path, path: &Path) -> String {
+    match path.strip_prefix(root) {
+        Ok(rest) if !rest.components().any(|c| c == std::path::Component::ParentDir) => rest.display().to_string(),
+        _ => path.display().to_string(),
+    }
 }
 
 /// One lefthook file at the root: the conditions (15b.1, 15b.3), then the
@@ -360,6 +367,14 @@ pub(crate) fn written_hook(msg: bool, bytes: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shows_hook_paths_relative_only_without_parent_steps() {
+        let root = Path::new("/r/repo");
+        assert_eq!(shown(root, Path::new("/r/repo/.githooks/commit-msg")), ".githooks/commit-msg");
+        assert_eq!(shown(root, Path::new("/r/repo/../shared/hooks/commit-msg")), "/r/repo/../shared/hooks/commit-msg");
+        assert_eq!(shown(root, Path::new("/m/.git/hooks/post-commit")), "/m/.git/hooks/post-commit");
+    }
 
     #[test]
     fn reads_the_hooks_init_writes() {

@@ -97,6 +97,14 @@ pub(crate) fn calls(text: &[u8], args: &[&str]) -> bool {
     text.split(|b| *b == b'\n').any(|line| call_line(line.strip_suffix(b"\r").unwrap_or(line), args))
 }
 
+/// Item 153, points 1 and 4: a regular file (links followed) that this user may
+/// execute, as git checks it (`access(X_OK)`), not any execute bit.
+pub(crate) fn runnable(path: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(c) = std::ffi::CString::new(path.as_os_str().as_bytes()) else { return false };
+    fs::metadata(path).is_ok_and(|m| m.is_file()) && unsafe { libc::access(c.as_ptr(), libc::X_OK) } == 0
+}
+
 /// Item 143: whether a line of `text` calls `shipcraft check --commit-msg` or `shipcraft close`.
 pub(crate) fn calls_shipcraft(text: &[u8]) -> bool {
     HOOKS.iter().any(|(_, args, _)| calls(text, args))
@@ -160,7 +168,7 @@ fn call_rest<'a>(line: &'a [u8], args: &[&str]) -> Option<&'a [u8]> {
 /// Item 153, point 1: whether both hooks (`commit-msg`, then `post-commit`) are wired by hand.
 pub(crate) fn wired(paths: &[PathBuf]) -> bool {
     HOOKS.iter().zip(paths).all(|((name, args, _), path)| {
-        is_executable(path) && fs::read(path).is_ok_and(|bytes| hand_wired(&bytes, args, *name == "commit-msg"))
+        runnable(path) && fs::read(path).is_ok_and(|bytes| hand_wired(&bytes, args, *name == "commit-msg"))
     })
 }
 
@@ -194,6 +202,22 @@ fn hand_wired(bytes: &[u8], args: &[&str], msg: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runnable_follows_the_owner_bit_not_any_bit() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("shipcraft-i153-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("hook");
+        fs::write(&p, "#!/bin/sh\nshipcraft close\n").unwrap();
+        for (mode, ok) in [(0o755, true), (0o700, true), (0o655, false), (0o644, false)] {
+            fs::set_permissions(&p, fs::Permissions::from_mode(mode)).unwrap();
+            assert_eq!(runnable(&p), ok, "{mode:o}");
+        }
+        assert!(!runnable(&dir));
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     const MSG: &[&str] = &["check", "--commit-msg"];
     const CLOSE: &[&str] = &["close"];
