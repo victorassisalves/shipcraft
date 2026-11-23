@@ -252,7 +252,7 @@ fn hand(repo: &Repo, refusal: Refusal, local: bool) -> Result<Hook> {
         // Point 3: no branch when git's path fails or is not UTF-8 (it could not be shown as it is).
         match repo.hook_path_as_git(hook) {
             Ok(Some(path)) => printed.push(path),
-            _ => return Err(Stop::Refused(refusal.branch(""))),
+            _ => return Err(Stop::Refused(refusal.branch("", Vec::new()))),
         }
     }
     let paths: Vec<PathBuf> = printed.iter().map(|p| repo.root().join(p)).collect();
@@ -272,16 +272,15 @@ fn hand(repo: &Repo, refusal: Refusal, local: bool) -> Result<Hook> {
         );
     }
     if !init_hooks::wired(&paths) {
-        // Point 3: no branch when a hook's folder exists and is not a folder (`/dev/null`).
-        if paths.iter().any(|p| p.parent().is_some_and(|d| fs::metadata(d).is_ok_and(|m| !m.is_dir()))) {
-            return Err(Stop::Refused(refusal.branch("")));
+        // Point 3: no branch when a folder above a hook exists and is not a folder (`/dev/null`, a `.git` file).
+        if paths.iter().any(|p| p.ancestors().skip(1).any(|d| fs::metadata(d).is_ok_and(|m| !m.is_dir()))) {
+            return Err(Stop::Refused(refusal.branch("", Vec::new())));
         }
         let bin = if local { LOCAL } else { "shipcraft" };
         let branch = format!(
-            ", or make `{bin} check --commit-msg \"$1\"` the last command of {} and `{bin} close` the last command of {}, each file starting with `#!/bin/sh` and with no `exit` or `exec` line before that call, both executable, and run `shipcraft init` again",
-            shown[0], shown[1]
+            ", or make `{bin} check --commit-msg \"$1\"` the last command of \u{1} and `{bin} close` the last command of \u{1}, each file starting with `#!/bin/sh` and with no `exit` or `exec` line before that call, both executable, and run `shipcraft init` again"
         );
-        return Err(Stop::Refused(refusal.branch(&branch)));
+        return Err(Stop::Refused(refusal.branch(&branch, shown)));
     }
     Ok(Hook::Hand(shown.join(", ")))
 }
