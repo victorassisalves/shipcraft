@@ -249,9 +249,10 @@ const RUNS_CHECK: &str = "the installed pre-commit hook runs `shipcraft check`";
 fn hand(repo: &Repo, refusal: Refusal, local: bool) -> Result<Hook> {
     let mut printed = Vec::new();
     for hook in ["commit-msg", "post-commit"] {
+        // Point 3: no branch when git's path fails or is not UTF-8 (it could not be shown as it is).
         match repo.hook_path_as_git(hook) {
-            Ok(path) => printed.push(path),
-            Err(_) => return Err(Stop::Refused(refusal.branch(""))),
+            Ok(Some(path)) => printed.push(path),
+            _ => return Err(Stop::Refused(refusal.branch(""))),
         }
     }
     let paths: Vec<PathBuf> = printed.iter().map(|p| repo.root().join(p)).collect();

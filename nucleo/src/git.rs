@@ -311,14 +311,19 @@ impl Repo {
 
     /// Where git looks for a hook (honours core.hooksPath and worktrees).
     pub fn hook_path(&self, name: &str) -> Result<PathBuf> {
-        Ok(self.root.join(self.hook_path_as_git(name)?))
+        Ok(self.root.join(text(&self.hook_path_bytes(name)?)))
     }
 
-    /// Item 153: the hook's path as git prints it (relative to the root, or absolute).
-    pub fn hook_path_as_git(&self, name: &str) -> Result<String> {
+    /// Item 153: the hook's path as git prints it (relative to the root, or absolute),
+    /// None when it is not valid UTF-8.
+    pub fn hook_path_as_git(&self, name: &str) -> Result<Option<String>> {
+        Ok(String::from_utf8(self.hook_path_bytes(name)?).ok())
+    }
+
+    fn hook_path_bytes(&self, name: &str) -> Result<Vec<u8>> {
         // Only the line end is git's: a core.hooksPath may start or end with spaces (item 101).
         let out = self.run(&["rev-parse", "--git-path", &format!("hooks/{name}")])?;
-        Ok(text(out.strip_suffix(b"\n").unwrap_or(&out)))
+        Ok(out.strip_suffix(b"\n").unwrap_or(&out).to_vec())
     }
 }
 
