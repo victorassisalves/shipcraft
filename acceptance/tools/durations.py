@@ -15,6 +15,8 @@ for path in sys.argv[1:]:
         if tc.find('skipped') is not None:
             continue
         lang, case = tc.get('name').split('::', 1)
+        if case == 'harness-git-config':  # item 157's guard row, not a case
+            continue
         secs[(lang, case)] = float(tc.get('time', '0'))
 if not secs:
     sys.exit('durations.py: no case ran in these reports')
