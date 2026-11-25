@@ -888,19 +888,23 @@ ln -s "$BIN" "$WORK/bin/shipcraft"
 # Item 157: the config files of the repository the battery runs from, as they are at start
 # (<work>/guard/<n> = a copy, or <n>.absent; <n>.path names the file). Checked after the cases.
 GUARD_N=0
+guard_keep() { # guard_keep <path>: the next watched file
+  GUARD_N=$((GUARD_N + 1))
+  local ok
+  if [ ! -e "$1" ] && [ ! -L "$1" ] && [ -r "$(dirname "$1")" ] && [ -x "$(dirname "$1")" ]; then
+    ok=$(: > "$WORK/guard/$GUARD_N.absent" && echo y)
+  else
+    ok=$(cp -p "$1" "$WORK/guard/$GUARD_N" && echo y)
+  fi
+  [ "$ok" = y ] && printf '%s\n' "$1" > "$WORK/guard/$GUARD_N.path" \
+    || { echo "run.sh: cannot keep a copy of $1" >&2; exit 2; }
+}
 if _gd=$(git -C "$ACEITE" rev-parse --path-format=absolute --git-common-dir --git-dir 2>/dev/null); then
   mkdir -p "$WORK/guard"
   _common=$(printf '%s\n' "$_gd" | sed -n 1p); _own=$(printf '%s\n' "$_gd" | sed -n 2p)
-  for _f in "$_common/config" "$_common/config.worktree" $( [ "$_own" != "$_common" ] && echo "$_own/config.worktree" ); do
-    GUARD_N=$((GUARD_N + 1))
-    if [ ! -e "$_f" ] && [ ! -L "$_f" ] && [ -r "$(dirname "$_f")" ] && [ -x "$(dirname "$_f")" ]; then
-      _ok=$(: > "$WORK/guard/$GUARD_N.absent" && echo y)
-    else
-      _ok=$(cp -p "$_f" "$WORK/guard/$GUARD_N" && echo y)
-    fi
-    [ "$_ok" = y ] && printf '%s\n' "$_f" > "$WORK/guard/$GUARD_N.path" \
-      || { echo "run.sh: cannot keep a copy of $_f" >&2; exit 2; }
-  done
+  guard_keep "$_common/config"
+  guard_keep "$_common/config.worktree"
+  [ "$_own" != "$_common" ] && guard_keep "$_own/config.worktree"
 elif ! git -C "$ACEITE" rev-parse --git-dir 2>&1 | grep -q 'not a git repository'; then
   echo "run.sh: warning: cannot read the repository acceptance/ is in; its git config is not watched" >&2
 fi

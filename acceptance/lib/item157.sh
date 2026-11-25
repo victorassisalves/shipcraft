@@ -4,8 +4,8 @@
 item157_langs() { echo core; }
 item157_cases() { for c in hook-env linked-env other-vars guard guard-worktree quiet-control own-identity; do echo "v1-157.$c"; done; }
 
-item157_src() { # the copy: $SRC157 (physical), committed; $1 = 1 adds the probe case
-  SRC157="$CW/src157"; mkdir -p "$SRC157" || fail 'fixture mkdir'
+item157_src() { # the copy: $SRC157 (physical), committed; $1 = 1 adds the probe case; $2 its folder name
+  SRC157="$CW/${2:-src157}"; mkdir -p "$SRC157" || fail 'fixture mkdir'
   cp -R "$ACEITE" "$SRC157/acceptance" || fail 'fixture copy of acceptance/'
   if [ "${1:-0}" = 1 ]; then
     cat > "$SRC157/acceptance/lib/item157probe.sh" <<'PROBE'
@@ -76,7 +76,7 @@ item157_case() {
       chk 'the guard keeps the bytes from start' cmp "$CW/config157.before" "$nwork/guard/1"
       chk 'the guard repairs nothing' eq "$(git -C "$SRC157" config probe157.leak)" yes ;;
     guard-worktree)
-      item157_src 1
+      item157_src 1 'src 157' # a space in the main repository's path (PR 180 review round 1)
       git -C "$SRC157" config extensions.worktreeConfig true || fail 'fixture worktreeConfig'
       git -C "$SRC157" worktree add -q --detach "$CW/wt157" || fail 'fixture linked worktree'
       item157_nest "$CW/wt157" v1-157probe.write PROBE157_SCOPE=--worktree
