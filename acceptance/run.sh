@@ -40,6 +40,15 @@
 # Portable: bash 3.2+, perl, python3, git, POSIX tools; clone flags are OS-specific.
 set -u
 
+# Item 157: forget the repository the battery was started from (a hook's GIT_DIR, and every
+# variable git itself clears for a submodule), so each git command finds its repository from
+# its folder. A case that sets one of them for its own fixture does so after this line.
+for _v in GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_CONFIG GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT GIT_OBJECT_DIRECTORY \
+  GIT_DIR GIT_WORK_TREE GIT_IMPLICIT_WORK_TREE GIT_GRAFT_FILE GIT_INDEX_FILE GIT_NO_REPLACE_OBJECTS \
+  GIT_REPLACE_REF_BASE GIT_PREFIX GIT_SHALLOW_FILE GIT_COMMON_DIR $(git rev-parse --local-env-vars 2>/dev/null); do
+  unset "$_v"
+done; unset _v
+
 SELF="$0"
 case "$SELF" in /*) ;; *) SELF="$(pwd)/$SELF" ;; esac
 ACEITE="$(cd "$(dirname "$SELF")" && pwd)"
@@ -876,6 +885,25 @@ trap 'exit 130' INT TERM
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/base" "$WORK/t" "$WORK/cw" "$WORK/logs" "$WORK/results"
 [ -n "$JUNIT" ] && mkdir -p "$WORK/starts" && : > "$WORK/skipped"
 ln -s "$BIN" "$WORK/bin/shipcraft"
+# Item 157: the config files of the repository the battery runs from, as they are at start
+# (<work>/guard/<n> = a copy, or <n>.absent; <n>.path names the file). Checked after the cases.
+GUARD_N=0
+if _gd=$(git -C "$ACEITE" rev-parse --path-format=absolute --git-common-dir --git-dir 2>/dev/null); then
+  mkdir -p "$WORK/guard"
+  _common=$(printf '%s\n' "$_gd" | sed -n 1p); _own=$(printf '%s\n' "$_gd" | sed -n 2p)
+  for _f in "$_common/config" "$_common/config.worktree" $( [ "$_own" != "$_common" ] && echo "$_own/config.worktree" ); do
+    GUARD_N=$((GUARD_N + 1))
+    if [ ! -e "$_f" ] && [ ! -L "$_f" ] && [ -r "$(dirname "$_f")" ] && [ -x "$(dirname "$_f")" ]; then
+      _ok=$(: > "$WORK/guard/$GUARD_N.absent" && echo y)
+    else
+      _ok=$(cp -p "$_f" "$WORK/guard/$GUARD_N" && echo y)
+    fi
+    [ "$_ok" = y ] && printf '%s\n' "$_f" > "$WORK/guard/$GUARD_N.path" \
+      || { echo "run.sh: cannot keep a copy of $_f" >&2; exit 2; }
+  done
+elif ! git -C "$ACEITE" rev-parse --git-dir 2>&1 | grep -q 'not a git repository'; then
+  echo "run.sh: warning: cannot read the repository acceptance/ is in; its git config is not watched" >&2
+fi
 CACHE="${SHIPCRAFT_ACCEPTANCE_CACHE:-$WORK/cache}"
 case "$CACHE" in /*) ;; *) echo "run.sh: SHIPCRAFT_ACCEPTANCE_CACHE must be absolute" >&2; exit 2 ;; esac
 mkdir -p "$CACHE"
@@ -931,10 +959,18 @@ python3 -m venv "$WORK/toolvenv" >/dev/null 2>&1 \
 export PY="$WORK/toolvenv/bin/python"
 
 # ---- target builders: one base per language; each case gets its own copy.
-git_seed() { git init -q && git checkout -q -b main 2>/dev/null; git config user.name "shipcraft acceptance"; git config user.email "shipcraft-acceptance@example.invalid"; }
+# Item 157: the identity goes only into the target's own repository.
+git_seed() {
+  local own seen
+  own="$(pwd -P)/.git"
+  git init -q . && seen=$(git rev-parse --absolute-git-dir 2>&1) && [ "$seen" = "$own" ] || {
+    echo "run.sh: the $1 base target is not its own git repository (${seen:-git init failed})" >&2; return 1; }
+  git checkout -q -b main 2>/dev/null
+  git config --local user.name "shipcraft acceptance" && git config --local user.email "shipcraft-acceptance@example.invalid"
+}
 build_python() (
   d="$WORK/base/python"; mkdir -p "$d/tests" && cd "$d" || exit 1
-  git_seed
+  git_seed python || exit 1
   python3 -m venv .venv || exit 1
   .venv/bin/python -m pip install -q pytest || exit 1
   printf 'pytest\n' > requirements.txt
@@ -946,7 +982,7 @@ build_python() (
 )
 build_node() (
   d="$WORK/base/node"; mkdir -p "$d/src" && cd "$d" || exit 1
-  git_seed
+  git_seed node || exit 1
   printf '{\n  "name": "textutil",\n  "private": true,\n  "type": "module"\n}\n' > package.json
   npm install -D --no-audit --no-fund --loglevel=error "vitest@${SHIPCRAFT_VITEST_VERSION:-5.0.4}" "typescript@${SHIPCRAFT_TS_VERSION:-7.0.2}" >/dev/null || exit 1
   cat > tsconfig.json <<'JSON'
@@ -973,7 +1009,7 @@ build_go() (
     go install gotest.tools/gotestsum@"${SHIPCRAFT_GOTESTSUM_VERSION:-v1.13.0}" || exit 1
   fi
   d="$WORK/base/go"; mkdir -p "$d" && cd "$d" || exit 1
-  git_seed
+  git_seed go || exit 1
   printf 'module example.com/textutil\n\ngo 1.21\n' > go.mod
   printf '// Package textutil: text utilities (stub).\npackage textutil\n' > textutil.go
   printf 'package textutil\n\nimport "testing"\n\nfunc TestPackageBuilds(t *testing.T) {}\n' > smoke_test.go
@@ -1027,6 +1063,24 @@ echo "run.sh: running $total cases"
   || cp "$WORK/plan" "$WORK/plan.order"
 xargs -P "$JOBS" -L 1 "$WORK/toolvenv/bin/python" "$ACEITE/tools/tmo.py" "${SHIPCRAFT_ACCEPTANCE_CASE_TIMEOUT:-900}" bash "$SELF" __case < "$WORK/plan.order"
 
+# Item 157: a run that changed the config of the repository it runs from fails, as one more
+# result. Nothing is written back: the copies stay in <work>/guard/.
+GUARD_CHANGED=""
+_i=1
+while [ "$_i" -le "$GUARD_N" ]; do
+  _f=$(cat "$WORK/guard/$_i.path")
+  if [ -e "$WORK/guard/$_i.absent" ]; then { [ -e "$_f" ] || [ -L "$_f" ]; } && GUARD_CHANGED="${GUARD_CHANGED:+$GUARD_CHANGED, }$_f"
+  elif ! cmp -s "$WORK/guard/$_i" "$_f"; then GUARD_CHANGED="${GUARD_CHANGED:+$GUARD_CHANGED, }$_f"; fi
+  _i=$((_i + 1))
+done
+if [ -n "$GUARD_CHANGED" ]; then
+  printf 'core guard harness-git-config\n' >> "$WORK/plan"
+  [ -n "$JUNIT" ] && printf 'harness-git-config acceptance/run.sh\n' >> "$WORK/files"
+  printf 'harness-git-config\tcore\tthe repository it runs from keeps its git config\tharness: the battery changed %s of the repository it runs from; the bytes at start are in %s/guard/\t-\tFAIL\n' \
+    "$GUARD_CHANGED" "$WORK" > "$WORK/results/core.guard.harness-git-config"
+  total=$((total + 1))
+fi
+
 # ---- report
 pass=0; failn=0
 printf '\n%-28s | %-8s | %-25s | %-60s | %-4s | %s\n' case language expected observed exit result
@@ -1054,6 +1108,14 @@ if [ "$failn" -gt 0 ] && { [ "${SHIPCRAFT_ACCEPTANCE_VERBOSE:-0}" = 1 ] || [ "${
     [ -f "$f" ] && [ "$(cut -f6 "$f")" = PASS ] && continue
     echo; echo "===== $l $c (log tail) ====="; tail -n 25 "$WORK/logs/$l-$c.log" 2>/dev/null
   done < "$WORK/plan"
+  _i=1
+  while [ -n "$GUARD_CHANGED" ] && [ "$_i" -le "$GUARD_N" ]; do
+    _f=$(cat "$WORK/guard/$_i.path")
+    if [ -e "$WORK/guard/$_i" ] && ! cmp -s "$WORK/guard/$_i" "$_f"; then
+      echo; echo "===== guard: $_f (diff from start) ====="; diff "$WORK/guard/$_i" "$_f"
+    fi
+    _i=$((_i + 1))
+  done
 fi
 if [ -n "$JUNIT" ]; then
   python3 "$ACEITE/tools/junit.py" "$WORK" "$JUNIT" "${SHIPCRAFT_ACCEPTANCE_CASE_TIMEOUT:-900}" \
@@ -1062,7 +1124,7 @@ fi
 # Only a complete green run of an unchanged, committed tree is reusable.
 if [ "${SHIPCRAFT_ACCEPTANCE_REUSE:-1}" != 0 ] && [ "$WHICH" = all ] \
   && [ -z "${SHIPCRAFT_ACCEPTANCE_CASES:-}" ] && [ -z "${SHIPCRAFT_ACCEPTANCE_SHARD:-}" ] && [ "$failn" -eq 0 ] \
-  && [ "$pass" -eq "$total" ] && [ "$total" -gt 0 ] \
+  && [ "$pass" -eq "$total" ] && [ "$total" -gt 0 ] && [ -z "$GUARD_CHANGED" ] \
   && [ -n "$REUSE_ID" ] && [ -z "$REUSE_CLEAN" ] \
   && [ "$(git -C "$REUSE_REPO" rev-parse HEAD)" = "$REUSE_SHA" ] \
   && REUSE_FINAL_CLEAN="$(git -C "$REUSE_REPO" status --porcelain --untracked-files=all -- nucleo/ acceptance/)" \
@@ -1104,4 +1166,4 @@ fi
 cleanup
 trap - EXIT
 echo "run.sh: total: $pass of $total cases pass"
-[ "$failn" -eq 0 ] && [ "$pass" -eq "$total" ] && [ "$total" -gt 0 ]
+[ "$failn" -eq 0 ] && [ "$pass" -eq "$total" ] && [ "$total" -gt 0 ] && [ -z "$GUARD_CHANGED" ]

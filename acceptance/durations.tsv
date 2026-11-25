@@ -75,6 +75,13 @@ core v1-11.3-aviso-linhas-maior-na-config 1.8
 core v1-11.3-aviso-linhas-menor-na-config 1.3
 core v1-11.3-sem-aviso-em-500 1.5
 core v1-11.4-linhas-produto-no-jsonl 2.7
+core v1-157.guard 16.0
+core v1-157.guard-worktree 16.0
+core v1-157.hook-env 18.0
+core v1-157.linked-env 18.0
+core v1-157.other-vars 18.0
+core v1-157.own-identity 0.5
+core v1-157.quiet-control 18.0
 core v1-15a.1-decide-antes-e-desfaz-escrita-no-meio 0.4
 core v1-15a.1-falha-preserva-config-simbolica 0.3
 core v1-15a.1-recusa-antes-de-perguntar-e-escrever 0.2
