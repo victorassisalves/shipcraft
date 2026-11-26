@@ -16,8 +16,11 @@ pub const FORMAT: u64 = 5;
 /// Item 105: format 6, format 5 with a `fixes_release` that is a tag name
 /// outside item 75's syntax; the highest format this shipcraft knows.
 pub const FORMAT_TAG_NAME: u64 = 6;
+/// Item 159: format 7, the abandoned lock (`red --replace`); the highest
+/// format this shipcraft knows.
+pub const FORMAT_ABANDONED: u64 = 7;
 /// The lock formats this shipcraft reads, each lock by its own `format`.
-pub const FORMATS: [u64; 5] = [2, 3, 4, FORMAT, FORMAT_TAG_NAME];
+pub const FORMATS: [u64; 6] = [2, 3, 4, FORMAT, FORMAT_TAG_NAME, FORMAT_ABANDONED];
 /// Item 43: in format 3 (and 4 and 5) each `files` value carries this prefix.
 const PREFIX: &str = "sha256:";
 /// Item 75: the keys format 4 adds, in order, after `failing_at_red`.
@@ -30,12 +33,28 @@ const CONTROLS: &str = "controls";
 /// Item 98: every key a format 5 lock has.
 const FORMAT_5_KEYS: [&str; 10] =
     ["format", "state", "files", "cases", "failing_at_red", CONTROLS, "kind", "reported_at", "fixes_release", "seal"];
+/// Item 159: every key a format 7 lock has, `reason` before `seal`.
+const FORMAT_7_KEYS: [&str; 11] = [
+    "format",
+    "state",
+    "files",
+    "cases",
+    "failing_at_red",
+    CONTROLS,
+    "kind",
+    "reported_at",
+    "fixes_release",
+    "reason",
+    "seal",
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum State {
     Open,
     Closed,
+    /// Item 159: closed by `red --replace`, only in format 7.
+    Abandoned,
 }
 
 /// Item 75: whether the cycle fixes behavior a release already shipped.
@@ -80,7 +99,12 @@ impl Fix {
             _ => return None,
         };
         let reported_at = optional("reported_at", valid_time)?;
-        let release: fn(&str) -> bool = if format == FORMAT_TAG_NAME { beyond_tag_syntax } else { valid_tag };
+        // Item 159: format 7 takes either grammar (a feature's is null below).
+        let release: fn(&str) -> bool = match format {
+            FORMAT_TAG_NAME => beyond_tag_syntax,
+            FORMAT_ABANDONED => tag_name,
+            _ => valid_tag,
+        };
         let fixes_release = optional("fixes_release", release)?;
         if kind == Kind::Feature && (reported_at.is_some() || fixes_release.is_some()) {
             return None;
@@ -129,6 +153,8 @@ pub struct Lock {
     pub controls: Option<Vec<String>>,
     /// Item 75: format 4's (and 5's) fix fields; None in formats 2 and 3.
     pub fix: Option<Fix>,
+    /// Item 159: format 7's reason, as `red --replace --reason` gave it.
+    pub reason: Option<String>,
     /// sha256 of the lock with an empty seal. A hand edit breaks it; it is a
     /// check against mistakes and shortcuts, not a signature.
     pub seal: String,
@@ -137,7 +163,9 @@ pub struct Lock {
 impl Serialize for Lock {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
-        let fields = if self.fix.is_some() { 9 } else { 6 } + usize::from(self.controls.is_some());
+        let fields = if self.fix.is_some() { 9 } else { 6 }
+            + usize::from(self.controls.is_some())
+            + usize::from(self.reason.is_some());
         let mut lock = serializer.serialize_struct("Lock", fields)?;
         lock.serialize_field("format", &self.formato)?;
         lock.serialize_field("state", &self.state)?;
@@ -151,6 +179,9 @@ impl Serialize for Lock {
             lock.serialize_field("kind", fix.kind.as_str())?;
             lock.serialize_field("reported_at", &fix.reported_at)?;
             lock.serialize_field("fixes_release", &fix.fixes_release)?;
+        }
+        if let Some(reason) = &self.reason {
+            lock.serialize_field("reason", reason)?;
         }
         lock.serialize_field("seal", &self.seal)?;
         lock.end()
@@ -175,6 +206,7 @@ impl Lock {
             failing_at_red,
             controls: Some(controls),
             fix: Some(fix),
+            reason: None,
             seal: String::new(),
         }
         .sealed()
@@ -196,7 +228,18 @@ impl Lock {
             Some(fix) => (FORMAT, Some(fix.clone()), Some(controls)),
             None => (3, None, None),
         };
-        Lock { formato, state: State::Open, files, cases, failing_at_red, controls, fix, seal: String::new() }.sealed()
+        Lock {
+            formato,
+            state: State::Open,
+            files,
+            cases,
+            failing_at_red,
+            controls,
+            fix,
+            reason: None,
+            seal: String::new(),
+        }
+        .sealed()
     }
 
     /// Item 98: the controls; none for a lock before format 5.
@@ -218,6 +261,27 @@ impl Lock {
         self.state == State::Open
     }
 
+    /// Item 159: the abandoned form of an open format 5 or 6 lock: format 7,
+    /// the same files, cases, failing cases, controls and fix fields, and the
+    /// reason; None for any other lock.
+    pub fn abandoned(&self, reason: &str) -> Option<Lock> {
+        let replaceable = self.is_open() && matches!(self.formato, FORMAT | FORMAT_TAG_NAME);
+        replaceable.then(|| {
+            Lock {
+                formato: FORMAT_ABANDONED,
+                state: State::Abandoned,
+                reason: Some(reason.to_string()),
+                ..self.clone()
+            }
+            .sealed()
+        })
+    }
+
+    /// Item 159: whether this lock is `old`'s abandoned form (any valid reason).
+    pub fn abandons(&self, old: &Lock) -> bool {
+        self.reason.as_deref().and_then(|reason| old.abandoned(reason)).as_ref() == Some(self)
+    }
+
     /// None when the bytes are not a lock, or when it was edited by hand: a
     /// broken seal, or a `files` value outside its format's syntax (item 43);
     /// item 75: in format 4, a fix field missing or outside its syntax, or a key
@@ -229,9 +293,14 @@ impl Lock {
         let base: Base = serde_json::from_slice(bytes).ok()?;
         let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
         let object = value.as_object()?;
+        // Item 159: `abandoned` only in format 7, and format 7 only abandoned.
+        if (base.formato == FORMAT_ABANDONED) != (base.state == State::Abandoned) {
+            return None;
+        }
         let keys: &[&str] = match base.formato {
             4 => &FORMAT_4_KEYS,
             5 | FORMAT_TAG_NAME => &FORMAT_5_KEYS,
+            FORMAT_ABANDONED => &FORMAT_7_KEYS,
             _ => &[],
         };
         let (fix, controls) = if keys.is_empty() {
@@ -244,7 +313,7 @@ impl Lock {
                 return None;
             }
             let controls = match base.formato {
-                5 | FORMAT_TAG_NAME => Some(read_controls(object.get(CONTROLS)?, &base.cases, &base.failing_at_red)?),
+                5..=FORMAT_ABANDONED => Some(read_controls(object.get(CONTROLS)?, &base.cases, &base.failing_at_red)?),
                 _ => None,
             };
             (Some(Fix::read(base.formato, object)?), controls)
@@ -257,6 +326,10 @@ impl Lock {
             failing_at_red: base.failing_at_red,
             controls,
             fix,
+            reason: match base.formato {
+                FORMAT_ABANDONED => Some(object.get("reason")?.as_str().filter(|r| valid_reason(r))?.to_string()),
+                _ => None,
+            },
             seal: base.seal,
         };
         (lock.files.values().all(|value| lock.valid_value(value)) && lock.seal == lock.compute_seal()).then_some(lock)
@@ -267,7 +340,7 @@ impl Lock {
     fn valid_value(&self, value: &str) -> bool {
         let hex = match self.formato {
             2 => Some(value),
-            3..=FORMAT_TAG_NAME => value.strip_prefix(PREFIX),
+            3..=FORMAT_ABANDONED => value.strip_prefix(PREFIX),
             _ => None,
         };
         hex.is_some_and(|hex| hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
@@ -297,6 +370,12 @@ fn read_controls(value: &serde_json::Value, cases: &[String], failing_at_red: &[
     let valid = controls.iter().all(|id| cases.contains(id) && !failing_at_red.contains(id))
         && controls.windows(2).all(|pair| pair[0].as_bytes() < pair[1].as_bytes());
     valid.then_some(controls)
+}
+
+/// Item 159: `--reason`'s grammar: one line (no `\n` or `\r`), not empty once
+/// spaces and tabs are trimmed, at most 300 bytes; kept as given.
+pub fn valid_reason(text: &str) -> bool {
+    !text.contains(['\n', '\r']) && !text.trim_matches([' ', '\t']).is_empty() && text.len() <= 300
 }
 
 /// Item 75: `YYYY-MM-DDTHH:MM[:SS]` then `Z` or `+HH:MM` or `-HH:MM`, ASCII
@@ -403,14 +482,14 @@ pub fn lock_files(repo: &Repo, snapshot: &Snapshot) -> Result<LockFiles> {
 /// Refuses a lock written in a format this shipcraft does not know. A lock that is
 /// not JSON, or has no format, is left to the seal check (edited by hand).
 /// Item 75: a format above the highest known one asks for a newer shipcraft
-/// (item 105: the highest is format 6).
+/// (item 105: the highest is format 6; item 159: format 7).
 pub(crate) fn check_format(path: &str, bytes: &[u8]) -> Result<()> {
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) else { return Ok(()) };
     let legacy = value.get("formato").is_some();
     match value.get("format").or_else(|| value.get("formato")) {
-        Some(f) if !legacy && f.as_u64().is_some_and(|f| f > FORMAT_TAG_NAME) => refuse(
+        Some(f) if !legacy && f.as_u64().is_some_and(|f| f > FORMAT_ABANDONED) => refuse(
             "lock-format",
-            format!("lock {path} needs a newer shipcraft (format {f}; this one knows formats 2 to {FORMAT_TAG_NAME})"),
+            format!("lock {path} needs a newer shipcraft (format {f}; this one knows formats 2 to {FORMAT_ABANDONED})"),
             "a lock written by a newer shipcraft cannot be judged by an older one",
             "upgrade shipcraft to the version the project pins (package.json, or shipcraft_min), then run the command again",
         ),
@@ -473,17 +552,17 @@ mod tests {
     }
 
     /// The lock's JSON object, changed by `edit`, resealed by hand: the
-    /// compact JSON with an empty seal, keys in format 5's fixed order (the
+    /// compact JSON with an empty seal, keys in format 7's fixed order (format 5's plus `reason`) (the
     /// others after them), as the spec's fixtures reseal.
     fn resealed(lock: &Lock, edit: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>)) -> Vec<u8> {
         let mut value = serde_json::to_value(lock).unwrap();
         let object = value.as_object_mut().unwrap();
         edit(object);
         object.insert("seal".into(), "".into());
-        let ordered: Vec<&String> = FORMAT_5_KEYS
+        let ordered: Vec<&String> = FORMAT_7_KEYS
             .iter()
             .filter_map(|key| object.get_key_value(*key).map(|(k, _)| k))
-            .chain(object.keys().filter(|key| !FORMAT_5_KEYS.contains(&key.as_str())))
+            .chain(object.keys().filter(|key| !FORMAT_7_KEYS.contains(&key.as_str())))
             .collect();
         let compact = |keys: &[&String], object: &serde_json::Map<String, serde_json::Value>| {
             let fields: Vec<String> = keys
@@ -589,13 +668,64 @@ mod tests {
     }
 
     #[test]
-    fn format_7_is_the_future_format() {
+    fn format_8_is_the_future_format() {
         assert!(check_format("l.json", br#"{"format":5}"#).is_ok());
         assert!(check_format("l.json", br#"{"format":6}"#).is_ok());
-        let Err(crate::refusal::Stop::Refused(refusal)) = check_format("l.json", br#"{"format":7}"#) else {
-            panic!("format 7 must refuse")
+        assert!(check_format("l.json", br#"{"format":7}"#).is_ok());
+        let Err(crate::refusal::Stop::Refused(refusal)) = check_format("l.json", br#"{"format":8}"#) else {
+            panic!("format 8 must refuse")
         };
-        assert_eq!(refusal.what(), "lock l.json needs a newer shipcraft (format 7; this one knows formats 2 to 6)");
+        assert_eq!(refusal.what(), "lock l.json needs a newer shipcraft (format 8; this one knows formats 2 to 7)");
+    }
+
+    // Item 159: the abandoned lock, format 7.
+
+    #[test]
+    fn the_abandoned_form_has_eleven_keys_in_order_and_parses() {
+        let open = five(&["a::p"]);
+        let lock = open.abandoned("renamed").unwrap();
+        assert_eq!((lock.formato, lock.state, lock.reason.as_deref()), (7, State::Abandoned, Some("renamed")));
+        assert!(!lock.is_open() && lock.abandons(&open) && !open.abandons(&open));
+        let json = lock.to_json();
+        let order: Vec<usize> = FORMAT_7_KEYS.iter().map(|key| json.find(&format!("\"{key}\"")).unwrap()).collect();
+        assert!(order.windows(2).all(|w| w[0] < w[1]), "keys out of order: {json}");
+        assert_eq!(Lock::parse(json.as_bytes()), Some(lock.clone()));
+        // Another value than the open lock's: not its abandoned form.
+        assert!(!five(&[]).abandoned("renamed").unwrap().abandons(&open));
+        // Only an open format 5 or 6 lock has an abandoned form.
+        assert!(lock.abandoned("x").is_none() && open.closed().abandoned("x").is_none());
+        let three = Lock { formato: 3, fix: None, controls: None, ..open.clone() }.sealed();
+        assert!(three.abandoned("x").is_none());
+        let tag = Fix { kind: Kind::Fix, reported_at: None, fixes_release: Some("deploy-1".into()) };
+        let six = Lock::open(files(), strings(&["a::f"]), strings(&["a::f"]), Vec::new(), tag);
+        let six_abandoned = six.abandoned("x").unwrap();
+        assert_eq!(Lock::parse(six_abandoned.to_json().as_bytes()), Some(six_abandoned));
+    }
+
+    #[test]
+    fn a_format_7_lock_outside_its_rules_does_not_parse() {
+        let lock = five(&["a::p"]).abandoned("renamed").unwrap();
+        let edit = |f: &dyn Fn(&mut serde_json::Map<String, serde_json::Value>)| Lock::parse(&resealed(&lock, f));
+        assert!(edit(&|_| {}).is_some(), "a hand reseal of the same values is valid");
+        assert!(edit(&|o| drop(o.insert("state".into(), "closed".into()))).is_none());
+        assert!(edit(&|o| drop(o.insert("state".into(), "open".into()))).is_none());
+        assert!(edit(&|o| drop(o.remove("reason"))).is_none());
+        assert!(edit(&|o| drop(o.insert("reason".into(), "  \t".into()))).is_none());
+        assert!(edit(&|o| drop(o.insert("reason".into(), "a\nb".into()))).is_none());
+        assert!(edit(&|o| drop(o.insert("reason".into(), "x".repeat(301).into()))).is_none());
+        assert!(edit(&|o| drop(o.insert("reason".into(), serde_json::Value::Null))).is_none());
+        assert!(edit(&|o| drop(o.insert("extra".into(), 1.into()))).is_none());
+        // `abandoned` in format 5, and a `reason` key there.
+        let open = five(&["a::p"]);
+        assert!(Lock::parse(&resealed(&open, |o| drop(o.insert("state".into(), "abandoned".into())))).is_none());
+        assert!(Lock::parse(&resealed(&open, |o| drop(o.insert("reason".into(), "x".into())))).is_none());
+    }
+
+    #[test]
+    fn a_reason_is_one_line_not_blank_and_at_most_300_bytes() {
+        assert!(valid_reason("renamed the case") && valid_reason(" x ") && valid_reason(&"é".repeat(150)));
+        assert!(!valid_reason("") && !valid_reason(" \t ") && !valid_reason("a\rb") && !valid_reason("a\nb"));
+        assert!(!valid_reason(&"é".repeat(151)) && valid_reason(&"x".repeat(300)) && !valid_reason(&"x".repeat(301)));
     }
 
     // Item 105: the tag name grammar.

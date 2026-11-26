@@ -25,6 +25,8 @@ const CLEANUP_LINE: &str = "- After a merge, clean up what this change created: 
 const EXPORT_LINE: &str = "- To contribute to a project that does not use Shipcraft (its default branch has no `.shipcraft.toml` or `.sc2.toml`), open the PR from the branch `shipcraft export --base <base> <new branch>` writes once the lock is closed and `shipcraft ci --base <base>` passes on this branch: it leaves out Shipcraft's files and this block, and the project's own checks still apply to it. `shipcraft pr` is for projects that use Shipcraft.\n";
 /// Item 145: the line the current block gains right after the `- A session told it is the RED or the GREEN` line (who fixes the interface).
 const INTERFACE_LINE: &str = "- Before starting either phase, the session the user talks to fixes the interface the tests call (what they call to reach the behavior: names, arguments, results, and the errors, exit codes or messages they check; for a command line, its commands, flags and output) and writes it in every prompt that starts a phase, a command given to the user included. The RED's tests and stubs use that interface; the GREEN never changes it (the code behind it is free), and a GREEN that finds it wrong stops and reports it as a wrong test: the repair above, with the corrected interface in the new RED's prompt and the GREEN's, through `shipcraft red --redo` and its limits.\n";
+/// Item 159: the line the current block gains right after the `- Before starting either phase` line (`red --replace`).
+const REPLACE_LINE: &str = "- If the repair renames or drops a case, or changes a stub, and no GREEN commit exists after the RED (only redo commits and commits that change only Markdown files), the new RED session runs `shipcraft red --replace --reason '<why>'` instead of `shipcraft red --redo` (also in the steps given to the user, with both lock paths it prints in `git add`), commits both locks with the tests and stubs in one commit, and puts the line it prints in the commit body; this takes precedence over the repair above. After a GREEN commit, `--replace` refuses: repair with `--redo` or open the new RED on a new branch.\n";
 /// Item 74's block (commit f4220f1, v2.30.0), a known block in both variants;
 /// item 75's is it with `FIX_LINE` (`agents_block_2_31`). Item 61's block
 /// with item 68's rules: the machine install's block; a project-local install
@@ -141,14 +143,21 @@ fn agents_block_2_82() -> String {
     after_line(&agents_block_2_81(), "\n- After a merge, clean up", EXPORT_LINE)
 }
 
-/// Item 145: item 142's block with `INTERFACE_LINE` right after the line that
-/// starts `- A session told it is the RED or the GREEN`.
-fn current_block() -> String {
+/// Item 145's block (v2.86.0 to v2.94.0), a known block in its three forms:
+/// item 142's block with `INTERFACE_LINE` right after the line that starts
+/// `- A session told it is the RED or the GREEN`.
+fn agents_block_2_86() -> String {
     after_line(
         &agents_block_2_82(),
         "\n- A session told it is the RED or the GREEN does that phase only",
         INTERFACE_LINE,
     )
+}
+
+/// Item 159: item 145's block with `REPLACE_LINE` right after the line that
+/// starts `- Before starting either phase`.
+fn current_block() -> String {
+    after_line(&agents_block_2_86(), "\n- Before starting either phase", REPLACE_LINE)
 }
 
 /// `block` with `lines` right after the line that starts at `start` (a `\n` and the line's start).
@@ -182,6 +191,8 @@ fn known_blocks(inv: &str) -> Vec<String> {
         agents_block_2_82(),
     ];
     let mut known: Vec<String> = FORMS.iter().filter(|f| **f != inv).map(|f| agents_text(f)).collect();
+    // Item 159: item 145's block, which 2.89.0 to 2.94.0 also wrote in the pnpm form.
+    known.extend(FORMS.iter().map(|f| variant(&agents_block_2_86(), f)));
     for block in &earlier {
         known.push(variant(block, FORMS[0]));
         known.push(variant(block, FORMS[1]));
@@ -398,11 +409,16 @@ mod tests {
     #[test]
     fn known_blocks_hold_this_versions_other_forms_and_no_earlier_pnpm_form() {
         let pnpm = agents_text(FORMS[2]);
-        assert_eq!(pnpm.len(), 8603);
         assert!(pnpm.lines().nth(2).unwrap().contains("where `pnpm exec shipcraft` runs"));
         let known = known_blocks(FORMS[2]);
         assert_eq!(known[..2], [agents_text(FORMS[0]), agents_text(FORMS[1])]);
-        assert!(!known.contains(&pnpm) && !known[2..].iter().any(|k| k.contains("pnpm exec")));
+        // Item 159: item 145's block is known in its three forms (8,603 bytes in pnpm's), no earlier one in pnpm's.
+        let old_pnpm = variant(&agents_block_2_86(), FORMS[2]);
+        assert_eq!(old_pnpm.len(), 8603);
+        assert!(!known.contains(&pnpm) && known[2..5].contains(&old_pnpm));
+        assert!(!known[5..].iter().any(|k| k.contains("pnpm exec")));
+        assert!(agents_text(FORMS[0]).contains(REPLACE_LINE) && !old_pnpm.contains("--replace"));
+        assert!(pnpm.contains("`pnpm exec shipcraft red --replace --reason"));
         assert!(written_blocks(AGENTS_FILE).contains(&pnpm));
     }
 }

@@ -28,7 +28,8 @@ fn install_paths() -> Vec<String> {
 
 /// Points 2 to 5: refuses `install-not-committed` when an install path exists
 /// in the working tree (or cannot be read) and neither HEAD nor the index has it.
-pub fn refuse_if_not_committed(repo: &Repo, redo: bool) -> Result<()> {
+/// `again` is the command the Next line reruns (`shipcraft red`, `--redo` or `--replace`).
+pub fn refuse_if_not_committed(repo: &Repo, again: &str) -> Result<()> {
     let mut existing = Vec::new();
     // Each uncommitted path, with the lstat error that made it so, if any.
     let mut uncommitted: Vec<(String, Option<String>)> = Vec::new();
@@ -66,7 +67,6 @@ pub fn refuse_if_not_committed(repo: &Repo, redo: bool) -> Result<()> {
         })
         .collect();
     let paths: Vec<&str> = uncommitted.iter().map(|(path, _)| path.as_str()).collect();
-    let again = if redo { "shipcraft red --redo" } else { "shipcraft red" };
     refuse(
         "install-not-committed",
         format!("the Shipcraft install is not committed or staged: {}", shown.join(", ")),
