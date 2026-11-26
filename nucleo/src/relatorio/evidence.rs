@@ -44,6 +44,8 @@ pub(super) struct Evidence {
     files: BTreeMap<String, FixData>,
     head: Option<(BTreeMap<String, String>, String)>,
     parsed: BTreeMap<String, Option<Lock>>,
+    /// Item 159: the locks whose file git reads abandoned in any source.
+    abandoned: BTreeSet<String>,
     /// Item 124: the mode, and `config`, `fallback` or `default`.
     pub(super) deploy: (Deploy, &'static str),
     /// Item 124: in merge mode, the default branch's first-parent line,
@@ -108,8 +110,9 @@ impl Evidence {
             (None, true) => (Deploy::Merge, "fallback"),
             (None, false) => (Deploy::Release, "default"),
         };
-        let (files, parsed) = (BTreeMap::new(), BTreeMap::new());
-        let mut ev = Evidence { branch, tip_commit, tip, releases, files, head, parsed, deploy, merges: None };
+        let (files, parsed, abandoned) = (BTreeMap::new(), BTreeMap::new(), BTreeSet::new());
+        let mut ev =
+            Evidence { branch, tip_commit, tip, releases, files, head, parsed, abandoned, deploy, merges: None };
         // Item 124: today's reads, in both modes, before `--since`'s check.
         ev.read_files(git, log_ids)?;
         Ok(ev)
@@ -149,7 +152,8 @@ impl Evidence {
     }
 
     /// The fix data of every lock of the population (the run log, the tip and
-    /// the deploys), from the first valid file among its sources in order.
+    /// the deploys), from the first valid file among its sources in order;
+    /// item 159: every source is read, and one abandoned makes the lock so.
     fn read_files(&mut self, git: &Git, log_ids: &[String]) -> std::result::Result<(), String> {
         let mut population: BTreeSet<String> = log_ids.iter().cloned().collect();
         population.extend(self.tip.keys().cloned());
@@ -157,6 +161,7 @@ impl Evidence {
             population.extend(deploy.locks.keys().cloned());
         }
         let mut files = BTreeMap::new();
+        let mut abandoned = BTreeSet::new();
         for id in population {
             let mut sources: Vec<(&str, &String)> = Vec::new();
             if let Some(oid) = self.tip.get(&id) {
@@ -184,7 +189,11 @@ impl Evidence {
                     let lock = lock::check_format(&spec, &bytes).ok().and_then(|()| Lock::parse(&bytes));
                     self.parsed.insert(oid.clone(), lock);
                 }
-                if let Some(lock) = &self.parsed[oid] {
+                let Some(lock) = &self.parsed[oid] else { continue };
+                if lock.state == lock::State::Abandoned {
+                    abandoned.insert(id.clone());
+                }
+                if !files.contains_key(&id) {
                     let data = match &lock.fix {
                         Some(fix) => FixData {
                             kind: Some(fix.kind.as_str().to_string()),
@@ -194,11 +203,11 @@ impl Evidence {
                         None => FixData::default(),
                     };
                     files.insert(id.clone(), data);
-                    break;
                 }
             }
         }
         self.files = files;
+        self.abandoned = abandoned;
         Ok(())
     }
 }
@@ -294,6 +303,8 @@ fn version_cmp(a: &str, b: &str) -> std::cmp::Ordering {
 /// Per lock id: its fix data and its release (index into the releases).
 pub(super) struct Facts {
     pub(super) tip: BTreeSet<String>,
+    /// Item 159: abandoned locks, left out of `release` (no DORA sample).
+    pub(super) abandoned: BTreeSet<String>,
     pub(super) fix: BTreeMap<String, FixData>,
     pub(super) release: BTreeMap<String, usize>,
 }
@@ -307,7 +318,9 @@ impl Facts {
         for (i, r) in ev.deploys().iter().enumerate() {
             for id in r.locks.keys() {
                 population.insert(id);
-                release.entry(id.clone()).or_insert(i);
+                if !ev.abandoned.contains(id) {
+                    release.entry(id.clone()).or_insert(i);
+                }
             }
         }
         for id in population {
@@ -317,7 +330,7 @@ impl Facts {
             };
             fix.insert(id.clone(), data);
         }
-        Facts { tip: ev.tip.keys().cloned().collect(), fix, release }
+        Facts { tip: ev.tip.keys().cloned().collect(), abandoned: ev.abandoned.clone(), fix, release }
     }
 }
 

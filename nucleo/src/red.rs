@@ -62,37 +62,85 @@ pub fn run(
     chosen: &mut Option<Chosen>,
 ) -> Result<(String, usize, LeftOut)> {
     let config = Config::load(repo)?;
-    refuse_if_a_lock_is_open(repo)?;
+    refuse_if_a_lock_is_open(repo, None)?;
     // Item 80: before the base and anything else.
-    crate::install::refuse_if_not_committed(repo, false)?;
+    crate::install::refuse_if_not_committed(repo, "shipcraft red")?;
+    first_red(repo, &config, base, all, fix, chosen, None)
+}
+
+/// Item 159: `red --replace` abandons the open lock HEAD holds and takes a
+/// new first RED, while no GREEN commit exists after that lock's RED.
+/// `abandoned` is HEAD's lock as soon as it is known, for the run log row.
+pub fn replace_red(
+    repo: &Repo,
+    base: Option<&str>,
+    all: bool,
+    fix: Fix,
+    reason: &str,
+    abandoned: &mut Option<String>,
+    chosen: &mut Option<Chosen>,
+) -> Result<(String, usize, LeftOut)> {
+    let config = Config::load(repo)?;
+    let (old_path, old) = head_lock(repo, abandoned, "--replace")?;
+    if old.formato < crate::lock::FORMAT {
+        return refuse(
+            "replace-old-format",
+            format!("lock {old_path} is format {}: `shipcraft red --replace` needs a lock of format 5 or later", old.formato),
+            "the abandoned lock keeps the open lock's controls and fix fields, which a lock below format 5 does not have",
+            "open the new RED on a new branch from the base; `--redo` cannot raise such a lock to format 5",
+        );
+    }
+    crate::install::refuse_if_not_committed(repo, "shipcraft red --replace")?;
+    refuse_if_pending(repo)?;
+    let head = repo.head()?.ok_or_else(|| failed("the repository has no commits"))?;
+    crate::contract::no_green(repo, &head, &old_path, &old)?;
+    refuse_if_a_lock_is_open(repo, Some(&old_path))?;
+    first_red(repo, &config, base, all, fix, chosen, Some((&old_path, &old, reason)))
+}
+
+/// `red`'s first RED, from the base on; item 159: with `replacing` (HEAD's
+/// lock path, the lock and the reason), the new lock is renamed into place,
+/// then the old one is rewritten as abandoned, before anything is printed.
+fn first_red(
+    repo: &Repo,
+    config: &Config,
+    base: Option<&str>,
+    all: bool,
+    fix: Fix,
+    chosen: &mut Option<Chosen>,
+    replacing: Option<(&str, &Lock, &str)>,
+) -> Result<(String, usize, LeftOut)> {
     let base = narrow::base(repo, base);
     let changed = narrow::changed(repo, &base);
-    warn_outside_globs(repo, &config, &changed);
-    let plan = narrow::plan(repo, &config, &changed, all, None);
-    let report = red_report(repo, &config, "shipcraft red", &base, &changed, plan, chosen)?;
+    warn_outside_globs(repo, config, &changed);
+    let plan = narrow::plan(repo, config, &changed, all, None);
+    let report = red_report(repo, config, "shipcraft red", &base, &changed, plan, chosen)?;
     let failing = failing_at_red(&report, "shipcraft red")?;
-    let left = leave_out(repo, &config, &changed, all, None, &failing)?;
+    let left = leave_out(repo, config, &changed, all, None, &failing)?;
     let (cases, failing) = without(&left.cases, report.cases_run(), failing);
     // Item 98: from the report `red` accepted, before item 53's second run.
-    let (controls, untied) = controls(repo, &config, &changed, all, &report, &cases)?;
+    let (controls, untied) = controls(repo, config, &changed, all, &report, &cases)?;
 
-    let files = locked_files(repo, &config)?;
-    refuse_a_suite_without_tests(repo, &config, &files, &failing)?;
-    let (failing, dropped) = confirm(repo, &config, &files, failing, "shipcraft red")?;
+    let files = locked_files(repo, config)?;
+    refuse_a_suite_without_tests(repo, config, &files, &failing)?;
+    let (failing, dropped) = confirm(repo, config, &files, failing, "shipcraft red")?;
     // Item 53: hashed as the second run leaves the files.
-    let files = locked_files(repo, &config)?;
+    let files = locked_files(repo, config)?;
 
     let lock = Lock::open(files, cases, failing, controls, fix);
     let path = new_lock_path();
     let full_path = repo.path(&path);
-    fs::create_dir_all(full_path.parent().expect("a lock path has a directory"))
-        .and_then(|()| fs::write(&full_path, lock.to_json()))
-        .map_err(|e| failed(format!("write {path}: {e}")))?;
+    match replacing {
+        None => fs::create_dir_all(full_path.parent().expect("a lock path has a directory"))
+            .and_then(|()| fs::write(&full_path, lock.to_json()))
+            .map_err(|e| failed(format!("write {path}: {e}")))?,
+        Some((old_path, old, reason)) => abandon(repo, &path, &lock, old_path, old, reason)?,
+    }
 
     print_dropped(&dropped);
     left.print();
     print_controls(&lock, untied);
-    vitest_files::print_beside(&config, &lock);
+    vitest_files::print_beside(config, &lock);
     println!(
         "shipcraft: RED locked at {path}: {} file(s), {} case(s), {} failing: {}",
         lock.files.len(),
@@ -100,11 +148,103 @@ pub fn run(
         lock.failing_at_red.len(),
         short_list(&lock.failing_at_red)
     );
-    println!("shipcraft: commit the lock with the tests; the hook checks the RED commit.");
-    warn_absent_suites(repo, &config, &base, &lock);
-    warn_default_branch(repo, &config);
-    next_green(&config);
+    match replacing {
+        None => println!("shipcraft: commit the lock with the tests; the hook checks the RED commit."),
+        Some((old_path, _, reason)) => {
+            println!("shipcraft: lock {old_path} abandoned: {reason}");
+            println!(
+                "shipcraft: commit both locks with the tests and stubs in one commit, with this line in its body: Replaces lock {}: {reason}",
+                crate::medicao::lock_id(old_path)
+            );
+        }
+    }
+    warn_absent_suites(repo, config, &base, &lock);
+    warn_default_branch(repo, config);
+    next_green(config);
     Ok((path, dropped.len(), left))
+}
+
+/// Item 159: the new lock renamed into place, then the old lock's file
+/// rewritten in place as its abandoned form; when that rewrite fails, the
+/// new lock is deleted and `replace-write-failed` refuses.
+fn abandon(repo: &Repo, path: &str, lock: &Lock, old_path: &str, old: &Lock, reason: &str) -> Result<()> {
+    let full_path = repo.path(path);
+    fs::create_dir_all(full_path.parent().expect("a lock path has a directory"))
+        .and_then(|()| write_renamed(&full_path, &lock.to_json()))
+        .map_err(|e| failed(format!("write {path}: {e}")))?;
+    let abandoned = old.abandoned(reason).expect("a replaced lock is open, format 5 or later");
+    let Err(e) = write_renamed(&repo.path(old_path), &abandoned.to_json()) else { return Ok(()) };
+    let (what, next) = match fs::remove_file(&full_path) {
+        Ok(()) => (format!("the new lock {path} was deleted"), String::new()),
+        Err(left) => (
+            format!("the new lock {path} could not be deleted ({left}) and is left behind"),
+            format!("delete {path}, "),
+        ),
+    };
+    refuse(
+        "replace-write-failed",
+        format!("could not rewrite lock {old_path} as abandoned: {e}; {what}"),
+        "a replace writes the new lock and the abandoned one together, so the old lock stays as it was",
+        format!("{next}make {LOCK_DIR} writable and run `shipcraft red --replace` again"),
+    )
+}
+
+/// Writes a temporary file next to `full_path` and renames it over it.
+fn write_renamed(full_path: &Path, json: &str) -> io::Result<()> {
+    let temp = full_path.with_extension(format!("replace-{}.tmp", std::process::id()));
+    let written = fs::write(&temp, json).and_then(|()| fs::rename(&temp, full_path));
+    if written.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    written
+}
+
+/// Item 159: HEAD's, the index's and the working tree's lock files (the
+/// `*.json` regular files directly in the lock folder) are the same paths
+/// with the same bytes; otherwise `replace-pending`, naming the paths.
+fn refuse_if_pending(repo: &Repo) -> Result<()> {
+    let committed = |args: &[&str], mode_at: usize| -> Result<BTreeMap<String, Vec<u8>>> {
+        let mut locks = BTreeMap::new();
+        for entry in repo.run(args)?.split(|b| *b == 0).filter(|e| !e.is_empty()) {
+            let entry = crate::git::text(entry);
+            let (meta, path) = entry.split_once('\t').ok_or_else(|| failed(format!("`git {}`: bad entry", args[0])))?;
+            let fields: Vec<&str> = meta.split(' ').collect();
+            let (Some(mode), Some(oid)) = (fields.first(), fields.get(mode_at)) else {
+                return Err(failed(format!("`git {}`: bad entry", args[0])));
+            };
+            if direct_lock(path) && (*mode == "100644" || *mode == "100755") {
+                locks.insert(path.to_string(), repo.run(&["cat-file", "blob", oid])?);
+            }
+        }
+        Ok(locks)
+    };
+    let dir = format!("{LOCK_DIR}/");
+    let head = committed(&["ls-tree", "-z", "HEAD", "--", &dir], 2)?;
+    let index = committed(&["ls-files", "-s", "-z", "--", &dir], 1)?;
+    let mut tree = BTreeMap::new();
+    for path in repo.list(&Snapshot::Tree, LOCK_DIR)?.into_iter().filter(|p| direct_lock(p)) {
+        let bytes = repo.read(&Snapshot::Tree, &path)?.ok_or_else(|| failed(format!("read {path}: gone")))?;
+        tree.insert(path, bytes);
+    }
+    let paths: BTreeSet<&String> = head.keys().chain(index.keys()).chain(tree.keys()).collect();
+    let differ: Vec<&String> =
+        paths.into_iter().filter(|p| head.get(*p) != index.get(*p) || head.get(*p) != tree.get(*p)).collect();
+    if differ.is_empty() {
+        return Ok(());
+    }
+    refuse(
+        "replace-pending",
+        format!("the lock files of the index or the working tree differ from HEAD's: {}", short_list(&differ)),
+        "a replace starts from the committed RED",
+        format!("`git restore --staged --worktree --source=HEAD -- ':/{LOCK_DIR}'`, delete the lock files git does not track there, then run `shipcraft red --replace` again"),
+    )
+}
+
+/// A `*.json` entry directly in the lock folder (item 159's population).
+fn direct_lock(path: &str) -> bool {
+    path.strip_prefix(LOCK_DIR)
+        .and_then(|rest| rest.strip_prefix('/'))
+        .is_some_and(|name| !name.contains('/') && name.ends_with(".json"))
 }
 
 /// Item 105: the selection check of `red --fix --fixes-release <tag>`, run
@@ -149,9 +289,9 @@ pub fn redo(
     unchanged: &mut Option<LeftOut>,
 ) -> Result<()> {
     let config = Config::load(repo)?;
-    let (lock_path, old) = head_lock(repo, path)?;
+    let (lock_path, old) = head_lock(repo, path, "--redo")?;
     // Item 80: after HEAD's lock, before the base and anything else.
-    crate::install::refuse_if_not_committed(repo, true)?;
+    crate::install::refuse_if_not_committed(repo, "shipcraft red --redo")?;
     // Item 66: the redo resolves its base as `red` does.
     let base = narrow::base(repo, base);
     let changed = narrow::changed(repo, &base);
@@ -251,8 +391,10 @@ fn next_green(config: &Config) {
 }
 
 /// Item 46: the one open lock HEAD holds, read as today (a broken seal is
-/// `lock-edited`, an unknown format `lock-format`).
-fn head_lock(repo: &Repo, path: &mut Option<String>) -> Result<(String, Lock)> {
+/// `lock-edited`, an unknown format `lock-format`). Item 159: `flag` is
+/// `--redo` or `--replace`, each with its own refusal when there is none.
+fn head_lock(repo: &Repo, path: &mut Option<String>, flag: &str) -> Result<(String, Lock)> {
+    let without_lock = || if flag == "--redo" { without_lock() } else { without_lock_to_replace() };
     let head = match repo.head()? {
         Some(head) => Snapshot::Commit(head),
         None => return without_lock(),
@@ -273,7 +415,9 @@ fn head_lock(repo: &Repo, path: &mut Option<String>) -> Result<(String, Lock)> {
             "lock-open",
             format!("HEAD holds {} open locks: {}", open.len(), short_list(&open)),
             "a redo rewrites the one open lock of the branch's cycle; with more than one, it cannot tell which",
-            "finish or remove the extra cycle so HEAD holds one open lock, then run `shipcraft red --redo` again",
+            format!(
+                "finish or remove the extra cycle so HEAD holds one open lock, then run `shipcraft red {flag}` again"
+            ),
         );
     }
     let bytes = lock_files(repo, &head)?.remove(first.as_str()).unwrap_or_default();
@@ -293,6 +437,16 @@ fn without_lock<T>() -> Result<T> {
         "redo-without-lock",
         "HEAD holds no open lock: there is no committed RED to redo",
         "a redo rewrites the RED commit's lock in a commit of its own; a RED not yet committed needs no redo",
+        "for an uncommitted RED, delete its lock file and run `shipcraft red` again; otherwise commit the RED first",
+    )
+}
+
+/// Item 159: `replace-without-lock`.
+fn without_lock_to_replace<T>() -> Result<T> {
+    refuse(
+        "replace-without-lock",
+        "HEAD holds no open lock: there is no committed RED to replace",
+        "a replace abandons the RED commit's lock and opens a new RED beside it; a RED not yet committed needs no replace",
         "for an uncommitted RED, delete its lock file and run `shipcraft red` again; otherwise commit the RED first",
     )
 }
@@ -715,10 +869,11 @@ fn stub_hint(config: &Config) -> &'static str {
         .map_or("create the stub: the function exists with the right signature and does nothing yet", |l| l.stub_hint())
 }
 
-/// Rule 1: one open cycle per branch.
-fn refuse_if_a_lock_is_open(repo: &Repo) -> Result<()> {
+/// Rule 1: one open cycle per branch; item 159: `replaced`, HEAD's open
+/// lock that `red --replace` abandons, does not count.
+fn refuse_if_a_lock_is_open(repo: &Repo, replaced: Option<&str>) -> Result<()> {
     for (path, bytes) in lock_files(repo, &Snapshot::Tree)? {
-        if Lock::parse(&bytes).is_none_or(|lock| lock.is_open()) {
+        if Some(path.as_str()) != replaced && Lock::parse(&bytes).is_none_or(|lock| lock.is_open()) {
             return refuse(
                 "lock-open",
                 format!("there is already an open lock on this branch: {path}"),

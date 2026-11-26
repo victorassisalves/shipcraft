@@ -61,6 +61,10 @@ def pnpm_form(block):
     return b''.join(lines[:2] + [ROOT_LINE] + lines[2:])
 
 PNPM = pnpm_form(MACHINE)
+# Spec18e718e: frozen inputs above stay; current output expectations gain item159.
+NEXT_MACHINE = MACHINE.replace(b'- Start each phase with the agent, model and effort',b"- If the repair renames or drops a case, or changes a stub, and no GREEN commit exists after the RED (only redo commits and commits that change only Markdown files), the new RED session runs `shipcraft red --replace --reason '<why>'` instead of `shipcraft red --redo` (also in the steps given to the user, with both lock paths it prints in `git add`), commits both locks with the tests and stubs in one commit, and puts the line it prints in the commit body; this takes precedence over the repair above. After a GREEN commit, `--replace` refuses: repair with `--redo` or open the new RED on a new branch.\n"+b'- Start each phase with the agent, model and effort',1)
+NEXT_NPX = f85['variant'](NEXT_MACHINE, True)
+NEXT_PNPM = pnpm_form(NEXT_MACHINE)
 OLD_PNPM = pnpm_form(f142['PIN'])
 EDITED = PNPM.replace(b'TDD with a lock', b'TDD with a project lock', 1)
 RED_PNPM = b'''# shipcraft: the RED phase
@@ -140,7 +144,7 @@ if case == 'repro':
     block, red = AGENTS.read_bytes(), RED.read_bytes()
     assert CLOSING in out.splitlines() and not (cw / 'pnpm-ran').exists(), out
     assert (digest(block), red.count(b'`pnpm exec shipcraft red`'), b'npx --' in red) == (
-        (8603, 'a8d3aed6bc40289af3a75863ff0abf2bd14e3935fde94070b301798d2a6b477f'), 2, False
+        (9228, 'e2e38b06752e42d91998841069abc73b2cb89fdca2cad5ec96dfb84cec063d20'), 2, False
     ), (digest(block), red.count(b'`pnpm exec shipcraft red`'), b'npx --' in red)
 elif case == 'root-line':
     pnpm_project()
@@ -170,7 +174,7 @@ elif case == 'no-pnpm':
     out = init(call)
     assert shutil.which('pnpm', path=env['PATH']) is None
     assert b'shipcraft: then write the failing test and stub, and run `npx -- shipcraft red`.' in out.splitlines()
-    assert digest(AGENTS.read_bytes()) == (8540, '6df332bde585b49cbb354480b20aa0a3eb9416132e9bf24437486f7b6ff4f2fc')
+    assert digest(AGENTS.read_bytes()) == (9159, '4f73597f1e84644899ec4ee0bcdda83c5f37a6fd5fca24c5f724da3c3f04cfe7')
     assert RED.read_bytes() == npx_red
 elif case == 'lock-symlink':
     put('real-lock', b'lockfileVersion: 9.0\n')
@@ -178,19 +182,19 @@ elif case == 'lock-symlink':
     pnpm()
     init(call)
     assert LOCK.is_symlink() and LOCK.is_file() and os.access(tools / 'pnpm', os.X_OK)
-    assert digest(AGENTS.read_bytes()) == (8540, '6df332bde585b49cbb354480b20aa0a3eb9416132e9bf24437486f7b6ff4f2fc')
+    assert digest(AGENTS.read_bytes()) == (9159, '4f73597f1e84644899ec4ee0bcdda83c5f37a6fd5fca24c5f724da3c3f04cfe7')
     assert RED.read_bytes() == npx_red
 elif case == 'no-lock':
     pnpm()
     init(call)
     assert not LOCK.exists() and os.access(tools / 'pnpm', os.X_OK)
-    assert digest(AGENTS.read_bytes()) == (8540, '6df332bde585b49cbb354480b20aa0a3eb9416132e9bf24437486f7b6ff4f2fc')
+    assert digest(AGENTS.read_bytes()) == (9159, '4f73597f1e84644899ec4ee0bcdda83c5f37a6fd5fca24c5f724da3c3f04cfe7')
     assert RED.read_bytes() == npx_red
 elif case == 'machine-pnpm':
     pnpm_project()
     out = init(binary)
     assert b'shipcraft: then write the failing test and stub, and run `shipcraft red`.' in out.splitlines()
-    assert digest(AGENTS.read_bytes()) == (8295, 'c4dea4f98d06f55e4a4833f9712ed3c0c4ed1df24f2a097840f5e9c30ac30373')
+    assert digest(AGENTS.read_bytes()) == (8900, 'c760600c8920f62c130b756d250d26864299a890f74aef49ed8a6066fe35c63e')
     assert RED.read_bytes() == bare_red
 elif case == 'subfolder':
     pnpm_project(b'\xff\0not YAML\n')
@@ -201,47 +205,48 @@ elif case == 'subfolder':
     out = init(call)
     assert CLOSING in out.splitlines()
     assert (sub / 'AGENTS.md').read_bytes() == b'package guidance\n'
-    assert (root / AGENTS).read_bytes() == PNPM
+    assert (root / AGENTS).read_bytes() == NEXT_PNPM
 elif case == 'npx-to-pnpm':
     init(call)
     pnpm_project()
     prefix, suffix = b'# Mine\n\n', b'\nafter\n'
     put(AGENTS, prefix + NPX + suffix, 0o751)
     out = init(call)
-    assert (AGENTS.read_bytes(), REPLACED in out.splitlines()) == (prefix + PNPM + suffix, True)
+    assert (AGENTS.read_bytes(), REPLACED in out.splitlines()) == (prefix + NEXT_PNPM + suffix, True)
     assert stat.S_IMODE(AGENTS.stat().st_mode) == 0o751
 elif case == 'pnpm-to-npx':
     pnpm()
     put(AGENTS, PNPM)
     out = init(call)
-    assert (AGENTS.read_bytes(), REPLACED in out.splitlines()) == (NPX, True)
+    assert (AGENTS.read_bytes(), REPLACED in out.splitlines()) == (NEXT_NPX, True)
 elif case == 'pnpm-to-machine':
     pnpm_project()
     put(AGENTS, PNPM)
     out = init(binary)
-    assert (AGENTS.read_bytes(), REPLACED in out.splitlines()) == (MACHINE, True)
+    assert (AGENTS.read_bytes(), REPLACED in out.splitlines()) == (NEXT_MACHINE, True)
 elif case == 'machine-to-pnpm':
     pnpm_project()
     put(AGENTS, MACHINE)
     out = init(call)
-    assert (AGENTS.read_bytes(), REPLACED in out.splitlines()) == (PNPM, True)
+    assert (AGENTS.read_bytes(), REPLACED in out.splitlines()) == (NEXT_PNPM, True)
 elif case == 'old142':
     pnpm_project()
     put(AGENTS, f85['variant'](f142['PIN'], True))
     out = init(call)
-    assert (AGENTS.read_bytes(), REPLACED in out.splitlines()) == (PNPM, True)
+    assert (AGENTS.read_bytes(), REPLACED in out.splitlines()) == (NEXT_PNPM, True)
 elif case == 'old85':
     pnpm_project()
     put(AGENTS, f85['NEW'])
     out = init(call)
-    assert (AGENTS.read_bytes(), REPLACED in out.splitlines()) == (PNPM, True)
+    assert (AGENTS.read_bytes(), REPLACED in out.splitlines()) == (NEXT_PNPM, True)
 elif case == 'equal':
     pnpm_project()
     put(AGENTS, PNPM)
     original = AGENTS.stat()
     out = init(call)
-    assert AGENTS.read_bytes() == PNPM and AGENTS.stat().st_ino == original.st_ino
-    assert KEPT in out.splitlines() and DIFFERS not in out.splitlines()
+    expected = NEXT_PNPM
+    assert AGENTS.read_bytes() == expected and AGENTS.stat().st_ino != original.st_ino
+    assert REPLACED in out.splitlines() and DIFFERS not in out.splitlines()
 elif case == 'edited':
     pnpm_project()
     put(AGENTS, EDITED)
@@ -260,13 +265,13 @@ elif case == 'claude':
     put(AGENTS, NPX)
     put(tools / 'claude', '#!/bin/sh\nexit 79\n', 0o755)
     out = init(call)
-    assert (AGENTS.read_bytes(), REPLACED in out.splitlines()) == (PNPM, True)
+    assert (AGENTS.read_bytes(), REPLACED in out.splitlines()) == (NEXT_PNPM, True)
     assert b'Shipcraft workflow (required): @AGENTS.md' in Path('CLAUDE.md').read_bytes().splitlines()
     assert b'CLAUDE.md' in ready(out)
 elif case == 'status-project':
     pnpm_project()
     init(call)
-    put(AGENTS, PNPM)
+    put(AGENTS, NEXT_PNPM)
     commit('install with pnpm form')
     result, unchanged = read_only_status(call)
     assert result.returncode == 0 and unchanged
@@ -277,14 +282,14 @@ elif case == 'status-project':
 elif case == 'status-machine':
     pnpm_project()
     init(call)
-    put(AGENTS, PNPM)
+    put(AGENTS, NEXT_PNPM)
     result, unchanged = read_only_status(binary)
     assert result.returncode == 0 and unchanged
     assert status_lines(result) == [CURRENT]
 elif case == 'status-npx':
     init(call)
     pnpm_project()
-    assert AGENTS.read_bytes() == NPX
+    assert AGENTS.read_bytes() == NEXT_NPX
     (root / '.git/hooks/commit-msg').unlink()
     result, unchanged = read_only_status(call)
     assert result.returncode == 0 and unchanged
@@ -374,7 +379,7 @@ elif case == 'machine':
     out = init(binary)
     green = GREEN.read_bytes()
     assert b'shipcraft: then write the failing test and stub, and run `shipcraft red`.' in out.splitlines()
-    assert digest(AGENTS.read_bytes()) == (8295, 'c4dea4f98d06f55e4a4833f9712ed3c0c4ed1df24f2a097840f5e9c30ac30373')
+    assert digest(AGENTS.read_bytes()) == (8900, 'c760600c8920f62c130b756d250d26864299a890f74aef49ed8a6066fe35c63e')
     assert RED.read_bytes() == bare_red
     assert b'`shipcraft ' not in green and b'\r' not in green
     assert green.endswith(b'\n\n<!-- written by shipcraft ' + version + b' -->\n')
@@ -389,7 +394,7 @@ elif case == 'distinct-root':
     assert Path(git('rev-parse', '--show-toplevel')).resolve() == root.resolve()
     out = init(call)
     assert CLOSING in out.splitlines() and not AGENTS.exists()
-    assert (root / AGENTS).read_bytes() == PNPM and (root / RED).read_bytes() == pnpm_red
+    assert (root / AGENTS).read_bytes() == NEXT_PNPM and (root / RED).read_bytes() == pnpm_red
 elif case == 'late-brief':
     pnpm_project()
     put('.shipcraft/briefs', b'blocked150\n')
@@ -397,14 +402,14 @@ elif case == 'late-brief':
     assert Path('.shipcraft/briefs').read_bytes() == b'blocked150\n'
     assert b'shipcraft: .shipcraft/briefs not written:' in out
     assert Path('.shipcraft.toml').is_file() and Path('.shipcraft/locks/.gitkeep').is_file()
-    assert AGENTS.read_bytes() == PNPM
+    assert AGENTS.read_bytes() == NEXT_PNPM
 elif case == 'late-claude':
     pnpm_project()
     put('CLAUDE.md/project-only', b'keep150')
     out = init(call)
     assert Path('CLAUDE.md/project-only').read_bytes() == b'keep150'
     assert b'CLAUDE.md' in out and b'CLAUDE.md' not in ready(out)
-    assert AGENTS.read_bytes() == PNPM
+    assert AGENTS.read_bytes() == NEXT_PNPM
 elif case == 'late-green':
     pnpm_project()
     put(GREEN / 'project-only', b'keep150')
@@ -416,7 +421,7 @@ elif case == 'late-green':
 elif case == 'late-status':
     pnpm_project()
     init(call)
-    put(AGENTS, PNPM)
+    put(AGENTS, NEXT_PNPM)
     shutil.rmtree('.shipcraft/locks')
     put('.shipcraft/locks', b'blocked150')
     result, unchanged = read_only_status(call)

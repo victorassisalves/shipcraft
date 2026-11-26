@@ -8,8 +8,8 @@
 
 use crate::config::{self, Camada, Config, CONFIG_FILE};
 use crate::contract::{
-    arrive_closed, bindings, changed_paths, check_files, check_lefthook, judge_locks, judge_locks_admitting,
-    judge_suite, no_report, Change, Scope, Suites, Verdict,
+    arrive_closed, bindings, changed_paths, check_files, check_lefthook, check_replace, judge_locks,
+    judge_locks_admitting, judge_suite, no_report, Change, Scope, Suites, Verdict,
 };
 use crate::docs;
 use crate::gh;
@@ -148,6 +148,10 @@ pub fn check_commit(
         _ => Ok(Vec::new()),
     };
     let changes = judge_locks_admitting(&locks, &now, &snapshot.describe(), false, admit, Some(&changed))?;
+    // Item 159: a replace commit passes the no-GREEN rule read from its parent.
+    if let ([Snapshot::Commit(parent)], [parent_locks]) = (parents.as_slice(), locks.as_slice()) {
+        check_replace(repo, parent, &changes, parent_locks)?;
+    }
     for (path, change, lock) in bindings(&changes) {
         check_files(repo, &snapshot, path, lock)?;
         // 15c.4: a lefthook change in a commit (made with --no-verify) is the CI's.

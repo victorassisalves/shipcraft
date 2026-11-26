@@ -16,7 +16,8 @@
 
 use crate::config::{self, Config, Filtra, CONFIG_FILE};
 use crate::contract::{
-    bindings, changed_paths, check_files, check_lefthook, judge_locks, judge_suite, no_report, Change, Scope, Verdict,
+    bindings, changed_paths, check_files, check_lefthook, check_replace, judge_locks, judge_suite, no_report, Change,
+    Scope, Verdict,
 };
 use crate::git::{text, Repo, Snapshot};
 use crate::junit::{Outcome, Report};
@@ -66,6 +67,10 @@ pub fn run(repo: &Repo, commit_msg: bool) -> Result<()> {
         _ => Ok(Vec::new()),
     };
     let changes = judge_locks(&parent_locks, &staged_locks, "in the pending commit", true, Some(&changed))?;
+    // Item 159: a replace commit passes the no-GREEN rule read from HEAD.
+    if let [Snapshot::Commit(head)] = parents.as_slice() {
+        check_replace(repo, head, &changes, &parent_locks[0])?;
+    }
 
     let binding: Vec<_> = bindings(&changes).collect();
     if binding.is_empty() {

@@ -74,6 +74,14 @@ impl Report {
                 if m.is_none() && facts.is_some_and(|f| f.tip.contains(id)) {
                     row["state"] = "merge_not_observed".into();
                 }
+                // Item 159: abandoned before every other state, out of the day rows.
+                let m = match facts.is_some_and(|f| f.abandoned.contains(id)) {
+                    true => {
+                        row["state"] = "abandoned".into();
+                        None
+                    }
+                    false => m,
+                };
                 row["change_kind"] = fix.kind.into();
                 row["reported_at"] = fix.reported_at.into();
                 row["fixes_release"] = fix.fixes_release.into();
