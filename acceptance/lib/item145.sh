@@ -24,6 +24,8 @@ BLOCK_LINE=b"- Before starting either phase, the session the user talks to fixes
 RED_LINE=b'- The tests call the interface your prompt fixes (names, arguments, results, and the errors, exit codes or messages they check), and the stubs have it. What the prompt leaves out, choose, list with the ambiguities and name in your report, so the GREEN gets it; where the prompt contradicts the intent or the existing tests, stop and report it before `shipcraft red`.\n'
 GREEN_INTERFACE=b'- Never change the interface the locked tests call (names, arguments, results, and the errors, exit codes or messages they check); the code behind it is yours. If it looks wrong, stop and report it as a wrong test.\n'
 CURRENT=f142['PIN'].replace(b'- Start each phase with the agent, model and effort',BLOCK_LINE+b'- Start each phase with the agent, model and effort',1)
+# Item159: CURRENT stays the frozen 2.94.0 fixture; only new output changes.
+TARGET=CURRENT.replace(b'- Start each phase with the agent, model and effort',b"- If the repair renames or drops a case, or changes a stub, and no GREEN commit exists after the RED (only redo commits and commits that change only Markdown files), the new RED session runs `shipcraft red --replace --reason '<why>'` instead of `shipcraft red --redo` (also in the steps given to the user, with both lock paths it prints in `git add`), commits both locks with the tests and stubs in one commit, and puts the line it prints in the commit body; this takes precedence over the repair above. After a GREEN commit, `--replace` refuses: repair with `--redo` or open the new RED on a new branch.\n"+b'- Start each phase with the agent, model and effort',1)
 REDA=b'- Commit the tests, their stubs and the lock in one commit, and stop.\n'
 GREENA=b'- Never edit a locked file or a lock (`.shipcraft/locks/*`).\n'
 UNSET='not set (the session that starts the RED and GREEN chooses)'
@@ -62,20 +64,20 @@ if case=='repro':
  assert s.returncode==0 and calls==[['api','repos/{owner}/{repo}/branches/main/protection']]
 elif case=='block-bare':
  p=init();assert p.returncode==0
- assert Path('AGENTS.md').read_bytes()==CURRENT,'machine block line/order/other bytes'
+ assert Path('AGENTS.md').read_bytes()==TARGET,'machine block line/order/other bytes'
 elif case=='block-local':
  p=init(local_call());assert p.returncode==0
- assert Path('AGENTS.md').read_bytes()==f85['variant'](CURRENT,True),'local block line/order/command rewriting'
+ assert Path('AGENTS.md').read_bytes()==f85['variant'](TARGET,True),'local block line/order/command rewriting'
 elif case=='upgrade-bare':
  put('AGENTS.md',b'prefix145\r\n\x00\n'+f142['PIN']+b'suffix145 no LF');Path('AGENTS.md').chmod(0o751)
  p=init();assert p.returncode==0
- assert Path('AGENTS.md').read_bytes()==b'prefix145\r\n\x00\n'+CURRENT+b'suffix145 no LF','item142 machine upgrade'
+ assert Path('AGENTS.md').read_bytes()==b'prefix145\r\n\x00\n'+TARGET+b'suffix145 no LF','item142 machine upgrade'
  assert stat.S_IMODE(Path('AGENTS.md').stat().st_mode)==0o751
  assert b'it differs from this version' not in p.stdout+p.stderr
 elif case=='upgrade-local':
  put('AGENTS.md',b'prefix145\r\n\x00\n'+f85['variant'](f142['PIN'],True)+b'suffix145 no LF');Path('AGENTS.md').chmod(0o751)
  p=init(local_call());assert p.returncode==0
- assert Path('AGENTS.md').read_bytes()==b'prefix145\r\n\x00\n'+f85['variant'](CURRENT,True)+b'suffix145 no LF','item142 local upgrade'
+ assert Path('AGENTS.md').read_bytes()==b'prefix145\r\n\x00\n'+f85['variant'](TARGET,True)+b'suffix145 no LF','item142 local upgrade'
  assert stat.S_IMODE(Path('AGENTS.md').stat().st_mode)==0o751
 elif case=='status-upgrade':
  assert init().returncode==0;config('red="codex"\ngreen="claude"\n')
@@ -162,7 +164,7 @@ elif case=='edited-block':
  merged=edited.replace(b'- Start each phase with the agent, model and effort',BLOCK_LINE+b'- Start each phase with the agent, model and effort');put('AGENTS.md',merged)
  p=init();assert p.returncode==0 and Path('AGENTS.md').read_bytes()==merged
  Path('AGENTS.md').unlink();assert init().returncode==0
- assert Path('AGENTS.md').read_bytes()==CURRENT,'fresh replacement must carry interface rule'
+ assert Path('AGENTS.md').read_bytes()==TARGET,'fresh replacement must carry interface rule'
 elif case=='docs':
  text=(acceptance.parent/'docs/spec.md').read_text();s4=text.split('## 4.',1)[1].split('## 5.',1)[0];s10=text.split('## 10.',1)[1].split('## 11.',1)[0]
  assert 'The agent (string or table, as `review`) the session that starts the RED and GREEN uses for each phase' in s4
@@ -194,12 +196,12 @@ elif case=='late-brief':
  assert p.returncode==0 and Path('.shipcraft/briefs').read_bytes()==b'blocked-brief-folder145\n'
  assert b'shipcraft: .shipcraft/briefs not written: ' in p.stdout+p.stderr
  assert Path('.shipcraft.toml').is_file() and Path('.shipcraft/locks/.gitkeep').is_file()
- assert Path('AGENTS.md').read_bytes()==CURRENT,'later brief-folder failure must keep new block'
+ assert Path('AGENTS.md').read_bytes()==TARGET,'later brief-folder failure must keep new block'
 elif case=='late-agents':
  Path('CLAUDE.md').mkdir();put('CLAUDE.md/keep','keep145');p=init()
  assert p.returncode==0 and Path('CLAUDE.md/keep').read_bytes()==b'keep145'
  assert b'CLAUDE.md' in p.stdout+p.stderr and Path('.shipcraft.toml').is_file() and Path('.shipcraft/locks/.gitkeep').is_file()
- assert Path('AGENTS.md').read_bytes()==CURRENT,'later CLAUDE failure must keep new block'
+ assert Path('AGENTS.md').read_bytes()==TARGET,'later CLAUDE failure must keep new block'
 elif case=='late-status':
  assert init().returncode==0;config()
  # Real lock-directory read error, without inventing a lock or a run-log row.

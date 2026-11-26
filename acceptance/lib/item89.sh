@@ -83,8 +83,10 @@ def history_checks(root,call,current,key):
 root,call,current=fixture("project89 space 'quote",case in ('current-local','cross-local','fixture-local'))
 a=root/'AGENTS.md'
 if case=='current-bare':
+ assert b"- If the repair renames or drops a case, or changes a stub, and no GREEN commit exists after the RED (only redo commits and commits that change only Markdown files), the new RED session runs `shipcraft red --replace --reason '<why>'` instead of `shipcraft red --redo` (also in the steps given to the user, with both lock paths it prints in `git add`), commits both locks with the tests and stubs in one commit, and puts the line it prints in the commit body; this takes precedence over the repair above. After a GREEN commit, `--replace` refuses: repair with `--redo` or open the new RED on a new branch.\n" in current
  line(status(root,call),CURRENT)
 elif case=='current-local':
+ assert b"- If the repair renames or drops a case, or changes a stub, and no GREEN commit exists after the RED (only redo commits and commits that change only Markdown files), the new RED session runs `shipcraft red --replace --reason '<why>'` instead of `shipcraft red --redo` (also in the steps given to the user, with both lock paths it prints in `git add`), commits both locks with the tests and stubs in one commit, and puts the line it prints in the commit body; this takes precedence over the repair above. After a GREEN commit, `--replace` refuses: repair with `--redo` or open the new RED on a new branch.\n".replace(b'`shipcraft ',b'`npx -- shipcraft ') in current
  line(status(root,call),CURRENT)
 elif case=='cross-bare':
  _,_,other=fixture('sample-local',True);a.write_bytes(other)

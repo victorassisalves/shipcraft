@@ -35,7 +35,7 @@ def variant(block,local):
 def current(local):
  # Item 86: the current block through public init, holding this item's frozen lines in order.
  block=ns['clean_block'](binary,local)
- assert ns['has_lines'](block,variant(NEW,local)),'current block lost or reordered an owned line'
+ assert ns['has_lines'](block,variant(NEW.replace(b'- Start each phase with the agent, model and effort',b"- If the repair renames or drops a case, or changes a stub, and no GREEN commit exists after the RED (only redo commits and commits that change only Markdown files), the new RED session runs `shipcraft red --replace --reason '<why>'` instead of `shipcraft red --redo` (also in the steps given to the user, with both lock paths it prints in `git add`), commits both locks with the tests and stubs in one commit, and puts the line it prints in the commit body; this takes precedence over the repair above. After a GREEN commit, `--replace` refuses: repair with `--redo` or open the new RED on a new branch.\n"+b'- Start each phase with the agent, model and effort',1),local)),'current block lost or reordered an owned line'
  return block
 def write(path,data,mode=None):
  p=Path(path);p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(data)
